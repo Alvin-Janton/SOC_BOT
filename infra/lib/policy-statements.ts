@@ -13,6 +13,7 @@ export interface EnvironmentResources {
   readonly boundaryArn: string;
 }
 
+/** Builds deterministic, environment-qualified names and ARNs used by IAM policies. */
 export function environmentResources(environment: DeploymentEnvironment): EnvironmentResources {
   const upper = environment.toUpperCase();
   return {
@@ -26,6 +27,7 @@ export function environmentResources(environment: DeploymentEnvironment): Enviro
   };
 }
 
+/** Defines the permissions used by GitHub Actions to deploy one application environment. */
 export function deploymentStatements(resources: EnvironmentResources): PolicyStatement[] {
   const cloudFormationActions = [
     'cloudformation:CancelUpdateStack',
@@ -109,6 +111,7 @@ export function deploymentStatements(resources: EnvironmentResources): PolicySta
   ];
 }
 
+/** Defines CloudFormation permissions for environment-scoped data and analytics resources. */
 export function dataAndAnalyticsStatements(resources: EnvironmentResources): PolicyStatement[] {
   const dataBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.dataBucketName}`;
   return [
@@ -166,6 +169,7 @@ export function dataAndAnalyticsStatements(resources: EnvironmentResources): Pol
   ];
 }
 
+/** Defines CloudFormation permissions for AI and application runtime resources. */
 export function aiApplicationStatements(resources: EnvironmentResources): PolicyStatement[] {
   return [
     new PolicyStatement({
@@ -214,6 +218,7 @@ export function aiApplicationStatements(resources: EnvironmentResources): Policy
   ];
 }
 
+/** Defines CloudFormation permissions for the frontend, API, and authentication resources. */
 export function frontendApiStatements(resources: EnvironmentResources): PolicyStatement[] {
   const tagConditions = {
     StringEqualsIfExists: {
@@ -279,6 +284,7 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
   ];
 }
 
+/** Defines CloudFormation permissions for environment-scoped logs, alarms, and budgets. */
 export function observabilityStatements(resources: EnvironmentResources): PolicyStatement[] {
   return [
     new PolicyStatement({
@@ -313,6 +319,7 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
   ];
 }
 
+/** Defines the constrained IAM lifecycle permissions for environment-specific runtime roles. */
 export function runtimeIamStatements(resources: EnvironmentResources): PolicyStatement[] {
   const upper = resources.environment.toUpperCase();
   const runtimeRoleArn = `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/SOC_BOT_${upper}_RUNTIME_*`;
@@ -395,11 +402,16 @@ export function runtimeIamStatements(resources: EnvironmentResources): PolicySta
   ];
 }
 
+/**
+ * Defines the maximum permissions available to runtime roles, separated by access-class tags.
+ * The explicit evaluation-prefix denial applies regardless of the runtime role's access class.
+ */
 export function runtimeBoundaryStatements(
   resources: EnvironmentResources,
   bedrockModelArn: string,
 ): PolicyStatement[] {
   const dataBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.dataBucketName}`;
+  // Produces the principal-tag condition that selects one approved runtime access class.
   const accessClass = (value: string) => ({
     StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': value },
   });
@@ -515,6 +527,7 @@ export function runtimeBoundaryStatements(
   ];
 }
 
+/** Returns the Glue catalog, database, and table ARNs for one environment. */
 function glueCatalogResources(resources: EnvironmentResources): string[] {
   return [
     `arn:${Aws.PARTITION}:glue:${Aws.REGION}:${Aws.ACCOUNT_ID}:catalog`,
@@ -523,6 +536,7 @@ function glueCatalogResources(resources: EnvironmentResources): string[] {
   ];
 }
 
+/** Uppercases the first character for readable IAM statement identifiers. */
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }

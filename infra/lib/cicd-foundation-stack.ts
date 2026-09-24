@@ -36,6 +36,7 @@ interface EnvironmentFoundation {
 }
 
 export class CicdFoundationStack extends Stack {
+  /** Defines the shared GitHub OIDC provider and isolated dev/demo IAM foundations. */
   public constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
@@ -67,6 +68,7 @@ export class CicdFoundationStack extends Stack {
     new CfnOutput(this, 'DemoCloudFormationExecutionRoleArn', { value: demo.executionRole.roleArn });
   }
 
+  /** Creates the deployment role, execution role, policies, and boundary for one environment. */
   private createEnvironmentFoundation(
     environment: DeploymentEnvironment,
     oidcProvider: CfnOIDCProvider,
@@ -169,6 +171,7 @@ export class CicdFoundationStack extends Stack {
     return { deployRole, executionRole };
   }
 
+  /** Creates a named managed policy and records its reviewed cdk-nag wildcard findings. */
   private createManagedPolicy(
     id: string,
     managedPolicyName: string,
@@ -189,12 +192,14 @@ export class CicdFoundationStack extends Stack {
     return policy;
   }
 
+  /** Applies the supplied ownership and environment tags to a taggable CDK construct. */
   private applyTags(resource: Construct, tags: Record<string, string>): void {
     for (const [key, value] of Object.entries(tags)) {
       Tags.of(resource).add(key, value);
     }
   }
 
+  /** Acknowledges specific reviewed AwsSolutions-IAM5 findings on one synthesized resource. */
   private acknowledgeIamWildcards(
     resource: Construct,
     findingIds: string[],
@@ -208,6 +213,7 @@ export class CicdFoundationStack extends Stack {
     }
   }
 
+  /** Returns the exact cdk-nag wildcard finding identifiers expected for a policy category. */
   private iamWildcardFindings(
     policy: 'deploy' | 'boundary' | 'data' | 'ai' | 'frontend' | 'observability' | 'runtime-iam',
     environment: DeploymentEnvironment,
@@ -216,6 +222,7 @@ export class CicdFoundationStack extends Stack {
     const account = '<AWS::AccountId>';
     const region = '<AWS::Region>';
     const partition = '<AWS::Partition>';
+    // Formats a resource ARN exactly as cdk-nag reports it in an IAM5 finding identifier.
     const resource = (arn: string) => `Resource::${arn}`;
 
     const findings: Record<typeof policy, string[]> = {
