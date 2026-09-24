@@ -62,6 +62,7 @@ Favor serverless, on-demand resources. Any recurring service must have a bounded
 - Use environment-qualified resource names and avoid hardcoded account IDs or credentials.
 - Keep `dev` easy to tear down while protecting stateful `demo` resources.
 - Update documentation when a change alters setup, behavior, architecture, or operational procedures.
+- Name every YAML file under `.github/` with the `.yml` extension, not `.yaml`, so the repository's Actionlint command includes it.
 
 ## Testing Expectations
 
@@ -84,4 +85,3 @@ Do not claim a check passed unless it was actually run. Report checks that could
 - Do not make destructive Git or cloud changes unless the implementation plan explicitly requires them and the user has approved them.
 - Keep commits and pull requests focused on one planned capability.
 - Surface assumptions and deferred decisions in the completion report.
-
