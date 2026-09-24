@@ -30,6 +30,7 @@ venv/
 !.env.example
 *.pem
 *.key
+.codex
 
 # Local datasets, query output, and generated artifacts
 data/local/
