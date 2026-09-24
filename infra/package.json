@@ -1,0 +1,26 @@
+{
+  "name": "@soc-bot/infra",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "jest --runInBand",
+    "synth": "cdk synth"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.270.0",
+    "constructs": "10.8.1"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.14",
+    "@types/node": "22.20.4",
+    "aws-cdk": "2.1143.0",
+    "cdk-nag": "3.0.2",
+    "jest": "29.7.0",
+    "ts-jest": "29.4.13",
+    "typescript": "5.9.3"
+  }
+}

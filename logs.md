@@ -11,3 +11,17 @@
 - Key changes: Required the `.yml` extension instead of `.yaml` for YAML files under `.github/`.
 - Tests or verification performed: Confirmed no `.yaml` files exist under `.github/`; targeted `git diff --check` passed.
 - Notes (no secrets): No workflow behavior was changed.
+
+### 2026-09-24 - Draft local CI/CD IAM policies
+- Goal: Create an ignored, review-only IAM policy workspace for future GitHub Actions and CloudFormation deployment roles.
+- Files changed: `.git/info/exclude`, local-only `Permissions/` drafts, `logs.md`.
+- Key changes: Added GitHub OIDC trusts, environment-specific deployment and execution role definitions, grouped managed policies, runtime permission boundaries, and a validation report without creating AWS resources.
+- Tests or verification performed: Parsed 23 JSON documents; IAM Access Analyzer validated 14 identity policies and 4 trust policies with no ERROR or SECURITY_WARNING findings; size, quota, PassRole, environment scope, forbidden action, and Git-ignore checks passed.
+- Notes (no secrets): Access Analyzer warnings for environment-based GitHub subjects and suggestions for the single-valued audience were reviewed and accepted in the local validation report. The shared OIDC provider has no single-environment tag because it serves both environments.
+
+### 2026-09-24 - Implement CI/CD foundation CDK stack
+- Goal: Establish the Node.js 22 npm workspace and translate the approved local IAM drafts into a synth-only account-level CDK foundation stack.
+- Files changed: Root npm manifests, `infra/` CDK source and tests, `.github/workflows/pr-checks.yml`, `README.md`, and `logs.md`.
+- Key changes: Added the GitHub OIDC provider, isolated dev/demo deployment and CloudFormation execution roles, ten grouped execution policies, two runtime permission boundaries, the required Bedrock ARN parameter, cdk-nag checks, focused CDK assertions, and infrastructure CI commands.
+- Tests or verification performed: Node.js 22 container `npm ci`, build, 14 Jest/CDK assertions, and CDK synth passed; AwsSolutionsChecks completed during synth; Actionlint 1.7.12 passed; zizmor 1.29.0 reported no findings; synthesized-template, whitespace, and ignored `Permissions/` checks passed.
+- Notes (no secrets): No AWS mutation was performed. The shared OIDC provider intentionally omits an environment tag. `AWS::IAM::ManagedPolicy` does not support tags, so managed policies and permission boundaries use exact environment-qualified names and scoped attachments instead; adding tags would require an out-of-scope privileged custom resource.

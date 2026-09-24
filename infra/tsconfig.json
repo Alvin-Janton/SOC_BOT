@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "alwaysStrict": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "rootDir": ".",
+    "strict": true,
+    "target": "ES2022"
+  },
+  "include": ["bin/**/*.ts", "lib/**/*.ts", "test/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

@@ -33,7 +33,7 @@ SOC Bot investigates but does not remediate. The Bedrock model has no AWS identi
 
 The runtime must never receive access to hidden evaluation ground truth or infrastructure-changing actions.
 
-## Planned Repository Layout
+## Repository Layout
 
 ```text
 SOC_BOT/
@@ -49,15 +49,36 @@ SOC_BOT/
 `-- README.md
 ```
 
-The exact layout may evolve during the first implementation plan. Do not create empty directories solely to match this outline.
+The exact layout will evolve as planned MVP components are implemented. Empty directories are not created solely to match this outline.
+
+## Infrastructure Development
+
+The repository is an npm workspace. The `@soc-bot/infra` workspace contains the TypeScript AWS CDK application and targets Node.js 22.
+
+Install dependencies and run the infrastructure checks from the repository root:
+
+```console
+npm ci
+npm run build
+npm test
+npm run synth
+```
+
+`npm run synth` synthesizes `SOC-BOT-CICD-FOUNDATION` for `us-east-1` and runs the `AwsSolutionsChecks` cdk-nag rules. Synthesis does not contact AWS or create resources. The stack includes the GitHub OIDC provider, environment-specific deployment and CloudFormation execution roles, execution policies, and runtime permission boundaries. The required `ApprovedBedrockModelArn` CloudFormation parameter remains unresolved during synthesis; a future manual deployment must supply the approved model or inference-profile ARN.
+
+The foundation stack is administrator-managed and must be deployed manually after review. This change includes no deployment workflow and does not bootstrap, deploy, or otherwise mutate AWS resources.
+
+### Foundation tagging exceptions
+
+- The shared GitHub OIDC provider has `Project=SOC_BOT` and `ManagedBy=CDK` tags but no environment tag because it is shared by both environments.
+- CloudFormation's `AWS::IAM::ManagedPolicy` resource does not support tags. The customer-managed execution policies and runtime permission boundaries therefore cannot carry the standard foundation tags. Their exact environment-qualified physical names, role attachments, and policy conditions preserve ownership and environment isolation. Adding tags would require an out-of-scope custom resource and an additional privileged runtime role.
 
 ## Development Workflow
 
 Changes are designed in a planning task before implementation. Each approved implementation plan is handed to a separate development task, which makes the scoped changes, runs the relevant checks, and reports results. Architectural decisions discovered during implementation should be returned to planning instead of being silently introduced.
 
-Setup and deployment commands will be added after the repository foundation and CDK application are implemented.
+Deployment procedures will be added in the separately planned OIDC and deployment implementation.
 
 ## Cost Constraint
 
 The project has a hard target of no more than **$100 per month** and should remain substantially below that amount. Recurring services must have bounded configurations, monitoring, and an off switch where practical.
-
