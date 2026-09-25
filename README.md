@@ -73,6 +73,20 @@ The foundation stack is administrator-managed and must be deployed manually afte
 - The shared GitHub OIDC provider has `Project=SOC_BOT` and `ManagedBy=CDK` tags but no environment tag because it is shared by both environments.
 - CloudFormation's `AWS::IAM::ManagedPolicy` resource does not support tags. The customer-managed execution policies and runtime permission boundaries therefore cannot carry the standard foundation tags. Their exact environment-qualified physical names, role attachments, and policy conditions preserve ownership and environment isolation. Adding tags would require an out-of-scope custom resource and an additional privileged runtime role.
 
+### Runtime IAM and deployment trust
+
+Each environment has three administrator-managed maximum-permission policies named `SOC_BOT_<ENV>_BOUNDARY_APPLICATION`, `SOC_BOT_<ENV>_BOUNDARY_QUERY`, and `SOC_BOT_<ENV>_BOUNDARY_GLUE`. Runtime roles use matching `SOC_BOT_<ENV>_RUNTIME_<CLASS>_*` namespaces. Application roles can access application state, the approved Bedrock profile, tool Lambdas, playbooks, and Cognito pools bearing the matching ownership tags. Query roles use Athena, read-only catalog metadata, Lake Formation data access, and the results prefix. Glue roles use the approved catalog operations and raw/normalized/quarantine prefixes. Each boundary denies evaluation-object access; only query and Glue boundaries permit bucket listing, restricted to their operational prefixes.
+
+`SOCBOTAccessClass` is required inventory metadata, not an authorization selector. Creation requires all four ownership/class request tags and the matching boundary. Subsequent boundary assignment checks the existing role tags. Protected tags cannot be removed or changed; updates to an existing role's tags must resend the complete protected set unchanged. Explicit tag denials cover environment project roles, while runtime IAM Allow statements target only the three class namespaces. Runtime managed policies use `SOC_BOT_<ENV>_RUNTIME_POLICY_*`; boundary-policy edits are explicitly denied and attachments require that runtime-policy namespace through `iam:PolicyARN`.
+
+The reviewed GitHub deployment path is trusted. Its execution role may remove runtime boundaries for automatic CloudFormation rollback and deletion, with no IAM restriction limiting removal to those events. After removal, inline or attached runtime policies are no longer capped by the boundary. These controls prevent accidental class assignment and boundary-policy modification; they do not contain a malicious or compromised deployment path. Review application templates and protect GitHub environments accordingly.
+
+### Accepted Lake Formation authority
+
+Both environment execution roles have account-wide authority for exactly `RegisterResource`, `DeregisterResource`, `GrantPermissions`, `RevokePermissions`, and `ListPermissions`. These Lake Formation administration operations use `Resource: "*"`. The account must not contain unrelated Lake Formation workloads. Environment-qualified buckets, databases, tables, and principals must be enforced by future application CDK and its tests; IAM resource scoping does not enforce that separation. A validated provider is the future hardening path if unrelated Lake Formation workloads are introduced. Data-lake settings, LF-tag administration, and data-cell filter administration remain excluded.
+
+After synthesis, `node infra/scripts/validate-policies.cjs` checks resolved policy sizes, namespaces, and attachment quotas. Add `--analyzer` to perform read-only AWS IAM Access Analyzer validation of all synthesized identity policies (AWS credentials and network access required). Temporary resolved copies use a synthetic account ID and are written to the operating-system temporary directory.
+
 ## Development Workflow
 
 Changes are designed in a planning task before implementation. Each approved implementation plan is handed to a separate development task, which makes the scoped changes, runs the relevant checks, and reports results. Architectural decisions discovered during implementation should be returned to planning instead of being silently introduced.

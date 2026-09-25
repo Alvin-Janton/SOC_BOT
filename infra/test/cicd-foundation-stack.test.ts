@@ -145,8 +145,8 @@ describe('CicdFoundationStack', () => {
     expect(serialized).toEqual(expect.arrayContaining([
       expect.stringContaining('SOC_BOT_DEV_CFN_EXEC'),
       expect.stringContaining('SOC_BOT_DEMO_CFN_EXEC'),
-      expect.stringContaining('SOC_BOT_DEV_RUNTIME_*'),
-      expect.stringContaining('SOC_BOT_DEMO_RUNTIME_*'),
+      expect.stringContaining('SOC_BOT_DEV_RUNTIME_APPLICATION_*'),
+      expect.stringContaining('SOC_BOT_DEMO_RUNTIME_APPLICATION_*'),
     ]));
   });
 
@@ -162,7 +162,7 @@ describe('CicdFoundationStack', () => {
       .find((statement: JsonObject) => actions(statement).includes('iam:PassRole'));
 
     expect(JSON.stringify(deployPassRole.Resource)).toContain(`SOC_BOT_${upper}_CFN_EXEC`);
-    expect(JSON.stringify(runtimePassRole.Resource)).toContain(`SOC_BOT_${upper}_RUNTIME_*`);
+    expect(JSON.stringify(runtimePassRole.Resource)).toContain(`SOC_BOT_${upper}_RUNTIME_APPLICATION_*`);
     expect(JSON.stringify([deployPassRole.Resource, runtimePassRole.Resource])).not.toContain(
       `SOC_BOT_${other}_`,
     );
@@ -192,9 +192,9 @@ describe('CicdFoundationStack', () => {
       .find((statement: JsonObject) => actions(statement).includes('iam:CreateRole'));
     const condition = createRole.Condition;
 
-    expect(JSON.stringify(createRole.Resource)).toContain(`SOC_BOT_${upper}_RUNTIME_*`);
+    expect(JSON.stringify(createRole.Resource)).toContain(`SOC_BOT_${upper}_RUNTIME_APPLICATION_*`);
     expect(JSON.stringify(condition.StringEquals['iam:PermissionsBoundary']))
-      .toContain(`SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
+      .toContain(`SOC_BOT_${upper}_BOUNDARY_APPLICATION`);
     expect(condition.StringEquals).toMatchObject({
       'aws:RequestTag/Project': 'SOC_BOT',
       'aws:RequestTag/Environment': environment,
@@ -219,7 +219,7 @@ describe('CicdFoundationStack', () => {
   // Verifies both runtime boundaries explicitly deny hidden evaluation-data access.
   test.each(['DEV', 'DEMO'])('%s runtime boundary denies evaluation access', (upper) => {
     const { template } = synthesize();
-    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
+    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_APPLICATION`);
     const deny = statementBySid(
       boundary,
       `Deny${capitalize(upper.toLowerCase())}EvaluationGroundTruth`,
@@ -299,10 +299,12 @@ describe('CicdFoundationStack', () => {
     ['DEMO', 'demo'],
   ])('%s runtime boundary restricts bucket listing to approved prefixes', (upper, environment) => {
     const { template } = synthesize();
-    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
+    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_APPLICATION`);
     const title = capitalize(environment);
-    const queryList = statementBySid(boundary, `Allow${title}AthenaResultListing`);
-    const glueList = statementBySid(boundary, `Allow${title}GluePrefixListing`);
+    const queryBoundary = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_QUERY`);
+    const glueBoundary = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_GLUE`);
+    const queryList = statementBySid(queryBoundary, `Allow${title}AthenaResultListing`);
+    const glueList = statementBySid(glueBoundary, `Allow${title}GluePrefixListing`);
 
     expect(queryList.Condition.StringLike['s3:prefix']).toEqual([
       'athena-results', 'athena-results/*',
@@ -313,7 +315,7 @@ describe('CicdFoundationStack', () => {
     expect(JSON.stringify(queryList.Condition)).not.toContain('evaluation');
     expect(JSON.stringify(glueList.Condition)).not.toContain('evaluation');
 
-    const listStatements = boundary.Properties.PolicyDocument.Statement
+    const listStatements = [...queryBoundary.Properties.PolicyDocument.Statement, ...glueBoundary.Properties.PolicyDocument.Statement]
       .filter((statement: JsonObject) => actions(statement).includes('s3:ListBucket'));
     expect(listStatements).toHaveLength(2);
 
@@ -346,7 +348,7 @@ describe('CicdFoundationStack', () => {
   // Verifies profile invocation is pinned to the selected profile and its routed model only.
   test.each(['DEV', 'DEMO'])('%s Bedrock access requires the selected inference profile', (upper) => {
     const { template } = synthesize();
-    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
+    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_APPLICATION`);
     const title = capitalize(upper.toLowerCase());
     const profile = statementBySid(boundary, `Allow${title}ApprovedBedrockInferenceProfile`);
     const model = statementBySid(boundary, `Allow${title}ApprovedBedrockProfileModels`);
@@ -358,6 +360,72 @@ describe('CicdFoundationStack', () => {
     );
     expect(JSON.stringify(model.Condition.StringEquals['bedrock:InferenceProfileArn']))
       .toContain(`:inference-profile/${BEDROCK_INFERENCE_PROFILE.profileId}`);
+  });
+
+  test('has six independent boundaries and exact Lake Formation administration', () => {
+    const { template } = synthesize();
+    const boundaries = resourcesOfType(template, 'AWS::IAM::ManagedPolicy')
+      .filter((p) => p.Properties.ManagedPolicyName.includes('_BOUNDARY_'));
+    expect(boundaries).toHaveLength(6);
+    for (const upper of ['DEV', 'DEMO']) {
+      for (const kind of ['APPLICATION', 'QUERY', 'GLUE']) {
+        const p = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_${kind}`);
+        expect(JSON.stringify(p)).not.toContain('aws:PrincipalTag/');
+        const allowed = p.Properties.PolicyDocument.Statement.filter((s: JsonObject) => s.Effect === 'Allow').flatMap(actions);
+        if (kind !== 'APPLICATION') expect(allowed.some((a: string) => /^(bedrock|dynamodb|cognito-idp|lambda):/.test(a))).toBe(false);
+        if (kind !== 'QUERY') expect(allowed.some((a: string) => /^(athena|lakeformation):/.test(a))).toBe(false);
+        if (kind !== 'GLUE') expect(allowed).not.toContain('glue:UpdateTable');
+        if (kind === 'APPLICATION') {
+          const cognito = p.Properties.PolicyDocument.Statement.find((s: JsonObject) => actions(s).includes('cognito-idp:AdminInitiateAuth'));
+          expect(cognito.Condition.StringEquals).toEqual({
+            'aws:ResourceTag/Project': 'SOC_BOT', 'aws:ResourceTag/Environment': upper.toLowerCase(),
+            'aws:ResourceTag/ManagedBy': 'CDK',
+          });
+          expect(allowed).not.toContain('s3:ListBucket');
+        }
+        expect(p.Properties.PolicyDocument.Statement.some((s: JsonObject) => s.Effect === 'Deny' && actions(s).includes('s3:*'))).toBe(true);
+      }
+      const data = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_DATA_ANALYTICS`);
+      const lf = data.Properties.PolicyDocument.Statement.filter((s: JsonObject) => actions(s).some((a) => a.startsWith('lakeformation:')));
+      expect(lf).toHaveLength(1);
+      expect(lf[0].Resource).toBe('*');
+      expect(actions(lf[0]).sort()).toEqual(['lakeformation:DeregisterResource', 'lakeformation:GrantPermissions',
+        'lakeformation:ListPermissions', 'lakeformation:RegisterResource', 'lakeformation:RevokePermissions']);
+    }
+  });
+
+  test.each(['DEV', 'DEMO'])('%s enforces class mappings and protects boundary policies and tags', (upper) => {
+    const { template } = synthesize();
+    const policy = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_RUNTIME_IAM`);
+    const ss: JsonObject[] = policy.Properties.PolicyDocument.Statement;
+    for (const kind of ['APPLICATION', 'QUERY', 'GLUE']) {
+      for (const action of ['iam:CreateRole', 'iam:PutRolePermissionsBoundary']) {
+        const matches = ss.filter((s) => actions(s).includes(action) && JSON.stringify(s.Resource).includes(`RUNTIME_${kind}_*`));
+        expect(matches).toHaveLength(1);
+        expect(JSON.stringify(matches[0].Condition.StringEquals['iam:PermissionsBoundary'])).toContain(`SOC_BOT_${upper}_BOUNDARY_${kind}`);
+        const tagType = action === 'iam:CreateRole' ? 'RequestTag' : 'ResourceTag';
+        expect(matches[0].Condition.StringEquals[`aws:${tagType}/SOCBOTAccessClass`]).toBe(kind.toLowerCase());
+        expect(matches[0].Condition.StringEquals[`aws:${tagType}/Environment`]).toBe(upper.toLowerCase());
+      }
+    }
+    const attachments = ss.find((s) => actions(s).includes('iam:AttachRolePolicy'))!;
+    expect(JSON.stringify(attachments.Resource)).not.toContain(':policy/');
+    expect(JSON.stringify(attachments.Condition.ArnLike['iam:PolicyARN'])).toContain(`SOC_BOT_${upper}_RUNTIME_POLICY_*`);
+    expect(JSON.stringify(attachments.Condition)).not.toContain('_BOUNDARY_');
+    const removal = ss.find((s) => s.Effect === 'Allow' && actions(s).includes('iam:DeleteRolePermissionsBoundary'))!;
+    expect(removal.Resource).toHaveLength(3);
+    for (const resource of removal.Resource) expect(JSON.stringify(resource)).toMatch(/RUNTIME_(APPLICATION|QUERY|GLUE)_/);
+    const deny = ss.find((s) => s.Effect === 'Deny' && actions(s).includes('iam:DeletePolicy'))!;
+    expect(JSON.stringify(deny.Resource)).toContain(`SOC_BOT_${upper}_BOUNDARY_*`);
+    expect(actions(deny).sort()).toEqual(['iam:CreatePolicyVersion', 'iam:DeletePolicy', 'iam:DeletePolicyVersion', 'iam:SetDefaultPolicyVersion', 'iam:TagPolicy', 'iam:UntagPolicy']);
+    const tagDenies = ss.filter((s) => s.Effect === 'Deny' && actions(s).includes('iam:TagRole'));
+    expect(tagDenies).toHaveLength(4);
+    for (const key of ['Project', 'Environment', 'ManagedBy', 'SOCBOTAccessClass']) {
+      const tagDeny = tagDenies.find((s) => s.Condition.Null[`aws:ResourceTag/${key}`] === 'false')!;
+      expect(tagDeny).toBeDefined();
+      expect(tagDeny.Condition.StringNotEquals[`aws:ResourceTag/${key}`]).toBe('${aws:RequestTag/' + key + '}');
+    }
+    expect(ss.some((s) => s.Effect === 'Deny' && actions(s).includes('iam:UntagRole'))).toBe(true);
   });
 
   // Verifies the committed CDK source resolves drafts through tokens rather than local values.

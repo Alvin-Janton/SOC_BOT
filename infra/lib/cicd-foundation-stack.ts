@@ -26,6 +26,7 @@ import {
   frontendApiStatements,
   observabilityStatements,
   runtimeBoundaryStatements,
+  RUNTIME_CLASSES,
   runtimeIamStatements,
 } from './policy-statements';
 
@@ -74,13 +75,16 @@ export class CicdFoundationStack extends Stack {
       ManagedBy: 'CDK',
     };
 
-    const runtimeBoundary = this.createManagedPolicy(
-      `${title}RuntimeBoundary`,
-      `SOC_BOT_${upper}_RUNTIME_BOUNDARY`,
-      runtimeBoundaryStatements(resources),
-      this.iamWildcardFindings('boundary', environment),
-      'Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny.',
-    );
+    for (const kind of RUNTIME_CLASSES) {
+      const boundary = this.createManagedPolicy(
+        `${title}Boundary${kind.charAt(0).toUpperCase() + kind.slice(1)}`,
+        `SOC_BOT_${upper}_BOUNDARY_${kind.toUpperCase()}`,
+        runtimeBoundaryStatements(resources, kind),
+        this.iamWildcardFindings('boundary', environment),
+        'Class-specific runtime limits use environment resources, scoped listing, and evaluation denial. Bedrock Region wildcard is restricted to the approved model through the exact US profile.',
+      );
+      boundary.node.addMetadata('Purpose', `${environment} ${kind} runtime boundary`);
+    }
 
     const dataPolicy = this.createManagedPolicy(
       `${title}DataAnalyticsPolicy`,
@@ -156,8 +160,6 @@ export class CicdFoundationStack extends Stack {
       'Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions.',
     );
 
-    // Keep the boundary provisioned for future application stacks without attaching it to foundation roles.
-    runtimeBoundary.node.addMetadata('Purpose', `${environment} runtime permission boundary`);
 
     return { deployRole, executionRole };
   }
@@ -271,8 +273,9 @@ export class CicdFoundationStack extends Stack {
         'Resource::*',
       ],
       'runtime-iam': [
-        resource(`arn:${partition}:iam::${account}:role/SOC_BOT_${upper}_RUNTIME_*`),
-        resource(`arn:${partition}:iam::${account}:policy/SOC_BOT_${upper}_RUNTIME_*`),
+        ...RUNTIME_CLASSES.map((kind) => resource(`arn:${partition}:iam::${account}:role/SOC_BOT_${upper}_RUNTIME_${kind.toUpperCase()}_*`)),
+        resource(`arn:${partition}:iam::${account}:policy/SOC_BOT_${upper}_RUNTIME_POLICY_*`),
+        resource(`arn:${partition}:iam::${account}:policy/SOC_BOT_${upper}_BOUNDARY_*`),
       ],
     };
 

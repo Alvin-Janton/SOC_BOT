@@ -2,6 +2,13 @@ import { Aws } from 'aws-cdk-lib';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 export type DeploymentEnvironment = 'dev' | 'demo';
+export const RUNTIME_CLASSES = ['application', 'query', 'glue'] as const;
+export type RuntimeClass = typeof RUNTIME_CLASSES[number];
+
+/** Returns the administrator-managed boundary ARN for an environment and runtime class. */
+export function runtimeBoundaryArn(environment: DeploymentEnvironment, runtimeClass: RuntimeClass): string {
+  return `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:policy/SOC_BOT_${environment.toUpperCase()}_BOUNDARY_${runtimeClass.toUpperCase()}`;
+}
 
 export const BEDROCK_INFERENCE_PROFILE = {
   profileId: 'us.anthropic.claude-sonnet-4-6',
@@ -16,7 +23,6 @@ export interface EnvironmentResources {
   readonly dataBucketName: string;
   readonly frontendBucketName: string;
   readonly executionRoleArn: string;
-  readonly boundaryArn: string;
 }
 
 /** Builds deterministic, environment-qualified names and ARNs used by IAM policies. */
@@ -29,7 +35,6 @@ export function environmentResources(environment: DeploymentEnvironment): Enviro
     dataBucketName: `soc-bot-${environment}-data-${Aws.ACCOUNT_ID}-${Aws.REGION}`,
     frontendBucketName: `soc-bot-${environment}-frontend-${Aws.ACCOUNT_ID}-${Aws.REGION}`,
     executionRoleArn: `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/SOC_BOT_${upper}_CFN_EXEC`,
-    boundaryArn: `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:policy/SOC_BOT_${upper}_RUNTIME_BOUNDARY`,
   };
 }
 
@@ -357,101 +362,102 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
 
 /** Defines the constrained IAM lifecycle permissions for environment-specific runtime roles. */
 export function runtimeIamStatements(resources: EnvironmentResources): PolicyStatement[] {
-  const upper = resources.environment.toUpperCase();
-  const runtimeRoleArn = `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/SOC_BOT_${upper}_RUNTIME_*`;
-  const runtimePolicyArn = `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:policy/SOC_BOT_${upper}_RUNTIME_*`;
-  const requiredTags = {
-    'aws:RequestTag/Project': 'SOC_BOT',
-    'aws:RequestTag/Environment': resources.environment,
-    'aws:RequestTag/ManagedBy': 'CDK',
-  };
-  return [
-    new PolicyStatement({
-      sid: `CreateTaggedBounded${capitalize(resources.environment)}RuntimeRoles`,
-      actions: ['iam:CreateRole'],
-      resources: [runtimeRoleArn],
+  const prefix = `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:`;
+  const namespace = `SOC_BOT_${resources.environment.toUpperCase()}`;
+  const roleArns = RUNTIME_CLASSES.map((kind) => `${prefix}role/${namespace}_RUNTIME_${kind.toUpperCase()}_*`);
+  const policyArn = `${prefix}policy/${namespace}_RUNTIME_POLICY_*`;
+  const ownership = { Project: 'SOC_BOT', Environment: resources.environment, ManagedBy: 'CDK' };
+  const protectedKeys = [...Object.keys(ownership), 'SOCBOTAccessClass'];
+  const statements: PolicyStatement[] = [];
+  for (const [index, kind] of RUNTIME_CLASSES.entries()) {
+    const tags = { ...ownership, SOCBOTAccessClass: kind };
+    const requestTags = Object.fromEntries(Object.entries(tags).map(([key, value]) => [`aws:RequestTag/${key}`, value]));
+    const resourceTags = Object.fromEntries(Object.entries(tags).map(([key, value]) => [`aws:ResourceTag/${key}`, value]));
+    statements.push(
+      new PolicyStatement({
+        actions: ['iam:CreateRole'], resources: [roleArns[index]],
+        conditions: {
+          StringEquals: { ...requestTags, 'iam:PermissionsBoundary': runtimeBoundaryArn(resources.environment, kind) },
+          'ForAllValues:StringEquals': { 'aws:TagKeys': protectedKeys },
+        },
+      }),
+      new PolicyStatement({
+        actions: ['iam:PutRolePermissionsBoundary'], resources: [roleArns[index]],
+        conditions: { StringEquals: { ...resourceTags, 'iam:PermissionsBoundary': runtimeBoundaryArn(resources.environment, kind) } },
+      }),
+    );
+  }
+  // Existing roles must resend the complete protected tag set unchanged. Creation has no existing tags.
+  // Denials cover the environment's project roles; Allow statements remain class-namespace scoped.
+  for (const key of protectedKeys) {
+    statements.push(new PolicyStatement({
+      effect: Effect.DENY, actions: ['iam:TagRole'], resources: [`${prefix}role/${namespace}_*`],
       conditions: {
-        StringEquals: {
-          'iam:PermissionsBoundary': resources.boundaryArn,
-          ...requiredTags,
-        },
-        'ForAllValues:StringEquals': {
-          'aws:TagKeys': ['Project', 'Environment', 'ManagedBy', 'SOCBOTAccessClass'],
-        },
+        Null: { [`aws:ResourceTag/${key}`]: 'false' },
+        StringNotEquals: { [`aws:ResourceTag/${key}`]: '${aws:RequestTag/' + key + '}' },
       },
+    }));
+  }
+  return [
+    ...statements,
+    new PolicyStatement({
+      effect: Effect.DENY, actions: ['iam:UntagRole'], resources: [`${prefix}role/${namespace}_*`],
+      conditions: { 'ForAnyValue:StringEquals': { 'aws:TagKeys': protectedKeys } },
     }),
     new PolicyStatement({
-      sid: `Manage${capitalize(resources.environment)}RuntimeRoles`,
       actions: [
         'iam:DeleteRole', 'iam:DeleteRolePolicy', 'iam:GetRole', 'iam:GetRolePolicy',
         'iam:ListAttachedRolePolicies', 'iam:ListRolePolicies', 'iam:ListRoleTags',
         'iam:PutRolePolicy', 'iam:TagRole', 'iam:UntagRole', 'iam:UpdateAssumeRolePolicy',
-        'iam:UpdateRoleDescription',
+        'iam:UpdateRoleDescription', 'iam:DeleteRolePermissionsBoundary',
       ],
-      resources: [runtimeRoleArn],
+      resources: roleArns,
     }),
     new PolicyStatement({
-      sid: `ApplyOnly${capitalize(resources.environment)}RuntimeBoundary`,
-      actions: ['iam:DeleteRolePermissionsBoundary', 'iam:PutRolePermissionsBoundary'],
-      resources: [runtimeRoleArn],
+      actions: ['iam:CreatePolicy'], resources: [policyArn],
       conditions: {
-        StringEqualsIfExists: { 'iam:PermissionsBoundary': resources.boundaryArn },
+        StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
+        'ForAllValues:StringEquals': { 'aws:TagKeys': Object.keys(ownership) },
       },
     }),
     new PolicyStatement({
-      sid: `CreateTagged${capitalize(resources.environment)}RuntimePolicies`,
-      actions: ['iam:CreatePolicy'],
-      resources: [runtimePolicyArn],
-      conditions: {
-        StringEquals: requiredTags,
-        'ForAllValues:StringEquals': {
-          'aws:TagKeys': ['Project', 'Environment', 'ManagedBy'],
-        },
-      },
-    }),
-    new PolicyStatement({
-      sid: `ManageOnly${capitalize(resources.environment)}RuntimePolicies`,
       actions: [
         'iam:CreatePolicyVersion', 'iam:DeletePolicy', 'iam:DeletePolicyVersion',
         'iam:GetPolicy', 'iam:GetPolicyVersion', 'iam:ListPolicyTags', 'iam:ListPolicyVersions',
         'iam:SetDefaultPolicyVersion', 'iam:TagPolicy', 'iam:UntagPolicy',
       ],
-      resources: [runtimePolicyArn],
+      resources: [policyArn],
     }),
     new PolicyStatement({
-      sid: `AttachOnly${capitalize(resources.environment)}RuntimePolicies`,
-      actions: ['iam:AttachRolePolicy', 'iam:DetachRolePolicy'],
-      resources: [runtimeRoleArn, runtimePolicyArn],
+      effect: Effect.DENY,
+      actions: ['iam:CreatePolicyVersion', 'iam:DeletePolicy', 'iam:DeletePolicyVersion',
+        'iam:SetDefaultPolicyVersion', 'iam:TagPolicy', 'iam:UntagPolicy'],
+      resources: [`${prefix}policy/${namespace}_BOUNDARY_*`],
     }),
     new PolicyStatement({
-      sid: `PassOnly${capitalize(resources.environment)}RuntimeRolesToApprovedServices`,
-      actions: ['iam:PassRole'],
-      resources: [runtimeRoleArn],
-      conditions: {
-        StringEquals: {
-          'iam:PassedToService': [
-            'lambda.amazonaws.com', 'glue.amazonaws.com', 'apigateway.amazonaws.com',
-          ],
-        },
-      },
+      actions: ['iam:AttachRolePolicy', 'iam:DetachRolePolicy'], resources: roleArns,
+      conditions: { ArnLike: { 'iam:PolicyARN': policyArn } },
+    }),
+    new PolicyStatement({
+      actions: ['iam:PassRole'], resources: roleArns,
+      conditions: { StringEquals: { 'iam:PassedToService': [
+        'lambda.amazonaws.com', 'glue.amazonaws.com', 'apigateway.amazonaws.com',
+      ] } },
     }),
   ];
 }
 
 /**
- * Defines the maximum permissions available to runtime roles, separated by access-class tags.
+ * Defines maximum permissions for one runtime class; tags are inventory metadata only.
  * The explicit evaluation-prefix denial applies regardless of the runtime role's access class.
  */
 export function runtimeBoundaryStatements(
   resources: EnvironmentResources,
+  runtimeClass: RuntimeClass,
 ): PolicyStatement[] {
   const dataBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.dataBucketName}`;
   const inferenceProfileArn = `arn:${Aws.PARTITION}:bedrock:${BEDROCK_INFERENCE_PROFILE.sourceRegion}:${Aws.ACCOUNT_ID}:inference-profile/${BEDROCK_INFERENCE_PROFILE.profileId}`;
   const foundationModelArn = `arn:${Aws.PARTITION}:bedrock:*::foundation-model/${BEDROCK_INFERENCE_PROFILE.foundationModelId}`;
-  // Produces the principal-tag condition that selects one approved runtime access class.
-  const accessClass = (value: string) => ({
-    StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': value },
-  });
   return [
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}RuntimeLogging`,
@@ -466,7 +472,7 @@ export function runtimeBoundaryStatements(
       resources: ['*'],
       conditions: { StringEquals: { 'cloudwatch:namespace': `SOC_BOT/${resources.environment}` } },
     }),
-    new PolicyStatement({
+    ...(runtimeClass === 'application' ? [new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApplicationState`,
       actions: [
         'dynamodb:BatchGetItem', 'dynamodb:BatchWriteItem', 'dynamodb:DeleteItem',
@@ -475,13 +481,11 @@ export function runtimeBoundaryStatements(
       resources: [
         `arn:${Aws.PARTITION}:dynamodb:${Aws.REGION}:${Aws.ACCOUNT_ID}:table/${resources.prefix}-*`,
       ],
-      conditions: accessClass('application'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApprovedBedrockInferenceProfile`,
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
       resources: [inferenceProfileArn],
-      conditions: accessClass('application'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApprovedBedrockProfileModels`,
@@ -489,7 +493,6 @@ export function runtimeBoundaryStatements(
       resources: [foundationModelArn],
       conditions: {
         StringEquals: {
-          'aws:PrincipalTag/SOCBOTAccessClass': 'application',
           'bedrock:InferenceProfileArn': inferenceProfileArn,
         },
       },
@@ -500,13 +503,11 @@ export function runtimeBoundaryStatements(
       resources: [
         `arn:${Aws.PARTITION}:lambda:${Aws.REGION}:${Aws.ACCOUNT_ID}:function:${resources.prefix}-*`,
       ],
-      conditions: accessClass('application'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}PlaybookReads`,
       actions: ['s3:GetObject'],
       resources: [`${dataBucketArn}/playbooks/*`],
-      conditions: accessClass('application'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}CognitoAuthentication`,
@@ -514,9 +515,14 @@ export function runtimeBoundaryStatements(
       resources: [
         `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`,
       ],
-      conditions: accessClass('application'),
+      conditions: { StringEquals: {
+        'aws:ResourceTag/Project': 'SOC_BOT',
+        'aws:ResourceTag/Environment': resources.environment,
+        'aws:ResourceTag/ManagedBy': 'CDK',
+      } },
     }),
-    new PolicyStatement({
+    ] : []),
+    ...(runtimeClass === 'query' ? [new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}DedicatedAthenaQueries`,
       actions: [
         'athena:GetQueryExecution', 'athena:GetQueryResults',
@@ -525,32 +531,27 @@ export function runtimeBoundaryStatements(
       resources: [
         `arn:${Aws.PARTITION}:athena:${Aws.REGION}:${Aws.ACCOUNT_ID}:workgroup/${resources.prefix}-*`,
       ],
-      conditions: accessClass('query'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}QueryCatalogMetadata`,
       actions: ['glue:GetDatabase', 'glue:GetDatabases', 'glue:GetTable', 'glue:GetTables', 'glue:GetPartitions'],
       resources: glueCatalogResources(resources),
-      conditions: accessClass('query'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}LakeFormationDataAccess`,
       actions: ['lakeformation:GetDataAccess'],
       resources: ['*'],
-      conditions: accessClass('query'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}QueryBucketLocation`,
       actions: ['s3:GetBucketLocation'],
       resources: [dataBucketArn],
-      conditions: accessClass('query'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}AthenaResultListing`,
       actions: ['s3:ListBucket'],
       resources: [dataBucketArn],
       conditions: {
-        StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': 'query' },
         StringLike: { 's3:prefix': ['athena-results', 'athena-results/*'] },
       },
     }),
@@ -558,9 +559,9 @@ export function runtimeBoundaryStatements(
       sid: `Allow${capitalize(resources.environment)}AthenaResultObjects`,
       actions: ['s3:AbortMultipartUpload', 's3:GetObject', 's3:PutObject'],
       resources: [`${dataBucketArn}/athena-results/*`],
-      conditions: accessClass('query'),
     }),
-    new PolicyStatement({
+    ] : []),
+    ...(runtimeClass === 'glue' ? [new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}GlueCatalogWrites`,
       actions: [
         'glue:BatchCreatePartition', 'glue:BatchDeletePartition', 'glue:BatchGetPartition',
@@ -568,35 +569,36 @@ export function runtimeBoundaryStatements(
         'glue:GetTable', 'glue:UpdatePartition', 'glue:UpdateTable',
       ],
       resources: glueCatalogResources(resources),
-      conditions: accessClass('glue'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}GlueBucketLocation`,
       actions: ['s3:GetBucketLocation'],
       resources: [dataBucketArn],
-      conditions: accessClass('glue'),
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}GluePrefixListing`,
       actions: ['s3:ListBucket'],
       resources: [dataBucketArn],
       conditions: {
-        StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': 'glue' },
         StringLike: {
           's3:prefix': ['raw', 'raw/*', 'normalized', 'normalized/*', 'quarantine', 'quarantine/*'],
         },
       },
     }),
     new PolicyStatement({
-      sid: `Allow${capitalize(resources.environment)}GlueSourceAndDestinationObjects`,
+      sid: `Allow${capitalize(resources.environment)}GlueSourceReads`,
+      actions: ['s3:GetObject'],
+      resources: [`${dataBucketArn}/raw/*`],
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}GlueDestinationObjects`,
       actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
       resources: [
-        `${dataBucketArn}/raw/*`,
         `${dataBucketArn}/normalized/*`,
         `${dataBucketArn}/quarantine/*`,
       ],
-      conditions: accessClass('glue'),
     }),
+    ] : []),
     new PolicyStatement({
       sid: `Deny${capitalize(resources.environment)}EvaluationGroundTruth`,
       effect: Effect.DENY,
