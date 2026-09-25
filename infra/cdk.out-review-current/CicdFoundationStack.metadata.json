@@ -1,0 +1,1697 @@
+{
+  "/CicdFoundationStack": [
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/GitHubOidcProvider": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "GitHubOidcProvider"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:11:30)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevRuntimeBoundary": [
+    {
+      "type": "Purpose",
+      "data": "dev runtime permission boundary"
+    }
+  ],
+  "/CicdFoundationStack/DemoRuntimeBoundary": [
+    {
+      "type": "Purpose",
+      "data": "demo runtime permission boundary"
+    }
+  ],
+  "/CicdFoundationStack/GitHubOidcProviderArn": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "GitHubOidcProviderArn"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:21:9)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevDeployRoleArn": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevDeployRoleArn"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:24:9)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoDeployRoleArn": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoDeployRoleArn"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:25:9)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevCloudFormationExecutionRoleArn": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevCloudFormationExecutionRoleArn"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:26:9)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoCloudFormationExecutionRoleArn": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoCloudFormationExecutionRoleArn"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:27:9)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/BootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "BootstrapVersion"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/CicdFoundationStack/CheckBootstrapVersion": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CheckBootstrapVersion"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...aws-cdk-lib...",
+        "(no user code in 10 frames, use --stack-trace-limit to capture more)"
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevRuntimeBoundary/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevRuntimeBoundary1EC87F07"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:*SOC-BOT-DEV-*:*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:dynamodb:<AWS::Region>:<AWS::AccountId>:table/SOC-BOT-DEV-*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:lambda:<AWS::Region>:<AWS::AccountId>:function:SOC-BOT-DEV-*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-data-<AWS::AccountId>-<AWS::Region>/playbooks/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cognito-idp:<AWS::Region>:<AWS::AccountId>:userpool/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:athena:<AWS::Region>:<AWS::AccountId>:workgroup/SOC-BOT-DEV-*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:database/soc_bot_dev*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:table/soc_bot_dev*/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-data-<AWS::AccountId>-<AWS::Region>/athena-results/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-data-<AWS::AccountId>-<AWS::Region>/normalized/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-data-<AWS::AccountId>-<AWS::Region>/quarantine/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-data-<AWS::AccountId>-<AWS::Region>/raw/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-data-<AWS::AccountId>-<AWS::Region>/evaluation/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Action::s3:*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevDataAnalyticsPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevDataAnalyticsPolicy2171A662"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-*/*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:database/soc_bot_dev*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:table/soc_bot_dev*/*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:job/SOC-BOT-DEV-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:trigger/SOC-BOT-DEV-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:athena:<AWS::Region>:<AWS::AccountId>:workgroup/SOC-BOT-DEV-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevAiApplicationPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevAiApplicationPolicyBE31ABF3"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:lambda:<AWS::Region>:<AWS::AccountId>:function:SOC-BOT-DEV-*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:dynamodb:<AWS::Region>:<AWS::AccountId>:table/SOC-BOT-DEV-*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::cdk-hnb659fds-assets-<AWS::AccountId>-<AWS::Region>/*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:events:<AWS::Region>:<AWS::AccountId>:rule/SOC-BOT-DEV-*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevFrontendApiPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevFrontendApiPolicy8023E687"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:apigateway:<AWS::Region>::/restapis/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:apigateway:<AWS::Region>::/tags/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cognito-idp:<AWS::Region>:<AWS::AccountId>:userpool/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudfront::<AWS::AccountId>:distribution/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevObservabilityPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevObservabilityPolicyE3C318DF"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:*SOC-BOT-DEV-*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudwatch:<AWS::Region>:<AWS::AccountId>:alarm:SOC-BOT-DEV-*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:budgets::<AWS::AccountId>:budget/SOC-BOT-DEV-*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevRuntimeIamPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevRuntimeIamPolicy13AB3341"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:44:39)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:iam::<AWS::AccountId>:role/SOC_BOT_DEV_RUNTIME_*]": "Runtime IAM access is restricted to the environment runtime namespace and requires the matching permission boundary and tags."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:44:39)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:iam::<AWS::AccountId>:policy/SOC_BOT_DEV_RUNTIME_*]": "Runtime IAM access is restricted to the environment runtime namespace and requires the matching permission boundary and tags."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:44:39)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevCloudFormationExecutionRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevCloudFormationExecutionRole46BCF847"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Role2 in aws-cdk-lib...",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:46:31)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DevDeployRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DevDeployRole32239B31"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Role2 in aws-cdk-lib...",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:55:28)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudformation:<AWS::Region>:<AWS::AccountId>:stack/SOC-BOT-DEV-*/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::cdk-hnb659fds-assets-<AWS::AccountId>-<AWS::Region>/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-dev-frontend-<AWS::AccountId>-<AWS::Region>/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudfront::<AWS::AccountId>:distribution/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:19:26)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoRuntimeBoundary/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoRuntimeBoundary5472C889"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:*SOC-BOT-DEMO-*:*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:dynamodb:<AWS::Region>:<AWS::AccountId>:table/SOC-BOT-DEMO-*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:lambda:<AWS::Region>:<AWS::AccountId>:function:SOC-BOT-DEMO-*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-data-<AWS::AccountId>-<AWS::Region>/playbooks/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cognito-idp:<AWS::Region>:<AWS::AccountId>:userpool/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:athena:<AWS::Region>:<AWS::AccountId>:workgroup/SOC-BOT-DEMO-*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:database/soc_bot_demo*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:table/soc_bot_demo*/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-data-<AWS::AccountId>-<AWS::Region>/athena-results/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-data-<AWS::AccountId>-<AWS::Region>/normalized/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-data-<AWS::AccountId>-<AWS::Region>/quarantine/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-data-<AWS::AccountId>-<AWS::Region>/raw/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-data-<AWS::AccountId>-<AWS::Region>/evaluation/*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Action::s3:*]": "Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:39:38)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoDataAnalyticsPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoDataAnalyticsPolicy11A9CD3F"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-*/*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:database/soc_bot_demo*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:table/soc_bot_demo*/*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:job/SOC-BOT-DEMO-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:glue:<AWS::Region>:<AWS::AccountId>:trigger/SOC-BOT-DEMO-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:athena:<AWS::Region>:<AWS::AccountId>:workgroup/SOC-BOT-DEMO-*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:40:33)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoAiApplicationPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoAiApplicationPolicyEA3D92E9"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:lambda:<AWS::Region>:<AWS::AccountId>:function:SOC-BOT-DEMO-*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:dynamodb:<AWS::Region>:<AWS::AccountId>:table/SOC-BOT-DEMO-*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::cdk-hnb659fds-assets-<AWS::AccountId>-<AWS::Region>/*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:events:<AWS::Region>:<AWS::AccountId>:rule/SOC-BOT-DEMO-*]": "Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:41:31)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoFrontendApiPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoFrontendApiPolicy66753B06"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:apigateway:<AWS::Region>::/restapis/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:apigateway:<AWS::Region>::/tags/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cognito-idp:<AWS::Region>:<AWS::AccountId>:userpool/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudfront::<AWS::AccountId>:distribution/*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:42:37)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoObservabilityPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoObservabilityPolicyD4622784"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:*SOC-BOT-DEMO-*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudwatch:<AWS::Region>:<AWS::AccountId>:alarm:SOC-BOT-DEMO-*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:budgets::<AWS::AccountId>:budget/SOC-BOT-DEMO-*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::*]": "Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource \"*\"."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:43:42)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoRuntimeIamPolicy/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoRuntimeIamPolicy5C65CACA"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new ManagedPolicy2 in aws-cdk-lib...",
+        "CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:83:24)",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:44:39)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:iam::<AWS::AccountId>:role/SOC_BOT_DEMO_RUNTIME_*]": "Runtime IAM access is restricted to the environment runtime namespace and requires the matching permission boundary and tags."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:44:39)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:iam::<AWS::AccountId>:policy/SOC_BOT_DEMO_RUNTIME_*]": "Runtime IAM access is restricted to the environment runtime namespace and requires the matching permission boundary and tags."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createManagedPolicy (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:91:14)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:44:39)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoCloudFormationExecutionRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoCloudFormationExecutionRole1F9BB07A"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Role2 in aws-cdk-lib...",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:46:31)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/DemoDeployRole/Resource": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "DemoDeployRoleD73D123F"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...new Role2 in aws-cdk-lib...",
+        "CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:55:28)",
+        "new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudformation:<AWS::Region>:<AWS::AccountId>:stack/SOC-BOT-DEMO-*/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::cdk-hnb659fds-assets-<AWS::AccountId>-<AWS::Region>/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:s3:::soc-bot-demo-frontend-<AWS::AccountId>-<AWS::Region>/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    },
+    {
+      "type": "aws:cdk:acknowledged-rules",
+      "data": {
+        "Annotation::AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:cloudfront::<AWS::AccountId>:distribution/*]": "Deployment wildcards are limited to the matching application stack prefix, deterministic file-asset/frontend buckets, and tagged CloudFront distributions."
+      },
+      "trace": [
+        "    ...Validations.acknowledge in aws-cdk-lib...",
+        "    at CicdFoundationStack.acknowledgeIamWildcards (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:103:52)",
+        "    at CicdFoundationStack.createEnvironmentFoundation (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:76:14)",
+        "    at new CicdFoundationStack (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\lib\\cicd-foundation-stack.js:20:27)",
+        "    at <anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:8:1)",
+        "    ...node internals..."
+      ]
+    }
+  ],
+  "/CicdFoundationStack/CDKMetadata/Default": [
+    {
+      "type": "aws:cdk:logicalId",
+      "data": "CDKMetadata"
+    },
+    {
+      "type": "aws:cdk:creationStack",
+      "data": [
+        "...App.synth in aws-cdk-lib...",
+        "<anonymous> (C:\\Users\\alvin\\OneDrive\\Desktop\\GitHub_Repos\\SOC_BOT\\infra\\dist\\bin\\soc-bot.js:16:5)",
+        "...node internals..."
+      ]
+    }
+  ]
+}

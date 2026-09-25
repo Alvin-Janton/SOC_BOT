@@ -1,6 +1,5 @@
 import {
   CfnOutput,
-  CfnParameter,
   Duration,
   Stack,
   StackProps,
@@ -40,13 +39,6 @@ export class CicdFoundationStack extends Stack {
   public constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    const bedrockModelArn = new CfnParameter(this, 'ApprovedBedrockModelArn', {
-      type: 'String',
-      description: 'ARN of the approved Bedrock foundation model or inference profile used by SOC Bot runtime roles.',
-      allowedPattern: '^arn:(aws|aws-us-gov|aws-cn):bedrock:[a-z0-9-]+:(?:[0-9]{12})?:(?:foundation-model|inference-profile)/[A-Za-z0-9._:/-]+$',
-      constraintDescription: 'Must be a Bedrock foundation-model or inference-profile ARN.',
-    });
-
     const oidcProvider = new CfnOIDCProvider(this, 'GitHubOidcProvider', {
       url: 'https://token.actions.githubusercontent.com',
       clientIdList: ['sts.amazonaws.com'],
@@ -56,8 +48,8 @@ export class CicdFoundationStack extends Stack {
       ],
     });
 
-    const dev = this.createEnvironmentFoundation('dev', oidcProvider, bedrockModelArn.valueAsString);
-    const demo = this.createEnvironmentFoundation('demo', oidcProvider, bedrockModelArn.valueAsString);
+    const dev = this.createEnvironmentFoundation('dev', oidcProvider);
+    const demo = this.createEnvironmentFoundation('demo', oidcProvider);
 
     new CfnOutput(this, 'GitHubOidcProviderArn', {
       value: oidcProvider.attrArn,
@@ -72,7 +64,6 @@ export class CicdFoundationStack extends Stack {
   private createEnvironmentFoundation(
     environment: DeploymentEnvironment,
     oidcProvider: CfnOIDCProvider,
-    bedrockModelArn: string,
   ): EnvironmentFoundation {
     const upper = environment.toUpperCase();
     const title = environment.charAt(0).toUpperCase() + environment.slice(1);
@@ -86,7 +77,7 @@ export class CicdFoundationStack extends Stack {
     const runtimeBoundary = this.createManagedPolicy(
       `${title}RuntimeBoundary`,
       `SOC_BOT_${upper}_RUNTIME_BOUNDARY`,
-      runtimeBoundaryStatements(resources, bedrockModelArn),
+      runtimeBoundaryStatements(resources),
       this.iamWildcardFindings('boundary', environment),
       'Runtime maximum permissions use environment-qualified resource prefixes, access-class conditions, approved account-scoped APIs, and an explicit evaluation-prefix deny.',
     );
@@ -117,7 +108,7 @@ export class CicdFoundationStack extends Stack {
       `SOC_BOT_${upper}_CFN_OBSERVABILITY`,
       observabilityStatements(resources),
       this.iamWildcardFindings('observability', environment),
-      'Observability resources are restricted to environment-qualified log group, alarm, and budget names.',
+      'Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource "*".',
     );
     const runtimeIamPolicy = this.createManagedPolicy(
       `${title}RuntimeIamPolicy`,
@@ -247,6 +238,7 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/quarantine/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/raw/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/evaluation/*`),
+        resource(`arn:${partition}:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6`),
         'Action::s3:*',
       ],
       data: [
@@ -276,6 +268,7 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:logs:${region}:${account}:log-group:*SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:cloudwatch:${region}:${account}:alarm:SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:budgets::${account}:budget/SOC-BOT-${upper}-*`),
+        'Resource::*',
       ],
       'runtime-iam': [
         resource(`arn:${partition}:iam::${account}:role/SOC_BOT_${upper}_RUNTIME_*`),

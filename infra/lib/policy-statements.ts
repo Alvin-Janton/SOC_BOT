@@ -3,6 +3,12 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 export type DeploymentEnvironment = 'dev' | 'demo';
 
+export const BEDROCK_INFERENCE_PROFILE = {
+  profileId: 'us.anthropic.claude-sonnet-4-6',
+  foundationModelId: 'anthropic.claude-sonnet-4-6',
+  sourceRegion: 'us-east-1',
+} as const;
+
 export interface EnvironmentResources {
   readonly environment: DeploymentEnvironment;
   readonly prefix: string;
@@ -118,7 +124,7 @@ export function dataAndAnalyticsStatements(resources: EnvironmentResources): Pol
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}DataBuckets`,
       actions: [
-        's3:CreateBucket', 's3:DeleteBucket', 's3:GetBucketLocation', 's3:GetBucketPolicy',
+        's3:CreateBucket', 's3:DeleteBucket', 's3:DeleteBucketPolicy', 's3:GetBucketLocation', 's3:GetBucketPolicy',
         's3:GetBucketTagging', 's3:GetEncryptionConfiguration', 's3:GetLifecycleConfiguration',
         's3:GetBucketPublicAccessBlock', 's3:GetBucketVersioning', 's3:ListBucket',
         's3:PutBucketPolicy', 's3:PutBucketTagging', 's3:PutEncryptionConfiguration',
@@ -220,57 +226,82 @@ export function aiApplicationStatements(resources: EnvironmentResources): Policy
 
 /** Defines CloudFormation permissions for the frontend, API, and authentication resources. */
 export function frontendApiStatements(resources: EnvironmentResources): PolicyStatement[] {
-  const tagConditions = {
-    StringEqualsIfExists: {
-      'aws:ResourceTag/Project': 'SOC_BOT',
-      'aws:ResourceTag/Environment': resources.environment,
+  const title = capitalize(resources.environment);
+  const requiredRequestTags = {
+    StringEquals: {
+      'aws:RequestTag/Project': 'SOC_BOT',
+      'aws:RequestTag/Environment': resources.environment,
+      'aws:RequestTag/ManagedBy': 'CDK',
+    },
+    'ForAllValues:StringEquals': {
+      'aws:TagKeys': ['Project', 'Environment', 'ManagedBy'],
     },
   };
+  const requiredResourceTags = {
+    StringEquals: {
+      'aws:ResourceTag/Project': 'SOC_BOT',
+      'aws:ResourceTag/Environment': resources.environment,
+      'aws:ResourceTag/ManagedBy': 'CDK',
+    },
+  };
+  const apiGatewayArn = `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/restapis`;
+  const userPoolArn = `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`;
+  const distributionArn = `arn:${Aws.PARTITION}:cloudfront::${Aws.ACCOUNT_ID}:distribution/*`;
   return [
     new PolicyStatement({
-      sid: `Manage${capitalize(resources.environment)}ApiGateway`,
-      actions: ['apigateway:DELETE', 'apigateway:GET', 'apigateway:PATCH', 'apigateway:POST', 'apigateway:PUT'],
-      resources: [
-        `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/restapis`,
-        `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/restapis/*`,
-        `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/tags/*`,
-      ],
-      conditions: tagConditions,
+      sid: `CreateTagged${title}ApiGateway`,
+      actions: ['apigateway:POST'],
+      resources: [apiGatewayArn],
+      conditions: requiredRequestTags,
     }),
     new PolicyStatement({
-      sid: `Manage${capitalize(resources.environment)}CognitoUserPools`,
+      sid: `ManageTagged${title}ApiGateway`,
+      actions: ['apigateway:DELETE', 'apigateway:GET', 'apigateway:PATCH', 'apigateway:POST', 'apigateway:PUT'],
+      resources: [`${apiGatewayArn}/*`],
+      conditions: requiredResourceTags,
+    }),
+    new PolicyStatement({
+      sid: `Tag${title}ApiGateway`,
+      actions: ['apigateway:PUT'],
+      resources: [`arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/tags/*`],
+      conditions: requiredRequestTags,
+    }),
+    new PolicyStatement({
+      sid: `ManageTagged${title}CognitoUserPools`,
       actions: [
         'cognito-idp:AddCustomAttributes', 'cognito-idp:CreateUserPoolClient', 'cognito-idp:DeleteUserPool',
         'cognito-idp:DeleteUserPoolClient', 'cognito-idp:DescribeUserPool', 'cognito-idp:DescribeUserPoolClient',
-        'cognito-idp:TagResource', 'cognito-idp:UntagResource', 'cognito-idp:UpdateUserPool',
-        'cognito-idp:UpdateUserPoolClient',
+        'cognito-idp:UpdateUserPool', 'cognito-idp:UpdateUserPoolClient',
       ],
-      resources: [
-        `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`,
-      ],
-      conditions: tagConditions,
+      resources: [userPoolArn],
+      conditions: requiredResourceTags,
     }),
     new PolicyStatement({
-      sid: `CreateTagged${capitalize(resources.environment)}CognitoUserPool`,
+      sid: `CreateTagged${title}CognitoUserPool`,
       actions: ['cognito-idp:CreateUserPool'],
       resources: ['*'],
-      conditions: {
-        StringEquals: {
-          'aws:RequestTag/Project': 'SOC_BOT',
-          'aws:RequestTag/Environment': resources.environment,
-          'aws:RequestTag/ManagedBy': 'CDK',
-        },
-      },
+      conditions: requiredRequestTags,
     }),
     new PolicyStatement({
-      sid: `ManageTagged${capitalize(resources.environment)}CloudFrontDistributions`,
+      sid: `Tag${title}CognitoUserPools`,
+      actions: ['cognito-idp:TagResource'],
+      resources: [userPoolArn],
+      conditions: requiredRequestTags,
+    }),
+    new PolicyStatement({
+      sid: `CreateTagged${title}CloudFrontDistribution`,
+      actions: ['cloudfront:CreateDistribution', 'cloudfront:TagResource'],
+      resources: ['*'],
+      conditions: requiredRequestTags,
+    }),
+    new PolicyStatement({
+      sid: `ManageTagged${title}CloudFrontDistributions`,
       actions: [
-        'cloudfront:CreateDistribution', 'cloudfront:DeleteDistribution', 'cloudfront:GetDistribution',
-        'cloudfront:GetDistributionConfig', 'cloudfront:TagResource', 'cloudfront:UntagResource',
-        'cloudfront:UpdateDistribution',
+        'cloudfront:DeleteDistribution', 'cloudfront:GetDistribution',
+        'cloudfront:GetDistributionConfig', 'cloudfront:UpdateDistribution',
       ],
-      resources: [`arn:${Aws.PARTITION}:cloudfront::${Aws.ACCOUNT_ID}:distribution/*`],
-      conditions: tagConditions,
+      resources: [distributionArn],
+      conditions: requiredResourceTags,
     }),
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}OriginAccessControls`,
@@ -291,12 +322,17 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
       sid: `Manage${capitalize(resources.environment)}LogGroups`,
       actions: [
         'logs:CreateLogGroup', 'logs:DeleteLogGroup', 'logs:DeleteRetentionPolicy',
-        'logs:DescribeLogGroups', 'logs:ListTagsForResource', 'logs:PutRetentionPolicy',
+        'logs:ListTagsForResource', 'logs:PutRetentionPolicy',
         'logs:TagResource', 'logs:UntagResource',
       ],
       resources: [
         `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:*${resources.prefix}-*`,
       ],
+    }),
+    new PolicyStatement({
+      sid: `Describe${capitalize(resources.environment)}LogGroups`,
+      actions: ['logs:DescribeLogGroups'],
+      resources: ['*'],
     }),
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}Alarms`,
@@ -311,8 +347,8 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}Budget`,
       actions: [
-        'budgets:CreateBudgetAction', 'budgets:DeleteBudgetAction',
-        'budgets:DescribeBudgetAction', 'budgets:UpdateBudgetAction',
+        'budgets:ListTagsForResource', 'budgets:ModifyBudget', 'budgets:TagResource',
+        'budgets:UntagResource', 'budgets:ViewBudget',
       ],
       resources: [`arn:${Aws.PARTITION}:budgets::${Aws.ACCOUNT_ID}:budget/${resources.prefix}-*`],
     }),
@@ -408,9 +444,10 @@ export function runtimeIamStatements(resources: EnvironmentResources): PolicySta
  */
 export function runtimeBoundaryStatements(
   resources: EnvironmentResources,
-  bedrockModelArn: string,
 ): PolicyStatement[] {
   const dataBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.dataBucketName}`;
+  const inferenceProfileArn = `arn:${Aws.PARTITION}:bedrock:${BEDROCK_INFERENCE_PROFILE.sourceRegion}:${Aws.ACCOUNT_ID}:inference-profile/${BEDROCK_INFERENCE_PROFILE.profileId}`;
+  const foundationModelArn = `arn:${Aws.PARTITION}:bedrock:*::foundation-model/${BEDROCK_INFERENCE_PROFILE.foundationModelId}`;
   // Produces the principal-tag condition that selects one approved runtime access class.
   const accessClass = (value: string) => ({
     StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': value },
@@ -441,10 +478,21 @@ export function runtimeBoundaryStatements(
       conditions: accessClass('application'),
     }),
     new PolicyStatement({
-      sid: `Allow${capitalize(resources.environment)}ApprovedBedrockModel`,
+      sid: `Allow${capitalize(resources.environment)}ApprovedBedrockInferenceProfile`,
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
-      resources: [bedrockModelArn],
+      resources: [inferenceProfileArn],
       conditions: accessClass('application'),
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}ApprovedBedrockProfileModels`,
+      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+      resources: [foundationModelArn],
+      conditions: {
+        StringEquals: {
+          'aws:PrincipalTag/SOCBOTAccessClass': 'application',
+          'bedrock:InferenceProfileArn': inferenceProfileArn,
+        },
+      },
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApplicationFunctions`,
@@ -492,9 +540,24 @@ export function runtimeBoundaryStatements(
       conditions: accessClass('query'),
     }),
     new PolicyStatement({
-      sid: `Allow${capitalize(resources.environment)}AthenaResultAccess`,
-      actions: ['s3:AbortMultipartUpload', 's3:GetBucketLocation', 's3:GetObject', 's3:ListBucket', 's3:PutObject'],
-      resources: [dataBucketArn, `${dataBucketArn}/athena-results/*`],
+      sid: `Allow${capitalize(resources.environment)}QueryBucketLocation`,
+      actions: ['s3:GetBucketLocation'],
+      resources: [dataBucketArn],
+      conditions: accessClass('query'),
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}AthenaResultListing`,
+      actions: ['s3:ListBucket'],
+      resources: [dataBucketArn],
+      conditions: {
+        StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': 'query' },
+        StringLike: { 's3:prefix': ['athena-results', 'athena-results/*'] },
+      },
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}AthenaResultObjects`,
+      actions: ['s3:AbortMultipartUpload', 's3:GetObject', 's3:PutObject'],
+      resources: [`${dataBucketArn}/athena-results/*`],
       conditions: accessClass('query'),
     }),
     new PolicyStatement({
@@ -508,10 +571,26 @@ export function runtimeBoundaryStatements(
       conditions: accessClass('glue'),
     }),
     new PolicyStatement({
-      sid: `Allow${capitalize(resources.environment)}GlueSourceAndDestinationPrefixes`,
-      actions: ['s3:GetBucketLocation', 's3:ListBucket', 's3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+      sid: `Allow${capitalize(resources.environment)}GlueBucketLocation`,
+      actions: ['s3:GetBucketLocation'],
+      resources: [dataBucketArn],
+      conditions: accessClass('glue'),
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}GluePrefixListing`,
+      actions: ['s3:ListBucket'],
+      resources: [dataBucketArn],
+      conditions: {
+        StringEquals: { 'aws:PrincipalTag/SOCBOTAccessClass': 'glue' },
+        StringLike: {
+          's3:prefix': ['raw', 'raw/*', 'normalized', 'normalized/*', 'quarantine', 'quarantine/*'],
+        },
+      },
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}GlueSourceAndDestinationObjects`,
+      actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
       resources: [
-        dataBucketArn,
         `${dataBucketArn}/raw/*`,
         `${dataBucketArn}/normalized/*`,
         `${dataBucketArn}/quarantine/*`,

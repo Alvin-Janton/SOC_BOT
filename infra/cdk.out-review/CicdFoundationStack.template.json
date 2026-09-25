@@ -1,0 +1,4483 @@
+{
+ "Description": "Account-level GitHub OIDC and CI/CD IAM foundation for SOC Bot",
+ "Resources": {
+  "GitHubOidcProvider": {
+   "Type": "AWS::IAM::OIDCProvider",
+   "Properties": {
+    "ClientIdList": [
+     "sts.amazonaws.com"
+    ],
+    "Tags": [
+     {
+      "Key": "ManagedBy",
+      "Value": "CDK"
+     },
+     {
+      "Key": "Project",
+      "Value": "SOC_BOT"
+     }
+    ],
+    "Url": "https://token.actions.githubusercontent.com"
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/GitHubOidcProvider"
+   }
+  },
+  "DevRuntimeBoundary1EC87F07": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEV_RUNTIME_BOUNDARY",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":logs:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":log-group:*SOC-BOT-DEV-*:*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevRuntimeLogging"
+      },
+      {
+       "Action": "cloudwatch:PutMetricData",
+       "Condition": {
+        "StringEquals": {
+         "cloudwatch:namespace": "SOC_BOT/dev"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "AllowDevRuntimeMetrics"
+      },
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:UpdateItem"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":dynamodb:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":table/SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevApplicationState"
+      },
+      {
+       "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":bedrock:us-east-1:",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":inference-profile/us.anthropic.claude-sonnet-4-6"
+         ]
+        ]
+       },
+       "Sid": "AllowDevApprovedBedrockInferenceProfile"
+      },
+      {
+       "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application",
+         "bedrock:InferenceProfileArn": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":bedrock:us-east-1:",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":inference-profile/us.anthropic.claude-sonnet-4-6"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":bedrock:*::foundation-model/anthropic.claude-sonnet-4-6"
+         ]
+        ]
+       },
+       "Sid": "AllowDevApprovedBedrockProfileModels"
+      },
+      {
+       "Action": "lambda:InvokeFunction",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":lambda:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":function:SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevApplicationFunctions"
+      },
+      {
+       "Action": "s3:GetObject",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          },
+          "/playbooks/*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevPlaybookReads"
+      },
+      {
+       "Action": [
+        "cognito-idp:AdminInitiateAuth",
+        "cognito-idp:AdminRespondToAuthChallenge"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cognito-idp:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":userpool/*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevCognitoAuthentication"
+      },
+      {
+       "Action": [
+        "athena:GetQueryExecution",
+        "athena:GetQueryResults",
+        "athena:StartQueryExecution",
+        "athena:StopQueryExecution"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":athena:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":workgroup/SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevDedicatedAthenaQueries"
+      },
+      {
+       "Action": [
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetPartitions",
+        "glue:GetTable",
+        "glue:GetTables"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":catalog"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":database/soc_bot_dev*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":table/soc_bot_dev*/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AllowDevQueryCatalogMetadata"
+      },
+      {
+       "Action": "lakeformation:GetDataAccess",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "AllowDevLakeFormationDataAccess"
+      },
+      {
+       "Action": "s3:GetBucketLocation",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDevQueryBucketLocation"
+      },
+      {
+       "Action": "s3:ListBucket",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        },
+        "StringLike": {
+         "s3:prefix": [
+          "athena-results",
+          "athena-results/*"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDevAthenaResultListing"
+      },
+      {
+       "Action": [
+        "s3:AbortMultipartUpload",
+        "s3:GetObject",
+        "s3:PutObject"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          },
+          "/athena-results/*"
+         ]
+        ]
+       },
+       "Sid": "AllowDevAthenaResultObjects"
+      },
+      {
+       "Action": [
+        "glue:BatchCreatePartition",
+        "glue:BatchDeletePartition",
+        "glue:BatchGetPartition",
+        "glue:CreatePartition",
+        "glue:GetDatabase",
+        "glue:GetPartition",
+        "glue:GetPartitions",
+        "glue:GetTable",
+        "glue:UpdatePartition",
+        "glue:UpdateTable"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":catalog"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":database/soc_bot_dev*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":table/soc_bot_dev*/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AllowDevGlueCatalogWrites"
+      },
+      {
+       "Action": "s3:GetBucketLocation",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDevGlueBucketLocation"
+      },
+      {
+       "Action": "s3:ListBucket",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        },
+        "StringLike": {
+         "s3:prefix": [
+          "raw",
+          "raw/*",
+          "normalized",
+          "normalized/*",
+          "quarantine",
+          "quarantine/*"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDevGluePrefixListing"
+      },
+      {
+       "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:PutObject"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-dev-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/normalized/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-dev-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/quarantine/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-dev-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/raw/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AllowDevGlueSourceAndDestinationObjects"
+      },
+      {
+       "Action": "s3:*",
+       "Effect": "Deny",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-dev-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/evaluation"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-dev-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/evaluation/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "DenyDevEvaluationGroundTruth"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevRuntimeBoundary/Resource"
+   }
+  },
+  "DevDataAnalyticsPolicy2171A662": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEV_CFN_DATA_ANALYTICS",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:DeleteBucketPolicy",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketTagging",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:ListBucket",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketTagging",
+        "s3:PutBucketVersioning",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutLifecycleConfiguration"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevDataBuckets"
+      },
+      {
+       "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:PutObject"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-dev-*/*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevDataBucketObjects"
+      },
+      {
+       "Action": [
+        "glue:CreateDatabase",
+        "glue:CreateJob",
+        "glue:CreateTable",
+        "glue:CreateTrigger",
+        "glue:DeleteDatabase",
+        "glue:DeleteJob",
+        "glue:DeleteTable",
+        "glue:DeleteTrigger",
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetJob",
+        "glue:GetJobs",
+        "glue:GetTable",
+        "glue:GetTables",
+        "glue:GetTrigger",
+        "glue:GetTriggers",
+        "glue:TagResource",
+        "glue:UntagResource",
+        "glue:UpdateDatabase",
+        "glue:UpdateJob",
+        "glue:UpdateTable",
+        "glue:UpdateTrigger"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":catalog"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":database/soc_bot_dev*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":job/SOC-BOT-DEV-*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":table/soc_bot_dev*/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":trigger/SOC-BOT-DEV-*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "ManageDevGlueCatalogResources"
+      },
+      {
+       "Action": [
+        "athena:CreateWorkGroup",
+        "athena:DeleteWorkGroup",
+        "athena:GetWorkGroup",
+        "athena:TagResource",
+        "athena:UntagResource",
+        "athena:UpdateWorkGroup"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":athena:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":workgroup/SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevAthenaWorkgroups"
+      },
+      {
+       "Action": [
+        "lakeformation:DeregisterResource",
+        "lakeformation:GrantPermissions",
+        "lakeformation:ListPermissions",
+        "lakeformation:RegisterResource",
+        "lakeformation:RevokePermissions"
+       ],
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "ManageDevLakeFormationConfiguration"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevDataAnalyticsPolicy/Resource"
+   }
+  },
+  "DevAiApplicationPolicyBE31ABF3": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEV_CFN_AI_APPLICATION",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "lambda:AddPermission",
+        "lambda:CreateFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:DeleteFunction",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:GetFunctionUrlConfig",
+        "lambda:ListTags",
+        "lambda:PublishVersion",
+        "lambda:RemovePermission",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:UpdateFunctionUrlConfig"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":lambda:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":function:SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevLambdaFunctions"
+      },
+      {
+       "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:ListTagsOfResource",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":dynamodb:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":table/SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevDynamoDbTables"
+      },
+      {
+       "Action": "s3:GetObject",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::cdk-hnb659fds-assets-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          },
+          "/*"
+         ]
+        ]
+       },
+       "Sid": "ReadBootstrapAssetsForDevFunctions"
+      },
+      {
+       "Action": [
+        "events:DeleteRule",
+        "events:DescribeRule",
+        "events:DisableRule",
+        "events:EnableRule",
+        "events:ListTagsForResource",
+        "events:ListTargetsByRule",
+        "events:PutRule",
+        "events:PutTargets",
+        "events:RemoveTargets",
+        "events:TagResource",
+        "events:UntagResource"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":events:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":rule/SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevEventSchedules"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevAiApplicationPolicy/Resource"
+   }
+  },
+  "DevFrontendApiPolicy8023E687": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEV_CFN_FRONTEND_API",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "apigateway:POST",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":apigateway:",
+          {
+           "Ref": "AWS::Region"
+          },
+          "::/restapis"
+         ]
+        ]
+       },
+       "Sid": "CreateTaggedDevApiGateway"
+      },
+      {
+       "Action": [
+        "apigateway:DELETE",
+        "apigateway:GET",
+        "apigateway:PATCH",
+        "apigateway:POST",
+        "apigateway:PUT"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:ResourceTag/Project": "SOC_BOT",
+         "aws:ResourceTag/Environment": "dev",
+         "aws:ResourceTag/ManagedBy": "CDK"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":apigateway:",
+          {
+           "Ref": "AWS::Region"
+          },
+          "::/restapis/*"
+         ]
+        ]
+       },
+       "Sid": "ManageTaggedDevApiGateway"
+      },
+      {
+       "Action": "apigateway:PUT",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":apigateway:",
+          {
+           "Ref": "AWS::Region"
+          },
+          "::/tags/*"
+         ]
+        ]
+       },
+       "Sid": "TagDevApiGateway"
+      },
+      {
+       "Action": [
+        "cognito-idp:AddCustomAttributes",
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DeleteUserPool",
+        "cognito-idp:DeleteUserPoolClient",
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:UpdateUserPoolClient"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:ResourceTag/Project": "SOC_BOT",
+         "aws:ResourceTag/Environment": "dev",
+         "aws:ResourceTag/ManagedBy": "CDK"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cognito-idp:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":userpool/*"
+         ]
+        ]
+       },
+       "Sid": "ManageTaggedDevCognitoUserPools"
+      },
+      {
+       "Action": "cognito-idp:CreateUserPool",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "CreateTaggedDevCognitoUserPool"
+      },
+      {
+       "Action": "cognito-idp:TagResource",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cognito-idp:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":userpool/*"
+         ]
+        ]
+       },
+       "Sid": "TagDevCognitoUserPools"
+      },
+      {
+       "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:TagResource"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "CreateTaggedDevCloudFrontDistribution"
+      },
+      {
+       "Action": [
+        "cloudfront:DeleteDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:ResourceTag/Project": "SOC_BOT",
+         "aws:ResourceTag/Environment": "dev",
+         "aws:ResourceTag/ManagedBy": "CDK"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cloudfront::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":distribution/*"
+         ]
+        ]
+       },
+       "Sid": "ManageTaggedDevCloudFrontDistributions"
+      },
+      {
+       "Action": [
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:GetOriginAccessControlConfig",
+        "cloudfront:UpdateOriginAccessControl"
+       ],
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "ManageDevOriginAccessControls"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevFrontendApiPolicy/Resource"
+   }
+  },
+  "DevObservabilityPolicyE3C318DF": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEV_CFN_OBSERVABILITY",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DeleteRetentionPolicy",
+        "logs:ListTagsForResource",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":logs:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":log-group:*SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevLogGroups"
+      },
+      {
+       "Action": "logs:DescribeLogGroups",
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "DescribeDevLogGroups"
+      },
+      {
+       "Action": [
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cloudwatch:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":alarm:SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevAlarms"
+      },
+      {
+       "Action": [
+        "budgets:ListTagsForResource",
+        "budgets:ModifyBudget",
+        "budgets:TagResource",
+        "budgets:UntagResource",
+        "budgets:ViewBudget"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":budgets::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":budget/SOC-BOT-DEV-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevBudget"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevObservabilityPolicy/Resource"
+   }
+  },
+  "DevRuntimeIamPolicy13AB3341": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEV_CFN_RUNTIME_IAM",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "iam:CreateRole",
+       "Condition": {
+        "StringEquals": {
+         "iam:PermissionsBoundary": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":iam::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":policy/SOC_BOT_DEV_RUNTIME_BOUNDARY"
+           ]
+          ]
+         },
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy",
+          "SOCBOTAccessClass"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEV_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "CreateTaggedBoundedDevRuntimeRoles"
+      },
+      {
+       "Action": [
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+        "iam:PutRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:UpdateRoleDescription"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEV_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "ManageDevRuntimeRoles"
+      },
+      {
+       "Action": [
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutRolePermissionsBoundary"
+       ],
+       "Condition": {
+        "StringEqualsIfExists": {
+         "iam:PermissionsBoundary": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":iam::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":policy/SOC_BOT_DEV_RUNTIME_BOUNDARY"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEV_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "ApplyOnlyDevRuntimeBoundary"
+      },
+      {
+       "Action": "iam:CreatePolicy",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "dev",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":policy/SOC_BOT_DEV_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "CreateTaggedDevRuntimePolicies"
+      },
+      {
+       "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyTags",
+        "iam:ListPolicyVersions",
+        "iam:SetDefaultPolicyVersion",
+        "iam:TagPolicy",
+        "iam:UntagPolicy"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":policy/SOC_BOT_DEV_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "ManageOnlyDevRuntimePolicies"
+      },
+      {
+       "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":policy/SOC_BOT_DEV_RUNTIME_*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":role/SOC_BOT_DEV_RUNTIME_*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AttachOnlyDevRuntimePolicies"
+      },
+      {
+       "Action": "iam:PassRole",
+       "Condition": {
+        "StringEquals": {
+         "iam:PassedToService": [
+          "lambda.amazonaws.com",
+          "glue.amazonaws.com",
+          "apigateway.amazonaws.com"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEV_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "PassOnlyDevRuntimeRolesToApprovedServices"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevRuntimeIamPolicy/Resource"
+   }
+  },
+  "DevCloudFormationExecutionRole46BCF847": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "cloudformation.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "CloudFormation execution role for SOC Bot dev stacks",
+    "ManagedPolicyArns": [
+     {
+      "Ref": "DevDataAnalyticsPolicy2171A662"
+     },
+     {
+      "Ref": "DevAiApplicationPolicyBE31ABF3"
+     },
+     {
+      "Ref": "DevFrontendApiPolicy8023E687"
+     },
+     {
+      "Ref": "DevObservabilityPolicyE3C318DF"
+     },
+     {
+      "Ref": "DevRuntimeIamPolicy13AB3341"
+     }
+    ],
+    "MaxSessionDuration": 3600,
+    "RoleName": "SOC_BOT_DEV_CFN_EXEC",
+    "Tags": [
+     {
+      "Key": "Environment",
+      "Value": "dev"
+     },
+     {
+      "Key": "ManagedBy",
+      "Value": "CDK"
+     },
+     {
+      "Key": "Project",
+      "Value": "SOC_BOT"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevCloudFormationExecutionRole/Resource"
+   }
+  },
+  "DevDeployRole32239B31": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+        "StringEquals": {
+         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+         "token.actions.githubusercontent.com:sub": "repo:Alvin-Janton/SOC_BOT:environment:dev"
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Federated": {
+         "Fn::GetAtt": [
+          "GitHubOidcProvider",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "GitHub Actions deployment role for the SOC Bot dev environment",
+    "MaxSessionDuration": 3600,
+    "Policies": [
+     {
+      "PolicyDocument": {
+       "Statement": [
+        {
+         "Action": [
+          "cloudformation:CancelUpdateStack",
+          "cloudformation:ContinueUpdateRollback",
+          "cloudformation:CreateChangeSet",
+          "cloudformation:CreateStack",
+          "cloudformation:DeleteChangeSet",
+          "cloudformation:DeleteStack",
+          "cloudformation:DescribeChangeSet",
+          "cloudformation:DescribeStackEvents",
+          "cloudformation:DescribeStackResources",
+          "cloudformation:DescribeStacks",
+          "cloudformation:ExecuteChangeSet",
+          "cloudformation:GetTemplate",
+          "cloudformation:GetTemplateSummary",
+          "cloudformation:ListChangeSets",
+          "cloudformation:ListStackResources",
+          "cloudformation:RollbackStack",
+          "cloudformation:UpdateStack"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":cloudformation:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":stack/SOC-BOT-DEV-*/*"
+           ]
+          ]
+         },
+         "Sid": "ManageDevProjectStacks"
+        },
+        {
+         "Action": "iam:PassRole",
+         "Condition": {
+          "StringEquals": {
+           "iam:PassedToService": "cloudformation.amazonaws.com"
+          }
+         },
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":iam::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":role/SOC_BOT_DEV_CFN_EXEC"
+           ]
+          ]
+         },
+         "Sid": "PassOnlyDevCloudFormationExecutionRole"
+        },
+        {
+         "Action": "ssm:GetParameter",
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":ssm:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":parameter/cdk-bootstrap/hnb659fds/version"
+           ]
+          ]
+         },
+         "Sid": "ReadBootstrapVersion"
+        },
+        {
+         "Action": [
+          "s3:GetBucketLocation",
+          "s3:ListBucket"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::cdk-hnb659fds-assets-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            }
+           ]
+          ]
+         },
+         "Sid": "ListBootstrapFileAssets"
+        },
+        {
+         "Action": [
+          "s3:AbortMultipartUpload",
+          "s3:GetObject",
+          "s3:PutObject"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::cdk-hnb659fds-assets-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            },
+            "/*"
+           ]
+          ]
+         },
+         "Sid": "PublishBootstrapFileAssets"
+        },
+        {
+         "Action": [
+          "s3:GetBucketLocation",
+          "s3:ListBucket"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::soc-bot-dev-frontend-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            }
+           ]
+          ]
+         },
+         "Sid": "ListExactDevFrontendBucket"
+        },
+        {
+         "Action": [
+          "s3:DeleteObject",
+          "s3:GetObject",
+          "s3:PutObject"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::soc-bot-dev-frontend-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            },
+            "/*"
+           ]
+          ]
+         },
+         "Sid": "UploadExactDevFrontendBucket"
+        },
+        {
+         "Action": "cloudfront:CreateInvalidation",
+         "Condition": {
+          "StringEquals": {
+           "aws:ResourceTag/Project": "SOC_BOT",
+           "aws:ResourceTag/Environment": "dev"
+          }
+         },
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":cloudfront::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":distribution/*"
+           ]
+          ]
+         },
+         "Sid": "InvalidateTaggedDevDistributions"
+        }
+       ],
+       "Version": "2012-10-17"
+      },
+      "PolicyName": "SOC_BOT_DEV_DEPLOY_INLINE"
+     }
+    ],
+    "RoleName": "SOC_BOT_DEV_DEPLOY",
+    "Tags": [
+     {
+      "Key": "Environment",
+      "Value": "dev"
+     },
+     {
+      "Key": "ManagedBy",
+      "Value": "CDK"
+     },
+     {
+      "Key": "Project",
+      "Value": "SOC_BOT"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DevDeployRole/Resource"
+   }
+  },
+  "DemoRuntimeBoundary5472C889": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEMO_RUNTIME_BOUNDARY",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":logs:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":log-group:*SOC-BOT-DEMO-*:*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoRuntimeLogging"
+      },
+      {
+       "Action": "cloudwatch:PutMetricData",
+       "Condition": {
+        "StringEquals": {
+         "cloudwatch:namespace": "SOC_BOT/demo"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "AllowDemoRuntimeMetrics"
+      },
+      {
+       "Action": [
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:UpdateItem"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":dynamodb:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":table/SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoApplicationState"
+      },
+      {
+       "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":bedrock:us-east-1:",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":inference-profile/us.anthropic.claude-sonnet-4-6"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoApprovedBedrockInferenceProfile"
+      },
+      {
+       "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application",
+         "bedrock:InferenceProfileArn": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":bedrock:us-east-1:",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":inference-profile/us.anthropic.claude-sonnet-4-6"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":bedrock:*::foundation-model/anthropic.claude-sonnet-4-6"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoApprovedBedrockProfileModels"
+      },
+      {
+       "Action": "lambda:InvokeFunction",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":lambda:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":function:SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoApplicationFunctions"
+      },
+      {
+       "Action": "s3:GetObject",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          },
+          "/playbooks/*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoPlaybookReads"
+      },
+      {
+       "Action": [
+        "cognito-idp:AdminInitiateAuth",
+        "cognito-idp:AdminRespondToAuthChallenge"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "application"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cognito-idp:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":userpool/*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoCognitoAuthentication"
+      },
+      {
+       "Action": [
+        "athena:GetQueryExecution",
+        "athena:GetQueryResults",
+        "athena:StartQueryExecution",
+        "athena:StopQueryExecution"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":athena:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":workgroup/SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoDedicatedAthenaQueries"
+      },
+      {
+       "Action": [
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetPartitions",
+        "glue:GetTable",
+        "glue:GetTables"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":catalog"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":database/soc_bot_demo*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":table/soc_bot_demo*/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AllowDemoQueryCatalogMetadata"
+      },
+      {
+       "Action": "lakeformation:GetDataAccess",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "AllowDemoLakeFormationDataAccess"
+      },
+      {
+       "Action": "s3:GetBucketLocation",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDemoQueryBucketLocation"
+      },
+      {
+       "Action": "s3:ListBucket",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        },
+        "StringLike": {
+         "s3:prefix": [
+          "athena-results",
+          "athena-results/*"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDemoAthenaResultListing"
+      },
+      {
+       "Action": [
+        "s3:AbortMultipartUpload",
+        "s3:GetObject",
+        "s3:PutObject"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "query"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          },
+          "/athena-results/*"
+         ]
+        ]
+       },
+       "Sid": "AllowDemoAthenaResultObjects"
+      },
+      {
+       "Action": [
+        "glue:BatchCreatePartition",
+        "glue:BatchDeletePartition",
+        "glue:BatchGetPartition",
+        "glue:CreatePartition",
+        "glue:GetDatabase",
+        "glue:GetPartition",
+        "glue:GetPartitions",
+        "glue:GetTable",
+        "glue:UpdatePartition",
+        "glue:UpdateTable"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":catalog"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":database/soc_bot_demo*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":table/soc_bot_demo*/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AllowDemoGlueCatalogWrites"
+      },
+      {
+       "Action": "s3:GetBucketLocation",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDemoGlueBucketLocation"
+      },
+      {
+       "Action": "s3:ListBucket",
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        },
+        "StringLike": {
+         "s3:prefix": [
+          "raw",
+          "raw/*",
+          "normalized",
+          "normalized/*",
+          "quarantine",
+          "quarantine/*"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-data-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          }
+         ]
+        ]
+       },
+       "Sid": "AllowDemoGluePrefixListing"
+      },
+      {
+       "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:PutObject"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:PrincipalTag/SOCBOTAccessClass": "glue"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-demo-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/normalized/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-demo-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/quarantine/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-demo-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/raw/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AllowDemoGlueSourceAndDestinationObjects"
+      },
+      {
+       "Action": "s3:*",
+       "Effect": "Deny",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-demo-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/evaluation"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":s3:::soc-bot-demo-data-",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           "-",
+           {
+            "Ref": "AWS::Region"
+           },
+           "/evaluation/*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "DenyDemoEvaluationGroundTruth"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoRuntimeBoundary/Resource"
+   }
+  },
+  "DemoDataAnalyticsPolicy11A9CD3F": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEMO_CFN_DATA_ANALYTICS",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:DeleteBucketPolicy",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketTagging",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:ListBucket",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketTagging",
+        "s3:PutBucketVersioning",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutLifecycleConfiguration"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoDataBuckets"
+      },
+      {
+       "Action": [
+        "s3:DeleteObject",
+        "s3:GetObject",
+        "s3:PutObject"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::soc-bot-demo-*/*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoDataBucketObjects"
+      },
+      {
+       "Action": [
+        "glue:CreateDatabase",
+        "glue:CreateJob",
+        "glue:CreateTable",
+        "glue:CreateTrigger",
+        "glue:DeleteDatabase",
+        "glue:DeleteJob",
+        "glue:DeleteTable",
+        "glue:DeleteTrigger",
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetJob",
+        "glue:GetJobs",
+        "glue:GetTable",
+        "glue:GetTables",
+        "glue:GetTrigger",
+        "glue:GetTriggers",
+        "glue:TagResource",
+        "glue:UntagResource",
+        "glue:UpdateDatabase",
+        "glue:UpdateJob",
+        "glue:UpdateTable",
+        "glue:UpdateTrigger"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":catalog"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":database/soc_bot_demo*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":job/SOC-BOT-DEMO-*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":table/soc_bot_demo*/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":glue:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":trigger/SOC-BOT-DEMO-*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "ManageDemoGlueCatalogResources"
+      },
+      {
+       "Action": [
+        "athena:CreateWorkGroup",
+        "athena:DeleteWorkGroup",
+        "athena:GetWorkGroup",
+        "athena:TagResource",
+        "athena:UntagResource",
+        "athena:UpdateWorkGroup"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":athena:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":workgroup/SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoAthenaWorkgroups"
+      },
+      {
+       "Action": [
+        "lakeformation:DeregisterResource",
+        "lakeformation:GrantPermissions",
+        "lakeformation:ListPermissions",
+        "lakeformation:RegisterResource",
+        "lakeformation:RevokePermissions"
+       ],
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "ManageDemoLakeFormationConfiguration"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoDataAnalyticsPolicy/Resource"
+   }
+  },
+  "DemoAiApplicationPolicyEA3D92E9": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEMO_CFN_AI_APPLICATION",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "lambda:AddPermission",
+        "lambda:CreateFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:DeleteFunction",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:GetFunctionUrlConfig",
+        "lambda:ListTags",
+        "lambda:PublishVersion",
+        "lambda:RemovePermission",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:UpdateFunctionUrlConfig"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":lambda:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":function:SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoLambdaFunctions"
+      },
+      {
+       "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:ListTagsOfResource",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":dynamodb:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":table/SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoDynamoDbTables"
+      },
+      {
+       "Action": "s3:GetObject",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":s3:::cdk-hnb659fds-assets-",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          "-",
+          {
+           "Ref": "AWS::Region"
+          },
+          "/*"
+         ]
+        ]
+       },
+       "Sid": "ReadBootstrapAssetsForDemoFunctions"
+      },
+      {
+       "Action": [
+        "events:DeleteRule",
+        "events:DescribeRule",
+        "events:DisableRule",
+        "events:EnableRule",
+        "events:ListTagsForResource",
+        "events:ListTargetsByRule",
+        "events:PutRule",
+        "events:PutTargets",
+        "events:RemoveTargets",
+        "events:TagResource",
+        "events:UntagResource"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":events:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":rule/SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoEventSchedules"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoAiApplicationPolicy/Resource"
+   }
+  },
+  "DemoFrontendApiPolicy66753B06": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEMO_CFN_FRONTEND_API",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "apigateway:POST",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":apigateway:",
+          {
+           "Ref": "AWS::Region"
+          },
+          "::/restapis"
+         ]
+        ]
+       },
+       "Sid": "CreateTaggedDemoApiGateway"
+      },
+      {
+       "Action": [
+        "apigateway:DELETE",
+        "apigateway:GET",
+        "apigateway:PATCH",
+        "apigateway:POST",
+        "apigateway:PUT"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:ResourceTag/Project": "SOC_BOT",
+         "aws:ResourceTag/Environment": "demo",
+         "aws:ResourceTag/ManagedBy": "CDK"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":apigateway:",
+          {
+           "Ref": "AWS::Region"
+          },
+          "::/restapis/*"
+         ]
+        ]
+       },
+       "Sid": "ManageTaggedDemoApiGateway"
+      },
+      {
+       "Action": "apigateway:PUT",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":apigateway:",
+          {
+           "Ref": "AWS::Region"
+          },
+          "::/tags/*"
+         ]
+        ]
+       },
+       "Sid": "TagDemoApiGateway"
+      },
+      {
+       "Action": [
+        "cognito-idp:AddCustomAttributes",
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DeleteUserPool",
+        "cognito-idp:DeleteUserPoolClient",
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:UpdateUserPoolClient"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:ResourceTag/Project": "SOC_BOT",
+         "aws:ResourceTag/Environment": "demo",
+         "aws:ResourceTag/ManagedBy": "CDK"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cognito-idp:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":userpool/*"
+         ]
+        ]
+       },
+       "Sid": "ManageTaggedDemoCognitoUserPools"
+      },
+      {
+       "Action": "cognito-idp:CreateUserPool",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "CreateTaggedDemoCognitoUserPool"
+      },
+      {
+       "Action": "cognito-idp:TagResource",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cognito-idp:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":userpool/*"
+         ]
+        ]
+       },
+       "Sid": "TagDemoCognitoUserPools"
+      },
+      {
+       "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:TagResource"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "CreateTaggedDemoCloudFrontDistribution"
+      },
+      {
+       "Action": [
+        "cloudfront:DeleteDistribution",
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "aws:ResourceTag/Project": "SOC_BOT",
+         "aws:ResourceTag/Environment": "demo",
+         "aws:ResourceTag/ManagedBy": "CDK"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cloudfront::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":distribution/*"
+         ]
+        ]
+       },
+       "Sid": "ManageTaggedDemoCloudFrontDistributions"
+      },
+      {
+       "Action": [
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:GetOriginAccessControlConfig",
+        "cloudfront:UpdateOriginAccessControl"
+       ],
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "ManageDemoOriginAccessControls"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoFrontendApiPolicy/Resource"
+   }
+  },
+  "DemoObservabilityPolicyD4622784": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEMO_CFN_OBSERVABILITY",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DeleteRetentionPolicy",
+        "logs:ListTagsForResource",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":logs:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":log-group:*SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoLogGroups"
+      },
+      {
+       "Action": "logs:DescribeLogGroups",
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "DescribeDemoLogGroups"
+      },
+      {
+       "Action": [
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":cloudwatch:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":alarm:SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoAlarms"
+      },
+      {
+       "Action": [
+        "budgets:ListTagsForResource",
+        "budgets:ModifyBudget",
+        "budgets:TagResource",
+        "budgets:UntagResource",
+        "budgets:ViewBudget"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":budgets::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":budget/SOC-BOT-DEMO-*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoBudget"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoObservabilityPolicy/Resource"
+   }
+  },
+  "DemoRuntimeIamPolicy5C65CACA": {
+   "Type": "AWS::IAM::ManagedPolicy",
+   "Properties": {
+    "Description": "",
+    "ManagedPolicyName": "SOC_BOT_DEMO_CFN_RUNTIME_IAM",
+    "Path": "/",
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "iam:CreateRole",
+       "Condition": {
+        "StringEquals": {
+         "iam:PermissionsBoundary": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":iam::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":policy/SOC_BOT_DEMO_RUNTIME_BOUNDARY"
+           ]
+          ]
+         },
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy",
+          "SOCBOTAccessClass"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEMO_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "CreateTaggedBoundedDemoRuntimeRoles"
+      },
+      {
+       "Action": [
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+        "iam:PutRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:UpdateRoleDescription"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEMO_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "ManageDemoRuntimeRoles"
+      },
+      {
+       "Action": [
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutRolePermissionsBoundary"
+       ],
+       "Condition": {
+        "StringEqualsIfExists": {
+         "iam:PermissionsBoundary": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":iam::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":policy/SOC_BOT_DEMO_RUNTIME_BOUNDARY"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEMO_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "ApplyOnlyDemoRuntimeBoundary"
+      },
+      {
+       "Action": "iam:CreatePolicy",
+       "Condition": {
+        "StringEquals": {
+         "aws:RequestTag/Project": "SOC_BOT",
+         "aws:RequestTag/Environment": "demo",
+         "aws:RequestTag/ManagedBy": "CDK"
+        },
+        "ForAllValues:StringEquals": {
+         "aws:TagKeys": [
+          "Project",
+          "Environment",
+          "ManagedBy"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":policy/SOC_BOT_DEMO_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "CreateTaggedDemoRuntimePolicies"
+      },
+      {
+       "Action": [
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyTags",
+        "iam:ListPolicyVersions",
+        "iam:SetDefaultPolicyVersion",
+        "iam:TagPolicy",
+        "iam:UntagPolicy"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":policy/SOC_BOT_DEMO_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "ManageOnlyDemoRuntimePolicies"
+      },
+      {
+       "Action": [
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":policy/SOC_BOT_DEMO_RUNTIME_*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":role/SOC_BOT_DEMO_RUNTIME_*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "AttachOnlyDemoRuntimePolicies"
+      },
+      {
+       "Action": "iam:PassRole",
+       "Condition": {
+        "StringEquals": {
+         "iam:PassedToService": [
+          "lambda.amazonaws.com",
+          "glue.amazonaws.com",
+          "apigateway.amazonaws.com"
+         ]
+        }
+       },
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":iam::",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":role/SOC_BOT_DEMO_RUNTIME_*"
+         ]
+        ]
+       },
+       "Sid": "PassOnlyDemoRuntimeRolesToApprovedServices"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoRuntimeIamPolicy/Resource"
+   }
+  },
+  "DemoCloudFormationExecutionRole1F9BB07A": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "cloudformation.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "CloudFormation execution role for SOC Bot demo stacks",
+    "ManagedPolicyArns": [
+     {
+      "Ref": "DemoDataAnalyticsPolicy11A9CD3F"
+     },
+     {
+      "Ref": "DemoAiApplicationPolicyEA3D92E9"
+     },
+     {
+      "Ref": "DemoFrontendApiPolicy66753B06"
+     },
+     {
+      "Ref": "DemoObservabilityPolicyD4622784"
+     },
+     {
+      "Ref": "DemoRuntimeIamPolicy5C65CACA"
+     }
+    ],
+    "MaxSessionDuration": 3600,
+    "RoleName": "SOC_BOT_DEMO_CFN_EXEC",
+    "Tags": [
+     {
+      "Key": "Environment",
+      "Value": "demo"
+     },
+     {
+      "Key": "ManagedBy",
+      "Value": "CDK"
+     },
+     {
+      "Key": "Project",
+      "Value": "SOC_BOT"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoCloudFormationExecutionRole/Resource"
+   }
+  },
+  "DemoDeployRoleD73D123F": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+        "StringEquals": {
+         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+         "token.actions.githubusercontent.com:sub": "repo:Alvin-Janton/SOC_BOT:environment:demo"
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Federated": {
+         "Fn::GetAtt": [
+          "GitHubOidcProvider",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "GitHub Actions deployment role for the SOC Bot demo environment",
+    "MaxSessionDuration": 3600,
+    "Policies": [
+     {
+      "PolicyDocument": {
+       "Statement": [
+        {
+         "Action": [
+          "cloudformation:CancelUpdateStack",
+          "cloudformation:ContinueUpdateRollback",
+          "cloudformation:CreateChangeSet",
+          "cloudformation:CreateStack",
+          "cloudformation:DeleteChangeSet",
+          "cloudformation:DescribeChangeSet",
+          "cloudformation:DescribeStackEvents",
+          "cloudformation:DescribeStackResources",
+          "cloudformation:DescribeStacks",
+          "cloudformation:ExecuteChangeSet",
+          "cloudformation:GetTemplate",
+          "cloudformation:GetTemplateSummary",
+          "cloudformation:ListChangeSets",
+          "cloudformation:ListStackResources",
+          "cloudformation:RollbackStack",
+          "cloudformation:UpdateStack"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":cloudformation:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":stack/SOC-BOT-DEMO-*/*"
+           ]
+          ]
+         },
+         "Sid": "ManageDemoProjectStacks"
+        },
+        {
+         "Action": "iam:PassRole",
+         "Condition": {
+          "StringEquals": {
+           "iam:PassedToService": "cloudformation.amazonaws.com"
+          }
+         },
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":iam::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":role/SOC_BOT_DEMO_CFN_EXEC"
+           ]
+          ]
+         },
+         "Sid": "PassOnlyDemoCloudFormationExecutionRole"
+        },
+        {
+         "Action": "ssm:GetParameter",
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":ssm:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":parameter/cdk-bootstrap/hnb659fds/version"
+           ]
+          ]
+         },
+         "Sid": "ReadBootstrapVersion"
+        },
+        {
+         "Action": [
+          "s3:GetBucketLocation",
+          "s3:ListBucket"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::cdk-hnb659fds-assets-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            }
+           ]
+          ]
+         },
+         "Sid": "ListBootstrapFileAssets"
+        },
+        {
+         "Action": [
+          "s3:AbortMultipartUpload",
+          "s3:GetObject",
+          "s3:PutObject"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::cdk-hnb659fds-assets-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            },
+            "/*"
+           ]
+          ]
+         },
+         "Sid": "PublishBootstrapFileAssets"
+        },
+        {
+         "Action": [
+          "s3:GetBucketLocation",
+          "s3:ListBucket"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::soc-bot-demo-frontend-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            }
+           ]
+          ]
+         },
+         "Sid": "ListExactDemoFrontendBucket"
+        },
+        {
+         "Action": [
+          "s3:DeleteObject",
+          "s3:GetObject",
+          "s3:PutObject"
+         ],
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":s3:::soc-bot-demo-frontend-",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            "-",
+            {
+             "Ref": "AWS::Region"
+            },
+            "/*"
+           ]
+          ]
+         },
+         "Sid": "UploadExactDemoFrontendBucket"
+        },
+        {
+         "Action": "cloudfront:CreateInvalidation",
+         "Condition": {
+          "StringEquals": {
+           "aws:ResourceTag/Project": "SOC_BOT",
+           "aws:ResourceTag/Environment": "demo"
+          }
+         },
+         "Effect": "Allow",
+         "Resource": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":cloudfront::",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":distribution/*"
+           ]
+          ]
+         },
+         "Sid": "InvalidateTaggedDemoDistributions"
+        }
+       ],
+       "Version": "2012-10-17"
+      },
+      "PolicyName": "SOC_BOT_DEMO_DEPLOY_INLINE"
+     }
+    ],
+    "RoleName": "SOC_BOT_DEMO_DEPLOY",
+    "Tags": [
+     {
+      "Key": "Environment",
+      "Value": "demo"
+     },
+     {
+      "Key": "ManagedBy",
+      "Value": "CDK"
+     },
+     {
+      "Key": "Project",
+      "Value": "SOC_BOT"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/DemoDeployRole/Resource"
+   }
+  },
+  "CDKMetadata": {
+   "Type": "AWS::CDK::Metadata",
+   "Properties": {
+    "Analytics": "v2:deflate64:H4sIAAAAAAAA/1WOvQqDMBRGn8U93qZB6Fzs0qEoCl3LrYnlakwkP0oR372knTqdwxk+PgHixIFnuPq8k2Ou6QlbG7AbGa7+QTjBVvamul7K2tmFpHLshgZfStZWU/dmZW/+Q2O1SjVxT1LFMMewM2OlgsEfFlGAOALPBk+Uu2gCTQqaHxmH9Gf+bt1Rk8RA1sB59a3VMbn/AMV0J1W1AAAA"
+   },
+   "Metadata": {
+    "aws:cdk:path": "CicdFoundationStack/CDKMetadata/Default"
+   }
+  }
+ },
+ "Outputs": {
+  "GitHubOidcProviderArn": {
+   "Value": {
+    "Fn::GetAtt": [
+     "GitHubOidcProvider",
+     "Arn"
+    ]
+   }
+  },
+  "DevDeployRoleArn": {
+   "Value": {
+    "Fn::GetAtt": [
+     "DevDeployRole32239B31",
+     "Arn"
+    ]
+   }
+  },
+  "DemoDeployRoleArn": {
+   "Value": {
+    "Fn::GetAtt": [
+     "DemoDeployRoleD73D123F",
+     "Arn"
+    ]
+   }
+  },
+  "DevCloudFormationExecutionRoleArn": {
+   "Value": {
+    "Fn::GetAtt": [
+     "DevCloudFormationExecutionRole46BCF847",
+     "Arn"
+    ]
+   }
+  },
+  "DemoCloudFormationExecutionRoleArn": {
+   "Value": {
+    "Fn::GetAtt": [
+     "DemoCloudFormationExecutionRole1F9BB07A",
+     "Arn"
+    ]
+   }
+  }
+ },
+ "Parameters": {
+  "BootstrapVersion": {
+   "Type": "AWS::SSM::Parameter::Value<String>",
+   "Default": "/cdk-bootstrap/hnb659fds/version",
+   "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+  }
+ },
+ "Rules": {
+  "CheckBootstrapVersion": {
+   "Assertions": [
+    {
+     "Assert": {
+      "Fn::Not": [
+       {
+        "Fn::Contains": [
+         [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5"
+         ],
+         {
+          "Ref": "BootstrapVersion"
+         }
+        ]
+       }
+      ]
+     },
+     "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+    }
+   ]
+  }
+ }
+}

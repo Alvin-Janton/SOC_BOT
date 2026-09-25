@@ -1,6 +1,7 @@
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { CicdFoundationStack } from '../lib/cicd-foundation-stack';
+import { BEDROCK_INFERENCE_PROFILE } from '../lib/policy-statements';
 
 type JsonObject = Record<string, any>;
 
@@ -53,6 +54,16 @@ function statements(template: JsonObject): JsonObject[] {
 /** Normalizes a policy statement's Action property to an array for inspection. */
 function actions(statement: JsonObject): string[] {
   return Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+}
+
+/** Finds a statement by SID within a synthesized managed policy. */
+function statementBySid(policy: JsonObject, sid: string): JsonObject {
+  const statement = policy.Properties.PolicyDocument.Statement
+    .find((candidate: JsonObject) => candidate.Sid === sid);
+  if (!statement) {
+    throw new Error(`Missing statement ${sid}`);
+  }
+  return statement;
 }
 
 describe('CicdFoundationStack', () => {
@@ -139,6 +150,24 @@ describe('CicdFoundationStack', () => {
     ]));
   });
 
+  // Verifies each environment can pass only its own execution and runtime roles.
+  test.each(['DEV', 'DEMO'])('%s PassRole statements cannot cross environments', (upper) => {
+    const { template } = synthesize();
+    const other = upper === 'DEV' ? 'DEMO' : 'DEV';
+    const deploy = roleByName(template, `SOC_BOT_${upper}_DEPLOY`);
+    const runtime = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_RUNTIME_IAM`);
+    const deployPassRole = deploy.Properties.Policies[0].PolicyDocument.Statement
+      .find((statement: JsonObject) => actions(statement).includes('iam:PassRole'));
+    const runtimePassRole = runtime.Properties.PolicyDocument.Statement
+      .find((statement: JsonObject) => actions(statement).includes('iam:PassRole'));
+
+    expect(JSON.stringify(deployPassRole.Resource)).toContain(`SOC_BOT_${upper}_CFN_EXEC`);
+    expect(JSON.stringify(runtimePassRole.Resource)).toContain(`SOC_BOT_${upper}_RUNTIME_*`);
+    expect(JSON.stringify([deployPassRole.Resource, runtimePassRole.Resource])).not.toContain(
+      `SOC_BOT_${other}_`,
+    );
+  });
+
   // Verifies each execution role receives the five policies approved for its environment.
   test.each(['DEV', 'DEMO'])('%s execution role has exactly five matching managed policies', (upper) => {
     const { template } = synthesize();
@@ -191,18 +220,19 @@ describe('CicdFoundationStack', () => {
   test.each(['DEV', 'DEMO'])('%s runtime boundary denies evaluation access', (upper) => {
     const { template } = synthesize();
     const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
-    const deny = boundary.Properties.PolicyDocument.Statement
-      .find((statement: JsonObject) => statement.Effect === 'Deny');
+    const deny = statementBySid(
+      boundary,
+      `Deny${capitalize(upper.toLowerCase())}EvaluationGroundTruth`,
+    );
     expect(actions(deny)).toEqual(['s3:*']);
     expect(JSON.stringify(deny.Resource)).toContain('/evaluation');
     expect(JSON.stringify(deny.Resource)).toContain('/evaluation/*');
   });
 
-  // Verifies deployment inputs and externally consumed role/provider outputs remain present.
-  test('has the required parameter and five role/provider outputs', () => {
+  // Verifies the obsolete Bedrock parameter is absent and foundation outputs remain present.
+  test('has no Bedrock parameter and retains five role/provider outputs', () => {
     const { template } = synthesize();
-    expect(template.Parameters.ApprovedBedrockModelArn).toBeDefined();
-    expect(template.Parameters.ApprovedBedrockModelArn.Default).toBeUndefined();
+    expect(template.Parameters?.ApprovedBedrockModelArn).toBeUndefined();
     expect(Object.keys(template.Outputs)).toEqual(expect.arrayContaining([
       'GitHubOidcProviderArn',
       'DevDeployRoleArn',
@@ -210,6 +240,124 @@ describe('CicdFoundationStack', () => {
       'DevCloudFormationExecutionRoleArn',
       'DemoCloudFormationExecutionRoleArn',
     ]));
+  });
+
+  // Verifies frontend creation and lifecycle statements enforce ownership tags without fail-open conditions.
+  test.each([
+    ['DEV', 'dev'],
+    ['DEMO', 'demo'],
+  ])('%s frontend policy strictly isolates tagged resources', (upper, environment) => {
+    const { template } = synthesize();
+    const policy = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_FRONTEND_API`);
+    const serialized = JSON.stringify(policy);
+    const createSids = [
+      `CreateTagged${capitalize(environment)}ApiGateway`,
+      `CreateTagged${capitalize(environment)}CognitoUserPool`,
+      `CreateTagged${capitalize(environment)}CloudFrontDistribution`,
+    ];
+
+    expect(serialized).not.toContain('StringEqualsIfExists');
+    expect(serialized).not.toContain('UntagResource');
+    for (const sid of createSids) {
+      const create = statementBySid(policy, sid);
+      expect(create.Condition.StringEquals).toMatchObject({
+        'aws:RequestTag/Project': 'SOC_BOT',
+        'aws:RequestTag/Environment': environment,
+        'aws:RequestTag/ManagedBy': 'CDK',
+      });
+      expect(create.Condition['ForAllValues:StringEquals']['aws:TagKeys'])
+        .toEqual(['Project', 'Environment', 'ManagedBy']);
+    }
+
+    for (const sid of [
+      `ManageTagged${capitalize(environment)}ApiGateway`,
+      `ManageTagged${capitalize(environment)}CognitoUserPools`,
+      `ManageTagged${capitalize(environment)}CloudFrontDistributions`,
+    ]) {
+      expect(statementBySid(policy, sid).Condition.StringEquals).toMatchObject({
+        'aws:ResourceTag/Project': 'SOC_BOT',
+        'aws:ResourceTag/Environment': environment,
+        'aws:ResourceTag/ManagedBy': 'CDK',
+      });
+    }
+
+    const createDistribution = statementBySid(
+      policy,
+      `CreateTagged${capitalize(environment)}CloudFrontDistribution`,
+    );
+    const manageDistribution = statementBySid(
+      policy,
+      `ManageTagged${capitalize(environment)}CloudFrontDistributions`,
+    );
+    expect(createDistribution.Resource).toBe('*');
+    expect(JSON.stringify(manageDistribution.Resource)).toContain(':distribution/*');
+  });
+
+  // Verifies runtime S3 listing is limited to role-specific prefixes and evaluation remains inaccessible.
+  test.each([
+    ['DEV', 'dev'],
+    ['DEMO', 'demo'],
+  ])('%s runtime boundary restricts bucket listing to approved prefixes', (upper, environment) => {
+    const { template } = synthesize();
+    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
+    const title = capitalize(environment);
+    const queryList = statementBySid(boundary, `Allow${title}AthenaResultListing`);
+    const glueList = statementBySid(boundary, `Allow${title}GluePrefixListing`);
+
+    expect(queryList.Condition.StringLike['s3:prefix']).toEqual([
+      'athena-results', 'athena-results/*',
+    ]);
+    expect(glueList.Condition.StringLike['s3:prefix']).toEqual([
+      'raw', 'raw/*', 'normalized', 'normalized/*', 'quarantine', 'quarantine/*',
+    ]);
+    expect(JSON.stringify(queryList.Condition)).not.toContain('evaluation');
+    expect(JSON.stringify(glueList.Condition)).not.toContain('evaluation');
+
+    const listStatements = boundary.Properties.PolicyDocument.Statement
+      .filter((statement: JsonObject) => actions(statement).includes('s3:ListBucket'));
+    expect(listStatements).toHaveLength(2);
+
+    const evaluationDeny = statementBySid(boundary, `Deny${title}EvaluationGroundTruth`);
+    expect(actions(evaluationDeny)).toEqual(['s3:*']);
+  });
+
+  // Verifies corrected S3, Logs, and Budgets action/resource compatibility.
+  test.each([
+    ['DEV', 'dev'],
+    ['DEMO', 'demo'],
+  ])('%s execution policies contain corrected service permissions', (upper, environment) => {
+    const { template } = synthesize();
+    const title = capitalize(environment);
+    const data = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_DATA_ANALYTICS`);
+    const observability = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_OBSERVABILITY`);
+    const bucket = statementBySid(data, `Manage${title}DataBuckets`);
+    const describeLogs = statementBySid(observability, `Describe${title}LogGroups`);
+    const budget = statementBySid(observability, `Manage${title}Budget`);
+
+    expect(actions(bucket)).toContain('s3:DeleteBucketPolicy');
+    expect(actions(describeLogs)).toEqual(['logs:DescribeLogGroups']);
+    expect(describeLogs.Resource).toBe('*');
+    expect(actions(budget)).toEqual(expect.arrayContaining([
+      'budgets:ModifyBudget', 'budgets:ViewBudget', 'budgets:TagResource',
+    ]));
+    expect(actions(budget).some((action) => action.includes('BudgetAction'))).toBe(false);
+  });
+
+  // Verifies profile invocation is pinned to the selected profile and its routed model only.
+  test.each(['DEV', 'DEMO'])('%s Bedrock access requires the selected inference profile', (upper) => {
+    const { template } = synthesize();
+    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_RUNTIME_BOUNDARY`);
+    const title = capitalize(upper.toLowerCase());
+    const profile = statementBySid(boundary, `Allow${title}ApprovedBedrockInferenceProfile`);
+    const model = statementBySid(boundary, `Allow${title}ApprovedBedrockProfileModels`);
+    const profileArn = JSON.stringify(profile.Resource);
+
+    expect(profileArn).toContain(`:inference-profile/${BEDROCK_INFERENCE_PROFILE.profileId}`);
+    expect(JSON.stringify(model.Resource)).toContain(
+      `:bedrock:*::foundation-model/${BEDROCK_INFERENCE_PROFILE.foundationModelId}`,
+    );
+    expect(JSON.stringify(model.Condition.StringEquals['bedrock:InferenceProfileArn']))
+      .toContain(`:inference-profile/${BEDROCK_INFERENCE_PROFILE.profileId}`);
   });
 
   // Verifies the committed CDK source resolves drafts through tokens rather than local values.
@@ -220,3 +368,8 @@ describe('CicdFoundationStack', () => {
     expect(serialized).not.toMatch(/\$\{(?:AWS_|FRONTEND_|DATA_|BEDROCK_)/);
   });
 });
+
+/** Uppercases the first character for synthesized statement identifiers. */
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}

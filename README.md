@@ -64,7 +64,7 @@ npm test
 npm run synth
 ```
 
-`npm run synth` synthesizes `SOC-BOT-CICD-FOUNDATION` for `us-east-1` and runs the `AwsSolutionsChecks` cdk-nag rules. Synthesis does not contact AWS or create resources. The stack includes the GitHub OIDC provider, environment-specific deployment and CloudFormation execution roles, execution policies, and runtime permission boundaries. The required `ApprovedBedrockModelArn` CloudFormation parameter remains unresolved during synthesis; a future manual deployment must supply the approved model or inference-profile ARN.
+`npm run synth` synthesizes `SOC-BOT-CICD-FOUNDATION` for `us-east-1` and runs the `AwsSolutionsChecks` cdk-nag rules. Synthesis does not contact AWS or create resources. The stack includes the GitHub OIDC provider, environment-specific deployment and CloudFormation execution roles, execution policies, and runtime permission boundaries. Runtime Bedrock access is pinned to the `us.anthropic.claude-sonnet-4-6` inference profile and its routed `anthropic.claude-sonnet-4-6` foundation model; direct foundation-model invocation is not allowed.
 
 The foundation stack is administrator-managed and must be deployed manually after review. This change includes no deployment workflow and does not bootstrap, deploy, or otherwise mutate AWS resources.
 
