@@ -323,6 +323,18 @@ describe('CicdFoundationStack', () => {
     expect(actions(evaluationDeny)).toEqual(['s3:*']);
   });
 
+  // Locks down raw source evidence as read-only in both Glue runtime boundaries.
+  test.each(['DEV', 'DEMO'])('%s Glue boundary allows only GetObject on raw source logs', (upper) => {
+    const { template } = synthesize();
+    const boundary = managedPolicyByName(template, `SOC_BOT_${upper}_BOUNDARY_GLUE`);
+    const rawAllows: JsonObject[] = boundary.Properties.PolicyDocument.Statement
+      .filter((statement: JsonObject) => statement.Effect === 'Allow'
+        && JSON.stringify(statement.Resource).includes('/raw/*'));
+
+    expect(rawAllows).toHaveLength(1);
+    expect(actions(rawAllows[0])).toEqual(['s3:GetObject']);
+  });
+
   // Verifies corrected S3, Logs, and Budgets action/resource compatibility.
   test.each([
     ['DEV', 'dev'],
