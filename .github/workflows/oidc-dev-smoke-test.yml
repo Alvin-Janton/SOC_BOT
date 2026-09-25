@@ -1,0 +1,76 @@
+name: Dev OIDC Smoke Test
+
+# Temporary diagnostic: remove after successful verification unless retained deliberately.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oidc-dev-smoke-test
+  cancel-in-progress: true
+
+jobs:
+  verify-dev-identity:
+    name: Verify dev deployment identity
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      SESSION_NAME: oidc-dev-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate dev environment role configuration
+        id: expected
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${EXPECTED_ROLE_ARN}" =~ ^arn:aws:iam::([0-9]{12}):role/SOC_BOT_DEV_DEPLOY$ ]]; then
+            echo '::error::The dev environment AWS_ROLE_ARN must identify SOC_BOT_DEV_DEPLOY in a 12-digit AWS account.'
+            exit 1
+          fi
+          echo "account=${BASH_REMATCH[1]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assume dev deployment role through OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          allowed-account-ids: ${{ steps.expected.outputs.account }}
+          role-session-name: ${{ env.SESSION_NAME }}
+          role-duration-seconds: 900
+          unset-current-credentials: true
+          retry-max-attempts: 2
+          # Limit this diagnostic session even though the role can normally deploy.
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"sts:GetCallerIdentity","Resource":"*"}]}
+
+      - name: Verify AWS account and assumed-role identity
+        shell: bash
+        env:
+          EXPECTED_ACCOUNT: ${{ steps.expected.outputs.account }}
+          AWS_PAGER: ""
+        run: |
+          set -euo pipefail
+          identity="$(aws sts get-caller-identity --output json)"
+          expected_arn="arn:aws:sts::${EXPECTED_ACCOUNT}:assumed-role/SOC_BOT_DEV_DEPLOY/${SESSION_NAME}"
+          if ! jq --exit-status \
+            --arg account "${EXPECTED_ACCOUNT}" \
+            --arg arn "${expected_arn}" \
+            '.Account == $account and .Arn == $arn' <<< "${identity}" > /dev/null; then
+            echo '::error::AWS caller identity does not match the configured account and SOC_BOT_DEV_DEPLOY session.'
+            exit 1
+          fi
+          jq '{Account, Arn}' <<< "${identity}"
+          echo 'OIDC dev identity verified. No AWS resource operations were performed.'
