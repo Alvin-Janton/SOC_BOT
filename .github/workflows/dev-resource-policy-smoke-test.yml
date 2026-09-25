@@ -1,0 +1,66 @@
+name: Dev Resource Policy Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a running resource test to start another one.
+concurrency:
+  group: dev-resource-policy-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  resource-policy:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_REGION: us-east-1
+      AWS_PAGER: ""
+      AWS_CLI_AUTO_PROMPT: "off"
+    steps:
+      - name: Check out test templates and runner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate dev role configuration
+        id: expected
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::([0-9]{12}):role/SOC_BOT_DEV_DEPLOY$ ]]; then
+            echo '::error::AWS_ROLE_ARN must identify the exact SOC_BOT_DEV_DEPLOY role.'
+            exit 1
+          fi
+          echo "account=${BASH_REMATCH[1]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assume dev deployment role through OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          allowed-account-ids: ${{ steps.expected.outputs.account }}
+          role-session-name: resource-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          unset-current-credentials: true
+          retry-max-attempts: 2
+
+      - name: Test positive creation and negative authorization
+        env:
+          EXPECTED_ACCOUNT: ${{ steps.expected.outputs.account }}
+        run: python3 .github/smoke-tests/resource-policy/run.py test
+
+      - name: Delete compliant stack and confirmed failed stack records
+        if: always() && steps.expected.outcome == 'success'
+        env:
+          EXPECTED_ACCOUNT: ${{ steps.expected.outputs.account }}
+        run: python3 .github/smoke-tests/resource-policy/run.py cleanup
