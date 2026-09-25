@@ -39,3 +39,10 @@
 - Key changes: Added six class boundaries and exact role mappings, removed principal-tag authorization, restricted Cognito by ownership tags, separated runtime-policy and boundary namespaces, constrained attachments with iam:PolicyARN, and denied protected tag changes/removal and boundary-policy edits.
 - Tests or verification performed: Build, infrastructure assertions, synthesis with cdk-nag, and quota/static checks; Access Analyzer validated all 18 synthesized identity policies with zero findings. Parsed 27 local draft JSON documents. Largest resolved managed policy is 6,117 characters; execution roles retain five attachments each.
 - Notes (no secrets): Boundary assignment checks existing resource tags, as approved, because PutRolePermissionsBoundary accepts no request tags. Tag updates must resend the complete protected set unchanged. Automatic boundary removal remains an accepted trust capability of the reviewed deployment path. The five account-wide Lake Formation administration actions require a dedicated project account and future application-level scoping tests. No deployment or AWS mutation occurred.
+
+### 2026-09-25 - Add manual dev OIDC smoke test
+- Goal: Verify GitHub OIDC assumption of the dev deployment role without AWS resource operations.
+- Files changed: `.github/workflows/oidc-dev-smoke-test.yml`, `logs.md`.
+- Key changes: Manual-only workflow restricted to the dev branch/environment, immutable Action pins, validated environment role ARN, exact STS account/session assertion, and an identity-only session policy.
+- Tests or verification performed: Actionlint 1.7.12 passed in a temporary Docker container. Remote dispatch is pending publication to the default branch and dev.
+- Notes (no secrets): Expected account comes from the dev environment AWS_ROLE_ARN variable; no account identifier or credential is committed. No AWS resource operations performed. Remove the temporary workflow after successful verification unless deliberately retained.
