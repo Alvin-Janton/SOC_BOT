@@ -1,0 +1,20 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Expected denial: REST API has no ownership tags.",
+  "Parameters": {
+    "ApiName": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "SmokeApi": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": {
+          "Ref": "ApiName"
+        },
+        "DisableExecuteApiEndpoint": true
+      }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Temporary dev policy smoke test; no objects, API methods, stages, or traffic.",
+  "Parameters": {
+    "BucketName": {
+      "Type": "String"
+    },
+    "ApiName": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "SmokeBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Delete",
+      "UpdateReplacePolicy": "Delete",
+      "Properties": {
+        "BucketName": {
+          "Ref": "BucketName"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "SOC_BOT"
+          },
+          {
+            "Key": "Environment",
+            "Value": "dev"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          }
+        ]
+      }
+    },
+    "SmokeApi": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": {
+          "Ref": "ApiName"
+        },
+        "DisableExecuteApiEndpoint": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "SOC_BOT"
+          },
+          {
+            "Key": "Environment",
+            "Value": "dev"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CDK"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "BucketName": {
+      "Value": {
+        "Ref": "SmokeBucket"
+      }
+    },
+    "ApiId": {
+      "Value": {
+        "Ref": "SmokeApi"
+      }
+    }
+  }
+}
