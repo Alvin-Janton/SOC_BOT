@@ -40,9 +40,21 @@
 - Tests or verification performed: Build, infrastructure assertions, synthesis with cdk-nag, and quota/static checks; Access Analyzer validated all 18 synthesized identity policies with zero findings. Parsed 27 local draft JSON documents. Largest resolved managed policy is 6,117 characters; execution roles retain five attachments each.
 - Notes (no secrets): Boundary assignment checks existing resource tags, as approved, because PutRolePermissionsBoundary accepts no request tags. Tag updates must resend the complete protected set unchanged. Automatic boundary removal remains an accepted trust capability of the reviewed deployment path. The five account-wide Lake Formation administration actions require a dedicated project account and future application-level scoping tests. No deployment or AWS mutation occurred.
 
-### 2026-09-25 - Add manual dev OIDC smoke test
-- Goal: Verify GitHub OIDC assumption of the dev deployment role without AWS resource operations.
-- Files changed: `.github/workflows/oidc-dev-smoke-test.yml`, `logs.md`.
-- Key changes: Manual-only workflow restricted to the dev branch/environment, immutable Action pins, validated environment role ARN, exact STS account/session assertion, and an identity-only session policy.
-- Tests or verification performed: Actionlint 1.7.12 passed in a temporary Docker container. Remote dispatch is pending publication to the default branch and dev.
-- Notes (no secrets): Expected account comes from the dev environment AWS_ROLE_ARN variable; no account identifier or credential is committed. No AWS resource operations performed. Remove the temporary workflow after successful verification unless deliberately retained.
+### 2026-09-25 - Add and validate manual dev OIDC smoke test
+  - Goal: Verify GitHub OIDC assumption of the dev deployment role without application resource operations.
+  - Files changed: `.github/workflows/oidc-dev-smoke-test.yml`, `infra/lib/cicd-foundation-stack.ts`, `logs.md`.
+  - Key changes: Added a manual-only workflow restricted to the dev branch and environment, with pinned Actions, role ARN validation, an identity-only
+  session policy, and an exact STS account/session assertion. Updated both deployment-role trust subjects to include GitHub's immutable owner and repository
+  IDs.
+  - Tests or verification performed: Actionlint 1.7.12 passed. The first manual run failed because the trust policy used GitHub's legacy name-only subject.
+  After updating and deploying the foundation stack, the dev OIDC workflow passed role assumption and caller-identity verification.
+  - Notes (no secrets): The repository was created after GitHub's immutable subject claim rollout. The dev subject is `repo:Alvin-Janton@197115837/
+  SOC_BOT@1385867681:environment:dev`; the demo subject uses the same repository IDs and `environment:demo`. The smoke test performed no application
+  resource operations.
+
+### 2026-09-25 - Add manual dev resource policy smoke test
+- Goal: Exercise deployed naming/tag controls through temporary CloudFormation stacks without changing foundation permissions.
+- Files changed: `.github/workflows/dev-resource-policy-smoke-test.yml`, `.github/smoke-tests/resource-policy/`, and `logs.md`.
+- Key changes: Dedicated positive and negative templates, dev-only OIDC workflow, serialized unique runs, strict resource-denial evidence, bounded administrator inspection window, and conservative cleanup restricted to compliant resources and confirmed failed records.
+- Tests or verification performed: Four offline Python tests passed; Actionlint 1.7.12 passed in a temporary Docker container; AWS CloudFormation ValidateTemplate succeeded for all three templates. No CDK changes or build required. Live workflow execution deferred at user request.
+- Notes (no secrets): No AWS resources created or changed. Live-tag and final resource-absence verification require a separate administrator/read-only session. Unexpected negative creation or rollback failure is preserved for administrator review; role permissions are not broadened. Existing user changes are excluded from the smoke-test commits.

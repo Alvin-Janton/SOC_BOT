@@ -132,7 +132,7 @@ export class CicdFoundationStack extends Stack {
     });
     this.applyTags(executionRole, tags);
 
-    const subject = `repo:Alvin-Janton/SOC_BOT:environment:${environment}`;
+    const subject = `repo:Alvin-Janton@197115837/SOC_BOT@1385867681:environment:${environment}`;
     const deployRole = new Role(this, `${title}DeployRole`, {
       roleName: `SOC_BOT_${upper}_DEPLOY`,
       description: `GitHub Actions deployment role for the SOC Bot ${environment} environment`,
