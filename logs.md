@@ -58,3 +58,10 @@
 - Key changes: Dedicated positive and negative templates, dev-only OIDC workflow, serialized unique runs, strict resource-denial evidence, bounded administrator inspection window, and conservative cleanup restricted to compliant resources and confirmed failed records.
 - Tests or verification performed: Four offline Python tests passed; Actionlint 1.7.12 passed in a temporary Docker container; AWS CloudFormation ValidateTemplate succeeded for all three templates. No CDK changes or build required. Live workflow execution deferred at user request.
 - Notes (no secrets): No AWS resources created or changed. Live-tag and final resource-absence verification require a separate administrator/read-only session. Unexpected negative creation or rollback failure is preserved for administrator review; role permissions are not broadened. Existing user changes are excluded from the smoke-test commits.
+
+### 2026-09-26 - Correct immutable OIDC subject assertions
+- Goal: Align dev/demo trust assertions with the corrected deployed repository identity before branch promotion.
+- Files changed: `infra/test/cicd-foundation-stack.test.ts`, `logs.md`.
+- Key changes: Replaced the legacy name-only expected subject with the immutable owner/repository-ID subject for both environments; no IAM implementation changes.
+- Tests or verification performed: TypeScript build, all 29 Jest assertions, and CDK synthesis with cdk-nag passed locally.
+- Notes (no secrets): No AWS deployment or resource mutation performed.

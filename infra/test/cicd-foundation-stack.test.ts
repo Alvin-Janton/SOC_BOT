@@ -100,7 +100,7 @@ describe('CicdFoundationStack', () => {
     expect(deployTrust.Action).toBe('sts:AssumeRoleWithWebIdentity');
     expect(deployTrust.Condition.StringEquals).toMatchObject({
       'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-      'token.actions.githubusercontent.com:sub': `repo:Alvin-Janton/SOC_BOT:environment:${environment}`,
+      'token.actions.githubusercontent.com:sub': `repo:Alvin-Janton@197115837/SOC_BOT@1385867681:environment:${environment}`,
     });
     expect(executionTrust).toMatchObject({
       Action: 'sts:AssumeRole',
