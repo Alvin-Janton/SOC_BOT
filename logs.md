@@ -65,3 +65,10 @@
 - Key changes: Replaced the legacy name-only expected subject with the immutable owner/repository-ID subject for both environments; no IAM implementation changes.
 - Tests or verification performed: TypeScript build, all 29 Jest assertions, and CDK synthesis with cdk-nag passed locally.
 - Notes (no secrets): No AWS deployment or resource mutation performed.
+
+### 2026-09-26 - Correct specification whitespace for PR checks
+- Goal: Resolve the whitespace-check failure on PR #3 without changing the specification's meaning.
+- Files changed: `Docs/Final_Spec.md`, `logs.md`.
+- Key changes: Preserve four Markdown hard breaks using backslashes and remove trailing whitespace from a heading.
+- Tests or verification performed: Local working-tree whitespace check passed; PR checks must rerun after publication.
+- Notes (no secrets): Security checks passed on the preceding PR revision; no AWS operations performed.

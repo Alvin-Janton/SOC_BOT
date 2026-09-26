@@ -2,10 +2,10 @@
 
 _Final pre-implementation architecture and delivery plan._
 
-**Status:** Proposed final MVP specification  
-**Date:** 2026-09-23  
-**Project duration:** Two semesters, approximately 40 weeks  
-**Expected team size:** 4-6 students  
+**Status:** Proposed final MVP specification\
+**Date:** 2026-09-23\
+**Project duration:** Two semesters, approximately 40 weeks\
+**Expected team size:** 4-6 students\
 **Primary AWS Region:** `us-east-1`, unless a required Bedrock model is unavailable there
 
 ---
@@ -417,7 +417,7 @@ The MVP uses one authenticated-user role. RBAC is deferred.
 
 ## 9. Backend Services
 
-### 9.1 Lambda Responsibilities 
+### 9.1 Lambda Responsibilities
 
 | Component | Responsibility |
 | --- | --- |
