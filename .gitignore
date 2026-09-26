@@ -10,6 +10,7 @@ coverage/
 
 # AWS CDK and local emulation
 cdk.out/
+cdk.out-*/
 .aws-sam/
 
 # Python and Glue development
