@@ -72,3 +72,10 @@
 - Key changes: Preserve four Markdown hard breaks using backslashes and remove trailing whitespace from a heading.
 - Tests or verification performed: Local working-tree whitespace check passed; PR checks must rerun after publication.
 - Notes (no secrets): Security checks passed on the preceding PR revision; no AWS operations performed.
+
+### 2026-09-27 - Scaffold dev and demo Data stacks
+- Goal: Organize CDK stacks by responsibility and add the protected data bucket for each environment.
+- Files changed: `infra/lib/stacks/cicd-foundation/`, `infra/test/stacks/cicd-foundation/`, `infra/lib/stacks/data/`, `infra/test/stacks/data/`, `infra/lib/shared/environment.ts`, `infra/bin/soc-bot.ts`, `Docs/Final_Spec.md`, and `README.md`.
+- Key changes: Moved the foundation code and tests, shared the environment-qualified bucket naming contract, and added `SOC-BOT-DEV-DATA` and `SOC-BOT-DEMO-DATA`. Both buckets block public access, use S3-managed encryption, enforce TLS, and carry ownership tags. Dev uses `DESTROY`; demo uses `RETAIN`; automatic object deletion is disabled.
+- Tests or verification performed: TypeScript build passed; all 31 infrastructure tests passed; CDK synthesis with cdk-nag passed; local policy validation and `git diff --check` passed. A read-only `cdk diff --method template` found no foundation changes and showed only the two new Data stacks.
+- Notes (no secrets): Server access logging has a resource-specific S1 acknowledgment for this increment. Versioning, lifecycle rules, and access-log storage await the data retention design. No stack was deployed or AWS resource mutated.

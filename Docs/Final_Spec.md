@@ -648,7 +648,7 @@ Bedrock Knowledge Bases may replace the simple retriever after the MVP works. S3
 ### 13.1 S3 Layout
 
 ```text
-s3://security-copilot-data-{environment}-{account}/
+s3://soc-bot-{environment}-data-{account}-{region}/
 |-- metadata/
 |   |-- dataset_manifest.json
 |   |-- README.md

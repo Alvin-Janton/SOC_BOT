@@ -66,17 +66,9 @@ Favor serverless, on-demand resources. Any recurring service must have a bounded
 
 ## Testing Expectations
 
-Every implementation plan must identify its verification steps. Development tasks should add focused tests proportional to the change and run all relevant existing checks.
+Do not create, expand, rewrite, or delete tests of any kind unless the user explicitly requests that test change for the current task. This includes unit tests, infrastructure assertions, integration tests, end-to-end tests, and negative security tests. Generic testing language in an implementation plan does not override this rule; surface a conflicting test requirement before editing test files.
 
-Expected layers include:
-
-- Unit tests for validation, transformations, query construction, tool dispatch, and shared utilities
-- Infrastructure assertions for IAM, encryption, public-access blocking, environment isolation, and removal policies
-- Integration tests for Glue-to-Parquet, Athena access through Lake Formation, Lambda tools, DynamoDB persistence, authentication, and Bedrock adapters
-- End-to-end tests for login, investigation creation, streaming chat, evidence inspection, conversation resumption, and logout
-- Negative security tests proving that unauthorized roles cannot access normalized data or evaluation ground truth
-
-Do not claim a check passed unless it was actually run. Report checks that could not run and explain why.
+Continue running relevant existing checks, including existing tests, builds, and synthesis, when appropriate. Do not claim a check passed unless it was actually run. Report checks that could not run and explain why.
 
 ## Change Discipline
 

@@ -1,7 +1,7 @@
 import { App } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
-import { CicdFoundationStack } from '../lib/cicd-foundation-stack';
-import { BEDROCK_INFERENCE_PROFILE } from '../lib/policy-statements';
+import { CicdFoundationStack } from '../../../lib/stacks/cicd-foundation/cicd-foundation-stack';
+import { BEDROCK_INFERENCE_PROFILE } from '../../../lib/stacks/cicd-foundation/policy-statements';
 
 type JsonObject = Record<string, any>;
 

@@ -64,7 +64,9 @@ npm test
 npm run synth
 ```
 
-`npm run synth` synthesizes `SOC-BOT-CICD-FOUNDATION` for `us-east-1` and runs the `AwsSolutionsChecks` cdk-nag rules. Synthesis does not contact AWS or create resources. The stack includes the GitHub OIDC provider, environment-specific deployment and CloudFormation execution roles, execution policies, and runtime permission boundaries. Runtime Bedrock access is pinned to the `us.anthropic.claude-sonnet-4-6` inference profile and its routed `anthropic.claude-sonnet-4-6` foundation model; direct foundation-model invocation is not allowed.
+`npm run synth` synthesizes `SOC-BOT-CICD-FOUNDATION`, `SOC-BOT-DEV-DATA`, and `SOC-BOT-DEMO-DATA` for `us-east-1` and runs the `AwsSolutionsChecks` cdk-nag rules. Synthesis does not contact AWS or create resources. The foundation stack includes the GitHub OIDC provider, environment-specific deployment and CloudFormation execution roles, execution policies, and runtime permission boundaries. Runtime Bedrock access is pinned to the `us.anthropic.claude-sonnet-4-6` inference profile and its routed `anthropic.claude-sonnet-4-6` foundation model; direct foundation-model invocation is not allowed.
+
+Each Data stack defines one private bucket named `soc-bot-{environment}-data-{account}-{region}`. All public access is blocked, S3-managed encryption and TLS are required, and the bucket is tagged for its environment. Dev uses `DESTROY` and demo uses `RETAIN`; automatic object deletion is disabled, so a populated dev bucket must be emptied before stack teardown. Versioning, lifecycle rules, and server access-log storage are deferred until the data and retention design is implemented. The data bucket has a resource-specific cdk-nag S1 acknowledgment for this initial increment.
 
 The foundation stack is administrator-managed and must be deployed manually after review. This change includes no deployment workflow and does not bootstrap, deploy, or otherwise mutate AWS resources.
 
