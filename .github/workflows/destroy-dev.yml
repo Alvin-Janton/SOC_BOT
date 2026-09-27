@@ -1,0 +1,99 @@
+name: Destroy Dev Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type DELETE SOC-BOT-DEV-DATA to confirm destruction
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soc-bot-dev-data
+  cancel-in-progress: false
+
+jobs:
+  destroy-data:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_REGION: us-east-1
+      AWS_PAGER: ""
+    steps:
+      - name: Confirm exact dev Data stack
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        shell: bash
+        run: |
+          if [[ "${CONFIRMATION}" != 'DELETE SOC-BOT-DEV-DATA' ]]; then
+            echo '::error::Confirmation must be exactly DELETE SOC-BOT-DEV-DATA.'
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate dev deployment role
+        id: expected
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::([0-9]{12}):role/SOC_BOT_DEV_DEPLOY$ ]]; then
+            echo '::error::The dev AWS_ROLE_ARN must identify SOC_BOT_DEV_DEPLOY.'
+            exit 1
+          fi
+          echo "account=${BASH_REMATCH[1]}" >> "${GITHUB_OUTPUT}"
+          echo "CDK_DEFAULT_ACCOUNT=${BASH_REMATCH[1]}" >> "${GITHUB_ENV}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile infrastructure
+        run: npm run build
+
+      - name: Synthesize infrastructure and run cdk-nag
+        run: npm run synth --workspace @soc-bot/infra
+
+      - name: Assume dev deployment role through OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          allowed-account-ids: ${{ steps.expected.outputs.account }}
+          role-session-name: soc-bot-dev-destroy-${{ github.run_id }}
+          role-duration-seconds: 3600
+          unset-current-credentials: true
+          retry-max-attempts: 2
+
+      - name: Destroy only the dev Data stack
+        env:
+          EXEC_ROLE_ARN: arn:aws:iam::${{ steps.expected.outputs.account }}:role/SOC_BOT_DEV_CFN_EXEC
+        run: |
+          if ! ./node_modules/.bin/cdk destroy devDataStack \
+            --app infra/cdk.out \
+            --role-arn "${EXEC_ROLE_ARN}" \
+            --exclusively \
+            --force \
+            --ci; then
+            echo '::error::Dev Data stack deletion failed. If its bucket is non-empty, deliberately empty it with administrator access before retrying.'
+            exit 1
+          fi

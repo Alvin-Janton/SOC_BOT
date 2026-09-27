@@ -124,7 +124,6 @@ export function deploymentStatements(resources: EnvironmentResources): PolicySta
 
 /** Defines CloudFormation permissions for environment-scoped data and analytics resources. */
 export function dataAndAnalyticsStatements(resources: EnvironmentResources): PolicyStatement[] {
-  const dataBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.dataBucketName}`;
   return [
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}DataBuckets`,

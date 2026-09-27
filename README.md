@@ -59,6 +59,7 @@ Install dependencies and run the infrastructure checks from the repository root:
 
 ```console
 npm ci
+npm run lint
 npm run build
 npm test
 npm run synth
@@ -68,7 +69,14 @@ npm run synth
 
 Each Data stack defines one private bucket named `soc-bot-{environment}-data-{account}-{region}`. All public access is blocked, S3-managed encryption and TLS are required, and the bucket is tagged for its environment. Dev uses `DESTROY` and demo uses `RETAIN`; automatic object deletion is disabled, so a populated dev bucket must be emptied before stack teardown. Versioning, lifecycle rules, and server access-log storage are deferred until the data and retention design is implemented. The data bucket has a resource-specific cdk-nag S1 acknowledgment for this initial increment.
 
-The foundation stack is administrator-managed and must be deployed manually after review. This change includes no deployment workflow and does not bootstrap, deploy, or otherwise mutate AWS resources.
+The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the Data stacks; they do not bootstrap or deploy the foundation stack.
+
+### Data stack deployment and teardown
+
+- A push to `dev` deploys only `SOC-BOT-DEV-DATA` through the `dev` GitHub Environment. A push to `main` deploys only `SOC-BOT-DEMO-DATA` through the `demo` Environment. Both workflows lint, build, and synthesize before deployment.
+- Each Environment must supply an `AWS_ROLE_ARN` variable naming its exact `SOC_BOT_<ENV>_DEPLOY` role and restrict deployment to its matching branch. The workflows assume that role through GitHub OIDC and pass only the matching `SOC_BOT_<ENV>_CFN_EXEC` role to CloudFormation. CDK uses the current OIDC credentials for stack operations and asset publishing to the existing bootstrap bucket. The account must already be bootstrapped; the workflows never run `cdk bootstrap`.
+- `Destroy Dev Data` is manual-only on `dev`. Enter exactly `DELETE SOC-BOT-DEV-DATA` to remove the dev Data stack. It shares a concurrency group with dev deployment, so these operations cannot overlap. There is no demo destroy workflow.
+- Teardown does not empty the bucket. If it contains objects, CloudFormation deletion fails and the workflow reports the failure. Review and empty the dev bucket deliberately with administrator access before retrying. The dev OIDC and resource-policy smoke workflows remain separate, manual diagnostics.
 
 ### Foundation tagging exceptions
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { App, Validations } from 'aws-cdk-lib';
+import { App, CliCredentialsStackSynthesizer, Validations } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
 import { CicdFoundationStack } from '../lib/stacks/cicd-foundation/cicd-foundation-stack';
 import { DataStack } from '../lib/stacks/data/data-stack';
@@ -20,6 +20,7 @@ for (const environment of ['dev', 'demo'] as const) {
     deploymentEnvironment: environment,
     stackName: `SOC-BOT-${environment.toUpperCase()}-DATA`,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
+    synthesizer: new CliCredentialsStackSynthesizer(),
     description: `SOC Bot ${environment} security data bucket`,
   });
 }
