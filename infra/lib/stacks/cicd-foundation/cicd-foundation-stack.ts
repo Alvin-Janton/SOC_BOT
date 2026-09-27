@@ -17,11 +17,11 @@ import {
   WebIdentityPrincipal,
 } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { DeploymentEnvironment } from '../../shared/environment';
 import {
   aiApplicationStatements,
   dataAndAnalyticsStatements,
   deploymentStatements,
-  DeploymentEnvironment,
   environmentResources,
   frontendApiStatements,
   observabilityStatements,

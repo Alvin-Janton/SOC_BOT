@@ -63,6 +63,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint TypeScript
+        run: npm run lint
+
       - name: Compile infrastructure
         run: npm run build
 

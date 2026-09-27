@@ -1,7 +1,7 @@
 import { Aws } from 'aws-cdk-lib';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { dataBucketName, DeploymentEnvironment } from '../../shared/environment';
 
-export type DeploymentEnvironment = 'dev' | 'demo';
 export const RUNTIME_CLASSES = ['application', 'query', 'glue'] as const;
 export type RuntimeClass = typeof RUNTIME_CLASSES[number];
 
@@ -32,7 +32,7 @@ export function environmentResources(environment: DeploymentEnvironment): Enviro
     environment,
     prefix: `SOC-BOT-${upper}`,
     databasePrefix: `soc_bot_${environment}`,
-    dataBucketName: `soc-bot-${environment}-data-${Aws.ACCOUNT_ID}-${Aws.REGION}`,
+    dataBucketName: dataBucketName(environment),
     frontendBucketName: `soc-bot-${environment}-frontend-${Aws.ACCOUNT_ID}-${Aws.REGION}`,
     executionRoleArn: `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/SOC_BOT_${upper}_CFN_EXEC`,
   };
@@ -124,7 +124,6 @@ export function deploymentStatements(resources: EnvironmentResources): PolicySta
 
 /** Defines CloudFormation permissions for environment-scoped data and analytics resources. */
 export function dataAndAnalyticsStatements(resources: EnvironmentResources): PolicyStatement[] {
-  const dataBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.dataBucketName}`;
   return [
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}DataBuckets`,
