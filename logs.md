@@ -86,3 +86,10 @@
 - Key changes: Added OIDC workflows with environment-specific role validation, execution-role selection, fixed Data stack targets, and non-canceling deployment concurrency. Manual dev teardown requires `DELETE SOC-BOT-DEV-DATA` and never empties the bucket. Data stacks use CDK caller credentials instead of the bootstrap deployment role. Added ESLint and removed one unused policy-builder constant.
 - Tests or verification performed: `npm ci`, lint, TypeScript build, all 31 existing tests, and synthesis with cdk-nag passed. Actionlint 1.7.12 accepted all workflows; zizmor 1.29.0 offline reported no findings. Reviewed the generated assembly to confirm the Data stacks have no bootstrap deployment or execution role ARN. `git diff --check` passed.
 - Notes (no secrets): No new or modified test cases. No workflow was dispatched and no AWS resources were created, changed, or deleted. Live dev/demo deployment and empty-bucket teardown behavior require operator validation after merge. Local checks used Node.js 24; workflows select Node.js 22.
+
+### 2026-09-27 - Update Jest dependencies
+- Goal: Remove the deprecated `glob@7` and `inflight` dependency chain from the infrastructure test tooling.
+- Files changed: `infra/package.json`, `package-lock.json`, and `logs.md`.
+- Key changes: Updated Jest to 30.5.2 and `@types/jest` to 30.0.0; retained compatible `ts-jest` 29.4.13. No tests or workflows changed.
+- Tests or verification performed: `npm ci`, infrastructure build, lint, and all 31 existing tests passed. `npm explain inflight` found no dependency; `npm explain glob` showed Jest's `glob@13.0.6` and a remaining nested `glob@10.5.0` through coverage tooling. `npm audit --audit-level=low` found zero known vulnerabilities.
+- Notes (no secrets): The remaining `glob@10.5.0` is deprecated but patched for the published CLI command-injection advisory; leave it until upstream coverage tooling adopts a supported release, and continue dependency audits. No GitHub Actions run or AWS deployment occurred. Local checks used Node.js 24; workflows select Node.js 22.
