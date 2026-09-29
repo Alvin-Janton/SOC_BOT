@@ -20,7 +20,10 @@ for (const environment of ['dev', 'demo'] as const) {
     deploymentEnvironment: environment,
     stackName: `SOC-BOT-${environment.toUpperCase()}-DATA`,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
-    synthesizer: new CliCredentialsStackSynthesizer(),
+    synthesizer: new CliCredentialsStackSynthesizer({
+      fileAssetsBucketName: `soc-bot-${environment}-glue-files-\${AWS::AccountId}-\${AWS::Region}`,
+      bucketPrefix: 'glue/',
+    }),
     description: `SOC Bot ${environment} security data bucket`,
   });
 }

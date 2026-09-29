@@ -1,6 +1,7 @@
 import {
   CfnOutput,
   Duration,
+  RemovalPolicy,
   Stack,
   StackProps,
   Tags,
@@ -17,7 +18,8 @@ import {
   WebIdentityPrincipal,
 } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
-import { DeploymentEnvironment } from '../../shared/environment';
+import { BlockPublicAccess, Bucket, BucketEncryption, CfnBucket } from 'aws-cdk-lib/aws-s3';
+import { DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
 import {
   aiApplicationStatements,
   dataAndAnalyticsStatements,
@@ -74,6 +76,19 @@ export class CicdFoundationStack extends Stack {
       Environment: environment,
       ManagedBy: 'CDK',
     };
+
+    const glueFiles = new Bucket(this, `${title}GlueFilesBucket`, {
+      bucketName: glueFileBucketName(environment),
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      encryption: BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.applyTags(glueFiles, tags);
+    Validations.of(glueFiles.node.defaultChild as CfnBucket).acknowledge({
+      id: 'AwsSolutions-S1',
+      reason: 'The environment file-asset bucket stores only CDK templates and Glue code; an access-log destination is not part of this application-data slice.',
+    });
 
     for (const kind of RUNTIME_CLASSES) {
       const boundary = this.createManagedPolicy(
@@ -223,6 +238,7 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:cloudformation:${region}:${account}:stack/SOC-BOT-${upper}-*/*`),
         resource(`arn:${partition}:s3:::cdk-hnb659fds-assets-${account}-${region}/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-frontend-${account}-${region}/*`),
+        resource(`arn:${partition}:s3:::soc-bot-${environment}-glue-files-${account}-${region}/glue/*`),
         resource(`arn:${partition}:cloudfront::${account}:distribution/*`),
       ],
       boundary: [
@@ -239,6 +255,7 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/normalized/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/quarantine/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/raw/*`),
+        resource(`arn:${partition}:s3:::soc-bot-${environment}-glue-files-${account}-${region}/glue/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/evaluation/*`),
         resource(`arn:${partition}:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6`),
         'Action::s3:*',

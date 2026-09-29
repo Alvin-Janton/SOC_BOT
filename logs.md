@@ -93,3 +93,10 @@
 - Key changes: Updated Jest to 30.5.2 and `@types/jest` to 30.0.0; retained compatible `ts-jest` 29.4.13. No tests or workflows changed.
 - Tests or verification performed: `npm ci`, infrastructure build, lint, and all 31 existing tests passed. `npm explain inflight` found no dependency; `npm explain glob` showed Jest's `glob@13.0.6` and a remaining nested `glob@10.5.0` through coverage tooling. `npm audit --audit-level=low` found zero known vulnerabilities.
 - Notes (no secrets): The remaining `glob@10.5.0` is deprecated but patched for the published CLI command-injection advisory; leave it until upstream coverage tooling adopts a supported release, and continue dependency audits. No GitHub Actions run or AWS deployment occurred. Local checks used Node.js 24; workflows select Node.js 22.
+
+### 2026-09-28 - Add application-logs Glue vertical slice
+- Goal: Normalize one application JSONL source to evidence-preserving, date-partitioned Parquet without a schedule or deployment.
+- Files changed: `glue/`, Data and foundation CDK sources, shared environment naming, CDK entry point, `README.md`, and `logs.md`.
+- Key changes: Added a source-specific PySpark transformer, validation, quarantine and deterministic initial severity rules; an on-demand Glue job and explicit projected `application_events` catalog table; and separate environment Glue file-asset buckets with scoped deployment and runtime read access. Existing application raw files remain unchanged.
+- Tests or verification performed: Python syntax, TypeScript lint/build, all 31 existing tests, CDK synthesis with cdk-nag, synthesized IAM size checks, and `git diff --check` passed. Local transformation spot-checks processed the 10 and 11 requested sample records without exposing excluded label keys. No tests were created or modified.
+- Notes (no secrets): The administrator-managed foundation stack must be updated before automatic Data-stack deployments on `dev` or `main`. Dataset upload, Glue execution, Lake Formation grants, and backfill remain out of scope. No AWS resources were changed during implementation.

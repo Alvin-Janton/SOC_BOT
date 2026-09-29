@@ -55,6 +55,7 @@ Favor serverless, on-demand resources. Any recurring service must have a bounded
 
 - Follow established repository patterns before adding new abstractions.
 - Keep modules small and organized around one responsibility.
+- Give every named function and class under `glue/` a concise Python docstring explaining its purpose.
 - Validate data at API, tool, and ETL boundaries.
 - Keep source-specific schemas separate; do not force all security events into one table.
 - Preserve evidence provenance through transformation and query responses.
