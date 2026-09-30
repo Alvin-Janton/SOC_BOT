@@ -54,14 +54,14 @@ _SIGNATURES = tuple(
 
 def _safe_evidence_key(key: object) -> bool:
     """
-    decides whether a dictionary key can be shown by name in a matched location. 
+    decides whether a dictionary key can be shown by name in a matched location.
     It returns True only when all three conditions pass:
-    
+
     1. The key is a Python string.
     2. It matches [A-Za-z_][A-Za-z0-9_-]{0,63}: between 1 and 64 characters, starting with a letter or underscore, followed only by ASCII letters, digits, underscores, or hyphens.
-    3. None of the attack signatures match the key itself.  
+    3. None of the attack signatures match the key itself.
 
-    The collector then uses a safe name like body_params.login[0], 
+    The collector then uses a safe name like body_params.login[0],
     or falls back to an indexed location like body_params[3].value[0].
     """
     return (

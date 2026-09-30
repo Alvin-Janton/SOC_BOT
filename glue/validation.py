@@ -40,5 +40,5 @@ def parse_application_record(raw_line: str) -> tuple[dict, datetime]:
 
     if timestamp.tzinfo is None:
         raise ValueError("event_time_missing_timezone")
-        
+
     return record, timestamp.astimezone(timezone.utc)

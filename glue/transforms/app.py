@@ -10,7 +10,7 @@ def normalize_application(record: dict, timestamp, source_key: str) -> dict:
     """Normalize a validated application log into one analyst-facing event.
 
     Example Input:
-    
+
     {
     "event_time": "2026-09-07T18:12:06Z",
     "request_id": "req-001",
@@ -89,7 +89,7 @@ Example Output (matches abbreviated):
         "response_bytes", "source_dataset", "target_service", "target_instance_id", "alb_name",
     ):
         result[key] = record.get(key)
-        
+
     for key in ("query_params", "body_params", "headers", "source_geo"):
         value = record.get(key)
         result[key] = json.dumps(value, ensure_ascii=False, sort_keys=True) if value is not None else None

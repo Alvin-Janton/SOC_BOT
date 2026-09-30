@@ -115,7 +115,7 @@ def main() -> None:
 
     data_columns = [name for name, _ in APP_COLUMNS]
     quarantine_columns = ["source_s3_key", "source_record_ref", "error_code", "raw_event"]
-    
+
     for selected in sorted(dates):
         year, month, day = selected.split("-")
         predicate = (F.col("year") == year) & (F.col("month") == month) & (F.col("day") == day)

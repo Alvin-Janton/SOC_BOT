@@ -27,7 +27,7 @@ def parse_config() -> JobConfig:
         "JOB_NAME", "input_prefix", "output_prefix", "quarantine_prefix",
         "mode", "schema_version", "max_invalid_fraction",
     ]
-    
+
     arguments = getResolvedOptions(sys.argv, required)
     if arguments["schema_version"] != "1":
         raise ValueError("Only normalized schema version 1 is supported")
@@ -52,7 +52,7 @@ def parse_config() -> JobConfig:
     threshold = float(arguments["max_invalid_fraction"])
     if not 0 <= threshold <= 1:
         raise ValueError("max-invalid-fraction must be between 0 and 1")
-    
+
     for key, suffix in [
         ("input_prefix", "/raw/app/"),
         ("output_prefix", "/normalized/app/"),
@@ -61,7 +61,7 @@ def parse_config() -> JobConfig:
         prefix = arguments[key]
         if not prefix.startswith("s3://") or not prefix.endswith(suffix):
             raise ValueError(f"{key} must be an S3 URI ending in {suffix}")
-            
+
     buckets = {arguments[key].split("/", 3)[2] for key in (
         "input_prefix", "output_prefix", "quarantine_prefix",
     )}
