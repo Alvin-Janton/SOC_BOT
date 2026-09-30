@@ -69,7 +69,25 @@ npm run synth
 
 Each Data stack defines one private bucket named `soc-bot-{environment}-data-{account}-{region}`. All public access is blocked, S3-managed encryption and TLS are required, and the bucket is tagged for its environment. Dev uses `DESTROY` and demo uses `RETAIN`; automatic object deletion is disabled, so a populated dev bucket must be emptied before stack teardown. Versioning, lifecycle rules, and server access-log storage are deferred until the data and retention design is implemented. The data bucket has a resource-specific cdk-nag S1 acknowledgment for this initial increment.
 
+Each Data stack now also defines an on-demand `SOC-BOT-<ENV>-NORMALIZE-APP` Glue 5.0 job, a boundary-limited Glue role, a `soc_bot_<environment>_security` catalog database, and a projected `application_events` Parquet table. The job reads unchanged JSONL from `raw/app/`, writes Snappy Parquet to `normalized/app/year=YYYY/month=MM/day=DD/`, and writes rejected records to the matching `quarantine/app/` date partition. Full runs replace only dates found in source input; incremental runs require an explicit comma-separated `--dates` list. Both replace the selected date partitions without touching raw files. Runs are manual, limited to one concurrent run, two G.1X workers, and 30 minutes; no crawler, trigger, or Lake Formation grant is created in this increment. The `app_rules_v2` severity mapping inspects request fields, headers, and all query/body parameter keys and values independently, including up to three URL-decoding rounds. Suspicious requests returning exactly `200` are High; every other suspicious response, including `302`, is Medium. Without a match, 401/403 and server errors are Low, and other requests are Informational. `severity_source` remains a string containing compact JSON with the rule version, selected rule, and deduplicated category/signature/location matches, without matched payloads. Severity is an analytical aid, not proof of exploitation; see section 14.2 of `Docs/Final_Spec.md` for the contract.
+
+The foundation stack creates a retained, private `soc-bot-{environment}-glue-files-{account}-{region}` bucket for each environment. CDK publishes Data-stack templates and Glue script/library assets under its `glue/` prefix using caller credentials; Glue receives read-only access to its environment's published code. The shared bootstrap asset bucket is not used for these Data-stack assets. **Update the administrator-managed foundation stack manually before merging this increment to `dev` or `main`**; those branches automatically deploy their Data stacks and will fail if their Glue file bucket and IAM policies do not exist first. The foundation stack update itself still requires administrator review and is not performed by the workflows.
+
+The application transformer preserves request and response evidence, request-ID and raw-object provenance, and a safe allowlisted `raw_event` subset. It excludes synthetic `is_malicious`, attack labels, `confidence`, `scenario_id`, and matched-indicator fields from the normalized table. It also excludes `source_file` because source filenames can reveal normal or anomalous traffic classifications, along with `source_line_start` and `source_line_end`; other provenance fields remain unchanged. The inspected source dataset stays outside this repository; this change does not upload it or run a backfill. The Glue job uses default CloudWatch Logs at-rest encryption rather than a new customer-managed KMS key, and bookmarks are disabled because explicit dates control reruns. Both are documented, resource-specific cdk-nag acknowledgments.
+
 The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the Data stacks; they do not bootstrap or deploy the foundation stack.
+
+### Local application normalization
+
+Place local JSONL fixtures in `glue/test/sample_logs/`, then run:
+
+```console
+python glue/test/run_local.py
+```
+
+The runner reuses the application parser, normalizer, and severity engine without Spark, Docker, AWS, or S3. It processes top-level `*.jsonl` files in sorted filename order, skips blank lines, and stops at invalid records with a filename and line number. Each input writes compact UTF-8 JSONL to `glue/test/output/<input-filename>`, with UTC timestamps serialized as ISO 8601 strings. Use `--input-dir <directory>` for other inputs or `--output glue/test/output/combined.jsonl` for one combined output file. Outputs cannot overwrite input fixtures. An invalid record can leave partial output; correct the input and rerun to replace it.
+
+The `raw/app/test/<input-filename>` provenance keys are local placeholders, not actual S3 objects. Fixtures and default outputs are ignored by Git; the entire `glue/test/` subtree is excluded from CDK Glue library assets. Custom outputs should also stay in the ignored output directory. This runner does not verify Spark execution, Parquet writing, S3 permissions, or Glue job arguments.
 
 ### Data stack deployment and teardown
 

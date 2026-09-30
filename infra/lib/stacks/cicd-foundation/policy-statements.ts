@@ -1,6 +1,6 @@
 import { Aws } from 'aws-cdk-lib';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { dataBucketName, DeploymentEnvironment } from '../../shared/environment';
+import { dataBucketName, DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
 
 export const RUNTIME_CLASSES = ['application', 'query', 'glue'] as const;
 export type RuntimeClass = typeof RUNTIME_CLASSES[number];
@@ -63,6 +63,7 @@ export function deploymentStatements(resources: EnvironmentResources): PolicySta
   }
 
   const assetBucketArn = `arn:${Aws.PARTITION}:s3:::cdk-hnb659fds-assets-${Aws.ACCOUNT_ID}-${Aws.REGION}`;
+  const glueAssetBucketArn = `arn:${Aws.PARTITION}:s3:::${glueFileBucketName(resources.environment)}`;
   const frontendBucketArn = `arn:${Aws.PARTITION}:s3:::${resources.frontendBucketName}`;
 
   return [
@@ -99,6 +100,16 @@ export function deploymentStatements(resources: EnvironmentResources): PolicySta
       resources: [`${assetBucketArn}/*`],
     }),
     new PolicyStatement({
+      sid: `List${capitalize(resources.environment)}GlueFileAssets`,
+      actions: ['s3:GetBucketLocation', 's3:ListBucket'],
+      resources: [glueAssetBucketArn],
+    }),
+    new PolicyStatement({
+      sid: `Publish${capitalize(resources.environment)}GlueFileAssets`,
+      actions: ['s3:AbortMultipartUpload', 's3:GetObject', 's3:PutObject'],
+      resources: [`${glueAssetBucketArn}/glue/*`],
+    }),
+    new PolicyStatement({
       sid: `ListExact${capitalize(resources.environment)}FrontendBucket`,
       actions: ['s3:GetBucketLocation', 's3:ListBucket'],
       resources: [frontendBucketArn],
@@ -125,6 +136,20 @@ export function deploymentStatements(resources: EnvironmentResources): PolicySta
 /** Defines CloudFormation permissions for environment-scoped data and analytics resources. */
 export function dataAndAnalyticsStatements(resources: EnvironmentResources): PolicyStatement[] {
   return [
+    new PolicyStatement({
+      sid: `Protect${capitalize(resources.environment)}AdministratorGlueFileBucket`,
+      effect: Effect.DENY,
+      actions: [
+        's3:CreateBucket', 's3:DeleteBucket', 's3:DeleteBucketPolicy',
+        's3:PutBucketPolicy', 's3:PutBucketTagging', 's3:PutEncryptionConfiguration',
+        's3:PutBucketPublicAccessBlock', 's3:PutBucketVersioning',
+        's3:PutLifecycleConfiguration', 's3:PutObject', 's3:DeleteObject',
+      ],
+      resources: [
+        `arn:${Aws.PARTITION}:s3:::${glueFileBucketName(resources.environment)}`,
+        `arn:${Aws.PARTITION}:s3:::${glueFileBucketName(resources.environment)}/*`,
+      ],
+    }),
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}DataBuckets`,
       actions: [
@@ -561,6 +586,11 @@ export function runtimeBoundaryStatements(
     }),
     ] : []),
     ...(runtimeClass === 'glue' ? [new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}GlueFileAssets`,
+      actions: ['s3:GetObject'],
+      resources: [`arn:${Aws.PARTITION}:s3:::${glueFileBucketName(resources.environment)}/glue/*`],
+    }),
+    new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}GlueCatalogWrites`,
       actions: [
         'glue:BatchCreatePartition', 'glue:BatchDeletePartition', 'glue:BatchGetPartition',
