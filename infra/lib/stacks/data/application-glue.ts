@@ -75,7 +75,7 @@ export class ApplicationGlue extends Construct {
     const script = new Asset(this, 'JobScript', { path: resolve(root, 'job.py') });
     const library = new Asset(this, 'JobLibrary', {
       path: root,
-      exclude: ['job.py', '__pycache__', '__pycache__/**', '**/__pycache__', '**/__pycache__/**', '*.pyc', '**/*.pyc'],
+      exclude: ['job.py', 'test', 'test/**', '__pycache__', '__pycache__/**', '**/__pycache__', '**/__pycache__/**', '*.pyc', '**/*.pyc'],
     });
     role.addToPolicy(new PolicyStatement({
       actions: ['s3:GetObject'],

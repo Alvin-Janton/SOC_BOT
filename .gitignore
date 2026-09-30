@@ -14,6 +14,8 @@ cdk.out-*/
 .aws-sam/
 
 # Python and Glue development
+glue/test/sample_logs/
+glue/test/output/
 __pycache__/
 *.py[cod]
 *.egg-info/

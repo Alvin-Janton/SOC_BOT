@@ -792,10 +792,10 @@ Inspect `path`, `raw_url`, `query_string`, `body`, `raw_request_line`, request h
 For application events, `severity_source` remains a Glue/Athena `string` containing compact JSON text:
 
 ```json
-{"rule_version":"app_rules_v2","rule":"suspicious_request_http_200","matches":[{"attack_type":"xss","indicator":"script_tag","location":"query_params[0].value[0]"}]}
+{"rule_version":"app_rules_v2","rule":"suspicious_request_http_200","matches":[{"attack_type":"xss","indicator":"script_tag","location":"query_params.login[0]"}]}
 ```
 
-Each distinct `(attack_type, indicator, location)` appears once, in deterministic order. Locations use field names and zero-based map-entry/list indexes; map keys are represented as `.key` and values as `.value`, avoiding payload text in location names. Matches never contain captured payloads. Suspicious requests use `suspicious_request_http_200` or `suspicious_request_other_status`; unmatched requests use `server_error`, `authentication_or_access_denied`, or `routine_request` with an empty `matches` array. Status `200` is a deterministic severity heuristic, not proof of exploit success. These rules do not change severity mappings for other log sources.
+Each distinct `(attack_type, indicator, location)` appears once, in deterministic order. Locations preserve safe parameter/header names, such as `body_params.login[0]` or `headers.user-agent`; list indexes are zero-based. Safe names are at most 64 ASCII characters, start with a letter or underscore, contain only letters, digits, underscores, or hyphens, and match no attack signature. Unsafe keys use zero-based map-entry indexes instead: `body_params[3].key` identifies the key and `body_params[3].value[0]` identifies its first value. For safe named entries, `.key` identifies evidence in the key itself. Matches never contain captured payloads. Suspicious requests use `suspicious_request_http_200` or `suspicious_request_other_status`; unmatched requests use `server_error`, `authentication_or_access_denied`, or `routine_request` with an empty `matches` array. Status `200` is a deterministic severity heuristic, not proof of exploit success. These rules do not change severity mappings for other log sources.
 
 ---
 

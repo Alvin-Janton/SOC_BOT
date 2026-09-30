@@ -77,6 +77,18 @@ The application transformer preserves request and response evidence, request-ID 
 
 The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the Data stacks; they do not bootstrap or deploy the foundation stack.
 
+### Local application normalization
+
+Place local JSONL fixtures in `glue/test/sample_logs/`, then run:
+
+```console
+python glue/test/run_local.py
+```
+
+The runner reuses the application parser, normalizer, and severity engine without Spark, Docker, AWS, or S3. It processes top-level `*.jsonl` files in sorted filename order, skips blank lines, and stops at invalid records with a filename and line number. Each input writes compact UTF-8 JSONL to `glue/test/output/<input-filename>`, with UTC timestamps serialized as ISO 8601 strings. Use `--input-dir <directory>` for other inputs or `--output glue/test/output/combined.jsonl` for one combined output file. Outputs cannot overwrite input fixtures. An invalid record can leave partial output; correct the input and rerun to replace it.
+
+The `raw/app/test/<input-filename>` provenance keys are local placeholders, not actual S3 objects. Fixtures and default outputs are ignored by Git; the entire `glue/test/` subtree is excluded from CDK Glue library assets. Custom outputs should also stay in the ignored output directory. This runner does not verify Spark execution, Parquet writing, S3 permissions, or Glue job arguments.
+
 ### Data stack deployment and teardown
 
 - A push to `dev` deploys only `SOC-BOT-DEV-DATA` through the `dev` GitHub Environment. A push to `main` deploys only `SOC-BOT-DEMO-DATA` through the `demo` Environment. Both workflows lint, build, and synthesize before deployment.

@@ -52,12 +52,37 @@ _SIGNATURES = tuple(
 )
 
 
+def _safe_evidence_key(key: object) -> bool:
+    """
+    decides whether a dictionary key can be shown by name in a matched location. 
+    It returns True only when all three conditions pass:
+    
+    1. The key is a Python string.
+    2. It matches [A-Za-z_][A-Za-z0-9_-]{0,63}: between 1 and 64 characters, starting with a letter or underscore, followed only by ASCII letters, digits, underscores, or hyphens.
+    3. None of the attack signatures match the key itself.  
+
+    The collector then uses a safe name like body_params.login[0], 
+    or falls back to an indexed location like body_params[3].value[0].
+    """
+    return (
+        isinstance(key, str)
+        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", key) is not None
+        and not any(pattern.search(key) for _, _, pattern in _SIGNATURES)
+    )
+
+
 def _evidence_values(value, location: str) -> Iterator[tuple[str, str]]:
-    """Yield each scalar separately, using indexes to avoid leaking key payloads."""
+    """Yield separate keys/values with safe names or positional fallback locations."""
     if isinstance(value, dict):
         for index, (key, item) in enumerate(value.items()):
-            yield from _evidence_values(key, f"{location}[{index}].key")
-            yield from _evidence_values(item, f"{location}[{index}].value")
+            if _safe_evidence_key(key):
+                entry_location = f"{location}.{key}"
+                yield from _evidence_values(key, f"{entry_location}.key")
+                yield from _evidence_values(item, entry_location)
+
+            else:
+                yield from _evidence_values(key, f"{location}[{index}].key")
+                yield from _evidence_values(item, f"{location}[{index}].value")
 
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
@@ -125,7 +150,7 @@ def application_severity(record: dict) -> tuple[int, str, str]:
 
     elif status in (401, 403):
         score, rule = 2, "authentication_or_access_denied"
-        
+
     else:
         score, rule = 1, "routine_request"
 
