@@ -27,7 +27,7 @@ def normalize_application(record: dict, timestamp, source_key: str) -> dict:
     datetime(2026, 9, 7, 18, 12, 6, tzinfo=timezone.utc),
     "raw/app/WEEK_2/2026-9-07.jsonl"
 
-Example Output:
+Example Output (matches abbreviated):
     {
     "event_uid": "<stable 64-character SHA-256 identifier>",
     "event_time": datetime(2026, 9, 7, 18, 12, 6),
@@ -37,7 +37,10 @@ Example Output:
     "status": "success",
     "severity_id": 4,
     "severity": "High",
-    "severity_source": "app_rules_v1:suspicious_request_allowed",
+    "severity_source": '{"rule_version":"app_rules_v2",'
+                       '"rule":"suspicious_request_http_200",'
+                       '"matches":[{"attack_type":"xss",'
+                       '"indicator":"script_tag","location":"query_string"}]}',
     "src_ip": "198.51.100.10",
     "request_id": "req-001",
     "source_s3_key": "raw/app/WEEK_2/2026-9-07.jsonl",

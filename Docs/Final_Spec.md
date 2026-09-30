@@ -778,6 +778,25 @@ Rules must be deterministic, versioned, and documented in the dataset manifest. 
 
 Severity is an analytical aid, not ground truth. The original status and native source fields must remain available.
 
+Application events use `app_rules_v2`, with the following source-specific mapping:
+
+| Request evidence | HTTP status | Severity |
+| --- | --- | --- |
+| A suspicious signature matches | Exactly `200` | High (4) |
+| A suspicious signature matches | Any other status, including `302` | Medium (3) |
+| No suspicious signature matches | `500`-`599`, `401`, or `403` | Low (2) |
+| No suspicious signature matches | Any other status | Informational (1) |
+
+Inspect `path`, `raw_url`, `query_string`, `body`, `raw_request_line`, request headers, and every query/body parameter key and value independently. Match case-insensitive SQL injection, XSS, CRLF/header injection, sensitive-file/path-traversal, and command-execution signatures against the original evidence and up to three successive URL-decoded forms. Synthetic classifications and matched-payload annotations are never detector inputs. SQL comment markers require SQL or quote context; ordinary body line breaks and request-line terminators alone are not injection evidence.
+
+For application events, `severity_source` remains a Glue/Athena `string` containing compact JSON text:
+
+```json
+{"rule_version":"app_rules_v2","rule":"suspicious_request_http_200","matches":[{"attack_type":"xss","indicator":"script_tag","location":"query_params[0].value[0]"}]}
+```
+
+Each distinct `(attack_type, indicator, location)` appears once, in deterministic order. Locations use field names and zero-based map-entry/list indexes; map keys are represented as `.key` and values as `.value`, avoiding payload text in location names. Matches never contain captured payloads. Suspicious requests use `suspicious_request_http_200` or `suspicious_request_other_status`; unmatched requests use `server_error`, `authentication_or_access_denied`, or `routine_request` with an empty `matches` array. Status `200` is a deterministic severity heuristic, not proof of exploit success. These rules do not change severity mappings for other log sources.
+
 ---
 
 ## 15. Glue ETL Transformation Pipeline
