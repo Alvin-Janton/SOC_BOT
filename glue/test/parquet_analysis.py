@@ -47,7 +47,7 @@ def load_table(paths: list[Path]) -> "pd.DataFrame":
 
             if not frame.dtypes.equals(reference.dtypes):
                 raise ValueError(f"Incompatible column types in {path}; expected those in {paths[0]}")
-                
+
         frames.append(frame)
 
     combined = pd.concat(frames, ignore_index=True)

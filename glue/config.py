@@ -1,11 +1,12 @@
-"""Validated arguments for the on-demand application normalization job."""
+"""Validated arguments for the shared, on-demand normalization job."""
 
 from dataclasses import dataclass
 from datetime import date
 import re
 import sys
+from urllib.parse import urlparse
 
-from awsglue.utils import getResolvedOptions
+SUPPORTED_SOURCES = ("app", "waf")
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,53 @@ class JobConfig:
     dates: frozenset[str]
     max_invalid_fraction: float
 
+    @property
+    def sources(self) -> tuple[str, ...]:
+        """Select both supported sources or only the explicitly requested one."""
+        key = urlparse(self.input_prefix).path.strip("/")
+        return SUPPORTED_SOURCES if key == "raw" else (key.split("/")[1],)
+
+    def source_input(self, source: str) -> str:
+        """Return a supported source root without listing the shared raw root."""
+        if source not in self.sources:
+            raise ValueError("Source is outside the selected input scope")
+
+        bucket = urlparse(self.input_prefix).netloc
+        return f"s3://{bucket}/raw/{source}/"
+
+
+def validate_prefixes(arguments: dict[str, str]) -> dict[str, str]:
+    """Validate exact S3 roots, normalize trailing slashes, and enforce one bucket."""
+    allowed = {
+        "input_prefix": {"raw", "raw/app", "raw/waf"},
+        "output_prefix": {"normalized"},
+        "quarantine_prefix": {"quarantine"},
+    }
+    result = {}
+    buckets = set()
+    for name, keys in allowed.items():
+        parsed = urlparse(arguments[name])
+        key = parsed.path.removesuffix("/").removeprefix("/")
+
+        if (
+            parsed.scheme != "s3" or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", parsed.netloc)
+            or parsed.query or parsed.fragment or key not in keys
+        ):
+            raise ValueError(f"{name} must be an S3 URI with an approved root: {sorted(keys)}")
+
+        result[name] = f"s3://{parsed.netloc}/{key}/"
+        buckets.add(parsed.netloc)
+
+    if len(buckets) != 1:
+        raise ValueError("all data prefixes must use the same bucket")
+
+    return result
+
 
 def parse_config() -> JobConfig:
     """Read Glue job arguments and reject unsupported or unsafe input locations."""
+
+    from awsglue.utils import getResolvedOptions
 
     required = [
         "JOB_NAME", "input_prefix", "output_prefix", "quarantine_prefix",
@@ -53,24 +98,9 @@ def parse_config() -> JobConfig:
     if not 0 <= threshold <= 1:
         raise ValueError("max-invalid-fraction must be between 0 and 1")
 
-    for key, suffix in [
-        ("input_prefix", "/raw/app/"),
-        ("output_prefix", "/normalized/app/"),
-        ("quarantine_prefix", "/quarantine/app/"),
-    ]:
-        prefix = arguments[key]
-        if not prefix.startswith("s3://") or not prefix.endswith(suffix):
-            raise ValueError(f"{key} must be an S3 URI ending in {suffix}")
-
-    buckets = {arguments[key].split("/", 3)[2] for key in (
-        "input_prefix", "output_prefix", "quarantine_prefix",
-    )}
-    if len(buckets) != 1:
-        raise ValueError("all data prefixes must use the same bucket")
+    prefixes = validate_prefixes(arguments)
     return JobConfig(
-        input_prefix=arguments["input_prefix"],
-        output_prefix=arguments["output_prefix"],
-        quarantine_prefix=arguments["quarantine_prefix"],
+        **prefixes,
         mode=mode,
         dates=dates,
         max_invalid_fraction=threshold,

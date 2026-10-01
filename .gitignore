@@ -14,7 +14,8 @@ cdk.out-*/
 .aws-sam/
 
 # Python and Glue development
-glue/test/sample_logs/
+glue/test/sample_logs_app/
+glue/test/sample_logs_waf/
 glue/test/output/
 glue/test/sample_logs_S3/
 __pycache__/
