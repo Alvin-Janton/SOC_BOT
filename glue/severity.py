@@ -159,3 +159,45 @@ def application_severity(record: dict) -> tuple[int, str, str]:
         separators=(",", ":"),
     )
     return score, LABELS[score], source
+
+
+def waf_severity(record: dict) -> tuple[int, str, str]:
+    """Rate native WAF action and rule evidence independently of app signatures."""
+    evidence = {
+        key: record.get(key) for key in (
+            "terminatingRuleId", "terminatingRuleType", "terminatingRuleMatchDetails",
+            "nonTerminatingMatchingRules", "ruleGroupList", "rateBasedRuleList", "labels",
+        ) if key in record
+    }
+
+    terminating = record.get("terminatingRuleId")
+    groups = record.get("ruleGroupList", [])
+
+    group_match = any(
+        group.get("terminatingRule") or group.get("nonTerminatingMatchingRules")
+        for group in groups
+    )
+
+    matched = bool(
+        (terminating and terminating != "Default_Action")
+        or record.get("terminatingRuleMatchDetails")
+        or record.get("nonTerminatingMatchingRules") or group_match
+        or record.get("rateBasedRuleList") or record.get("labels")
+    )
+
+    action = record["action"]
+    if action == "ALLOW":
+        score, rule = (4, "allowed_rule_match") if matched else (1, "allow_without_match")
+
+    elif action == "BLOCK" and matched:
+        score, rule = 3, "blocked_rule_match"
+
+    else:
+        score, rule = 0, "unsupported_action_or_missing_match"
+
+    source = json.dumps(
+        {"rule_version": "waf_rules_v1", "rule": rule, "action": action, "evidence": evidence},
+        ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False,
+    )
+
+    return score, LABELS[score], source

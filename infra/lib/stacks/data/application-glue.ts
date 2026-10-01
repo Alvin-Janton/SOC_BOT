@@ -33,8 +33,16 @@ const APP_COLUMNS: Array<[string, string]> = [
   ['source_account_id', 'string'], ['source_aws_region', 'string'], ['source_environment', 'string'],
   ['target_service', 'string'], ['target_instance_id', 'string'], ['alb_name', 'string'],
 ];
+const WAF_COLUMNS: Array<[string, string]> = [
+  ['timestamp', 'bigint'], ['format_version', 'int'], ['web_acl_id', 'string'],
+  ['action', 'string'], ['terminating_rule_id', 'string'], ['terminating_rule_type', 'string'],
+  ['response_code_sent', 'int'], ['labels', 'string'], ['terminating_rule_match_details', 'string'],
+  ['non_terminating_matching_rules', 'string'], ['rule_group_list', 'string'], ['rate_based_rule_list', 'string'],
+  ['http_source_name', 'string'], ['http_source_id', 'string'], ['method', 'string'],
+  ['path', 'string'], ['query_string', 'string'], ['country', 'string'], ['headers', 'string'], ['http_version', 'string'],
+];
 
-/** Defines one on-demand application job and its projected Parquet catalog table. */
+/** Defines one shared on-demand job with separate application and WAF catalog tables. */
 export class ApplicationGlue extends Construct {
   public constructor(scope: Construct, id: string, props: ApplicationGlueProps) {
     super(scope, id);
@@ -43,6 +51,7 @@ export class ApplicationGlue extends Construct {
     const jobName = `SOC-BOT-${upper}-NORMALIZE-APP`;
     const logPrefix = `/aws-glue/${jobName}`;
     const dataArn = dataBucket.bucketArn;
+    const sources = ['app', 'waf'];
 
     const role = new Role(this, 'JobRole', {
       roleName: `SOC_BOT_${upper}_RUNTIME_GLUE_APP`,
@@ -58,17 +67,17 @@ export class ApplicationGlue extends Construct {
     }));
     role.addToPolicy(new PolicyStatement({
       actions: ['s3:ListBucket'], resources: [dataArn],
-      conditions: { StringLike: { 's3:prefix': [
-        'raw/app', 'raw/app/*', 'normalized/app', 'normalized/app/*',
-        'quarantine/app', 'quarantine/app/*',
-      ] } },
+      conditions: { StringLike: { 's3:prefix': sources.flatMap((source) =>
+        ['raw', 'normalized', 'quarantine'].flatMap((prefix) =>
+          [`${prefix}/${source}`, `${prefix}/${source}/*`])) } },
     }));
     role.addToPolicy(new PolicyStatement({
-      actions: ['s3:GetObject'], resources: [`${dataArn}/raw/app/*`],
+      actions: ['s3:GetObject'], resources: sources.map((source) => `${dataArn}/raw/${source}/*`),
     }));
     role.addToPolicy(new PolicyStatement({
       actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-      resources: [`${dataArn}/normalized/app/*`, `${dataArn}/quarantine/app/*`],
+      resources: sources.flatMap((source) =>
+        [`${dataArn}/normalized/${source}/*`, `${dataArn}/quarantine/${source}/*`]),
     }));
 
     const root = this.glueSourceDirectory();
@@ -133,6 +142,37 @@ export class ApplicationGlue extends Construct {
     });
     table.addResourceDependency(database);
 
+    const wafTable = new CfnTable(this, 'WafTable', {
+      catalogId: Aws.ACCOUNT_ID,
+      databaseName,
+      tableInput: {
+        name: 'waf_events',
+        tableType: 'EXTERNAL_TABLE',
+        parameters: {
+          classification: 'parquet',
+          'projection.enabled': 'true',
+          'projection.year.type': 'integer',
+          'projection.year.range': '2026,2036',
+          'projection.month.type': 'integer',
+          'projection.month.range': '1,12',
+          'projection.month.digits': '2',
+          'projection.day.type': 'integer',
+          'projection.day.range': '1,31',
+          'projection.day.digits': '2',
+          'storage.location.template': `s3://${dataBucket.bucketName}/normalized/waf/year=\${year}/month=\${month}/day=\${day}/`,
+        },
+        partitionKeys: ['year', 'month', 'day'].map((name) => ({ name, type: 'string' })),
+        storageDescriptor: {
+          columns: [...COMMON_COLUMNS, ...WAF_COLUMNS].map(([name, type]) => ({ name, type })),
+          location: `s3://${dataBucket.bucketName}/normalized/waf/`,
+          inputFormat: 'org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat',
+          outputFormat: 'org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat',
+          serdeInfo: { serializationLibrary: 'org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe' },
+        },
+      },
+    });
+    wafTable.addResourceDependency(database);
+
     const job = new CfnJob(this, 'NormalizeApplicationJob', {
       name: jobName,
       role: role.roleArn,
@@ -140,12 +180,12 @@ export class ApplicationGlue extends Construct {
       command: { name: 'glueetl', pythonVersion: '3', scriptLocation: script.s3ObjectUrl },
       defaultArguments: {
         '--job-language': 'python',
-        // Avoid EMRFS legacy folder-marker probes outside the allowed app prefixes.
+        // Avoid EMRFS legacy folder-marker probes outside the supported source prefixes.
         '--conf': 'spark.hadoop.fs.s3.useDirectoryHeaderAsFolderObject=true --conf spark.hadoop.fs.s3.folderObject.autoAction.disabled=true',
         '--extra-py-files': library.s3ObjectUrl,
-        '--input_prefix': `s3://${dataBucket.bucketName}/raw/app/`,
-        '--output_prefix': `s3://${dataBucket.bucketName}/normalized/app/`,
-        '--quarantine_prefix': `s3://${dataBucket.bucketName}/quarantine/app/`,
+        '--input_prefix': `s3://${dataBucket.bucketName}/raw/`,
+        '--output_prefix': `s3://${dataBucket.bucketName}/normalized/`,
+        '--quarantine_prefix': `s3://${dataBucket.bucketName}/quarantine/`,
         '--mode': 'full',
         '--schema_version': '1',
         '--max_invalid_fraction': '0.05',
@@ -171,10 +211,12 @@ export class ApplicationGlue extends Construct {
     const policyResource = role.node.findChild('DefaultPolicy').node.defaultChild as CfnPolicy;
     const bucketLogicalId = Stack.of(this).getLogicalId(dataBucket.node.defaultChild as CfnBucket);
     for (const prefix of ['raw', 'normalized', 'quarantine']) {
-      Validations.of(policyResource).acknowledge({
-        id: `AwsSolutions-IAM5[Resource::<${bucketLogicalId}.Arn>/${prefix}/app/*]`,
-        reason: `The Glue job accesses only the ${prefix}/app/ objects of its environment data bucket.`,
-      });
+      for (const source of sources) {
+        Validations.of(policyResource).acknowledge({
+          id: `AwsSolutions-IAM5[Resource::<${bucketLogicalId}.Arn>/${prefix}/${source}/*]`,
+          reason: `The Glue job accesses only the ${prefix}/${source}/ objects of its environment data bucket.`,
+        });
+      }
     }
     for (const suffix of ['error', 'output']) {
       Validations.of(policyResource).acknowledge({

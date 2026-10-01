@@ -778,6 +778,8 @@ Rules must be deterministic, versioned, and documented in the dataset manifest. 
 
 Severity is an analytical aid, not ground truth. The original status and native source fields must remain available.
 
+WAF events initially use `waf_rules_v1`, independently of application signatures. `ALLOW` without native match evidence is Informational; `BLOCK` with positive match evidence is Medium; `ALLOW` with positive match evidence is High. Unsupported actions, or a `BLOCK` without match evidence, are Unknown. Positive evidence means a non-default terminating rule ID, terminating match details, non-terminating matches, matched rules inside rule groups, rate-based rules, or native labels. Labels represent WAF evidence, not a guarantee of maliciousness. `severity_source` is compact JSON text containing `rule_version`, the selected `rule`, `action`, and native rule/label `evidence`, including matched-data details when supplied. This is an initial mapping subject to review; an allowed match is not proof of successful exploitation.
+
 Application events use `app_rules_v2`, with the following source-specific mapping:
 
 | Request evidence | HTTP status | Severity |
@@ -828,7 +830,7 @@ Athena
 
 ### 15.2 Job Structure
 
-Use one shared Glue script package with source-specific transformer modules. Create separate job definitions or independently parameterized runs for:
+Use one shared Glue job per environment with source-specific validators, transformer modules, and explicit output schemas. A run may select all supported sources using the `raw/` root, or one source using `raw/app/` or `raw/waf/`. Root runs expand to supported source prefixes directly; they do not list the bucket or shared `raw/` root. Unsupported explicit prefixes and unexpected source URIs fail closed. Sources planned for later increments are:
 
 - `normalize-cloudtrail`
 - `normalize-app`
@@ -838,15 +840,18 @@ Use one shared Glue script package with source-specific transformer modules. Cre
 Example parameters:
 
 ```text
---source-type cloudtrail
---input-prefix s3://.../raw/cloudtrail/
---output-prefix s3://.../normalized/cloudtrail/
---quarantine-prefix s3://.../quarantine/cloudtrail/
+--input_prefix s3://.../raw/waf/
+--output_prefix s3://.../normalized/
+--quarantine_prefix s3://.../quarantine/
 --mode full
---schema-version 1
+--schema_version 1
 ```
 
-Each source is read independently. Different schemas must not be combined into one DynamicFrame before transformation.
+Raw JSONL lines are dispatched using their S3 object path before source-specific validation and transformation. Different normalized schemas must never be combined into one DataFrame or table. App-only and WAF-only runs leave the other source's output and quarantine partitions untouched. Full runs replace only source/date partitions represented in input; incremental runs intersect the requested dates with each source's available dates. Missing supported prefixes are reported and skipped only in a root run; an explicitly selected missing prefix fails. Reject-fraction checks are source-specific and complete before any writes. Writes across partitions are not transactional; a failed write requires a rerun.
+
+The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role names are retained for deployment continuity; they now support both app and WAF. One concurrent run per environment serializes all supported sources. Input and output roots must share a bucket; source roots accept an optional trailing slash.
+
+WAF `timestamp` (integer epoch milliseconds) is canonical UTC time. Optional `event_time` must contain a timezone and agree exactly. Preserve native request, rule, label, response, and object evidence. Keep each input occurrence, including repeated request IDs: `request_id` and `source_record_ref` retain the native ID, while `event_uid` hashes source type, raw object key, and request ID. Copies in different objects have different identifiers; repeated IDs in the same object can share an identifier and are still separate rows. Request ID or event UID alone is not a unique occurrence/join key. `waf_events` uses the common envelope plus WAF-specific columns; nested rule evidence and headers are serialized as JSON strings, with projected UTC year/month/day partitions. The supplied WAF records contain native WAF evidence, not application ground-truth annotations. Select native fields for output and raw-event provenance without recursive synthetic-field filtering; preserve native nested rule and label details unchanged. Application annotation filtering remains in place, and raw JSONL remains unchanged. If the WAF source contract later introduces hidden evaluation annotations, its normalization must be reviewed before those inputs are used.
 
 ### 15.3 Transformation Modules
 
@@ -898,7 +903,7 @@ After the backfill:
 
 - Use `--mode incremental`
 - Process explicit pending date prefixes or use Glue job bookmarks
-- Set maximum concurrent runs to one per source
+- Set maximum concurrent runs to one per environment's shared job
 - Use a short, bounded timeout
 - Batch files rather than invoking one Spark job per S3 object
 
@@ -1223,7 +1228,7 @@ Controls:
 - Daily Glue schedule disabled by default
 - One bounded batch per source instead of one Glue run per file
 - Minimum practical Glue capacity and short timeout
-- Maximum Glue concurrency of one per source
+- Maximum Glue concurrency of one per environment's shared job
 - Athena partition predicates and bytes-scanned limits
 - Parquet with compression
 - Short Athena-result lifecycle
