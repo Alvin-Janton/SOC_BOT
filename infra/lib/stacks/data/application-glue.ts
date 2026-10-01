@@ -140,6 +140,8 @@ export class ApplicationGlue extends Construct {
       command: { name: 'glueetl', pythonVersion: '3', scriptLocation: script.s3ObjectUrl },
       defaultArguments: {
         '--job-language': 'python',
+        // Avoid EMRFS legacy folder-marker probes outside the allowed app prefixes.
+        '--conf': 'spark.hadoop.fs.s3.useDirectoryHeaderAsFolderObject=true --conf spark.hadoop.fs.s3.folderObject.autoAction.disabled=true',
         '--extra-py-files': library.s3ObjectUrl,
         '--input_prefix': `s3://${dataBucket.bucketName}/raw/app/`,
         '--output_prefix': `s3://${dataBucket.bucketName}/normalized/app/`,
