@@ -17,6 +17,10 @@ cdk.out-*/
 glue/test/sample_logs_app/
 glue/test/sample_logs_waf/
 glue/test/output/
+glue/test/output_app/
+glue/test/output_waf/
+glue/test/quarantine_app/
+glue/test/quarantine_waf/
 glue/test/sample_logs_S3/
 __pycache__/
 *.py[cod]

@@ -10,8 +10,10 @@ from typing import TextIO
 # Match the Glue library's module layout when this script is run directly.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from transforms.app import normalize_application
-from validation import parse_application_record
+from config import SUPPORTED_SOURCES
+from routing import classify, source_key
+
+LOCAL_BUCKET = "soc-bot-local-fixtures"
 
 
 def serialize_datetime(value: object) -> str:
@@ -22,29 +24,31 @@ def serialize_datetime(value: object) -> str:
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
-def convert_file(input_path: Path, output: TextIO) -> int:
-    """Write normalized nonblank records, stopping at the first invalid input."""
-    count = 0
-    source_key = f"raw/app/test/{input_path.name}"
+def convert_file(input_path: Path, uri: str, output: TextIO, quarantine: TextIO) -> tuple[int, int]:
+    """Route nonblank records through production classification into separate outputs."""
+    normalized_count = rejected_count = 0
     with input_path.open(encoding="utf-8-sig") as source:
         for line_number, line in enumerate(source, 1):
             if not line.strip():
                 continue
 
             try:
-                record, timestamp = parse_application_record(line)
-                normalized = normalize_application(record, timestamp, source_key)
+                _, disposition, record = classify(line, uri, LOCAL_BUCKET)
                 encoded = json.dumps(
-                    normalized, ensure_ascii=False, separators=(",", ":"),
+                    record, ensure_ascii=False, separators=(",", ":"),
                     default=serialize_datetime, allow_nan=False,
                 )
 
             except (ValueError, TypeError, KeyError, RecursionError) as error:
-                raise ValueError(f"{input_path.name}:{line_number}: {error}") from error
+                raise ValueError(f"{input_path}:{line_number}: {error}") from error
 
-            output.write(encoded + "\n")
-            count += 1
-    return count
+            if disposition == "valid":
+                output.write(encoded + "\n")
+                normalized_count += 1
+            else:
+                quarantine.write(encoded + "\n")
+                rejected_count += 1
+    return normalized_count, rejected_count
 
 
 def reject_input_overwrite(output_path: Path, inputs: list[Path]) -> None:
@@ -57,48 +61,80 @@ def reject_input_overwrite(output_path: Path, inputs: list[Path]) -> None:
 
 
 def main() -> int:
-    """Convert sorted local JSONL fixtures to separate or combined output files."""
+    """Normalize selected app/WAF fixture folders without Spark or AWS access."""
     directory = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
-        "--input-dir", type=Path, default=directory / "sample_logs",
-        help="Directory containing top-level JSONL inputs (default: glue/test/sample_logs).",
+        "--input-dir", type=Path, default=directory,
+        help="Fixture root containing sample_logs_app/ and sample_logs_waf/ (default: glue/test).",
     )
 
     parser.add_argument(
-        "--output", type=Path,
-        help="Optional combined JSONL file; default: glue/test/output/<input-filename>.",
+        "--input-prefix", default="raw/",
+        choices=("raw", "raw/", "raw/app", "raw/app/", "raw/waf", "raw/waf/"),
+        help="Logical raw source selection (default: raw/).",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=directory,
+        help="Root for output_<source>/ and quarantine_<source>/ (default: glue/test).",
     )
 
     args = parser.parse_args()
 
     try:
-        inputs = [path.resolve() for path in sorted(args.input_dir.glob("*.jsonl")) if path.is_file()]
-
-        if not inputs:
-            raise ValueError(f"No top-level JSONL inputs found in {args.input_dir}")
-
-        outputs = (
-            [(args.output.resolve(), inputs)] if args.output else
-            [((directory / "output" / path.name).resolve(), [path]) for path in inputs]
-        )
+        root = args.input_dir.resolve()
+        prefix = args.input_prefix.rstrip("/")
+        sources = SUPPORTED_SOURCES if prefix == "raw" else (prefix.split("/")[1],)
+        fixture_dirs = [(root / f"sample_logs_{source}").resolve() for source in SUPPORTED_SOURCES]
+        inputs = [path.resolve() for folder in fixture_dirs for path in folder.rglob("*.jsonl") if path.is_file()]
+        outputs = []
+        for source in sources:
+            folder = root / f"sample_logs_{source}"
+            if not folder.is_dir():
+                if prefix != "raw":
+                    raise ValueError(f"Selected fixture directory is missing: {folder}")
+                print(f"{source}: skipping absent fixture directory {folder}")
+                continue
+            files = sorted(path for path in folder.rglob("*.jsonl") if path.is_file())
+            if not files:
+                raise ValueError(f"No JSONL inputs found in {folder}")
+            for path in files:
+                relative = path.relative_to(folder)
+                uri = f"s3://{LOCAL_BUCKET}/raw/{source}/test/{relative.as_posix()}"
+                source_key(uri, LOCAL_BUCKET)
+                output = (args.output_dir / f"output_{source}" / relative).resolve()
+                quarantine = (args.output_dir / f"quarantine_{source}" / relative).resolve()
+                outputs.append((source, path, uri, output, quarantine))
+        if not outputs:
+            raise ValueError(f"No supported JSONL inputs found in {root}")
 
         # Check every destination before creating or truncating any output.
-        for output_path, _ in outputs:
-            reject_input_overwrite(output_path, inputs)
+        destinations: list[Path] = []
+        for _, _, _, output, quarantine in outputs:
+            for destination in (output, quarantine):
+                if any(destination.is_relative_to(folder) for folder in fixture_dirs):
+                    raise ValueError(f"Output must stay outside fixture directories: {destination}")
+                reject_input_overwrite(destination, inputs)
+                reject_input_overwrite(destination, destinations)
+                destinations.append(destination)
 
-        print("Local provenance: raw/app/test/<input-filename> is a placeholder, not an S3 object.")
-        total = 0
-        for output_path, sources in outputs:
+        print("Local provenance: raw/<source>/test/<relative-filename> is a placeholder, not an S3 object.")
+        totals = {source: [0, 0, 0] for source in sources}
+        for source, input_path, uri, output_path, quarantine_path in outputs:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            with output_path.open("w", encoding="utf-8", newline="\n") as output:
-                for input_path in sources:
-                    count = convert_file(input_path, output)
-                    total += count
-                    print(f"{input_path.name}: {count} records -> {output_path}")
-
-        print(f"Converted {total} records from {len(inputs)} input files.")
+            quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+            with output_path.open("w", encoding="utf-8", newline="\n") as output, \
+                    quarantine_path.open("w", encoding="utf-8", newline="\n") as quarantine:
+                normalized, rejected = convert_file(input_path, uri, output, quarantine)
+            totals[source][0] += 1
+            totals[source][1] += normalized
+            totals[source][2] += rejected
+            print(f"{source}/{input_path.name}: {normalized} normalized, {rejected} rejected -> "
+                  f"{output_path}; quarantine -> {quarantine_path}")
+        for source, (files, normalized, rejected) in totals.items():
+            print(f"{source}: {files} files, {normalized + rejected} input records, "
+                  f"{normalized} normalized, {rejected} rejected.")
     except (OSError, ValueError, UnicodeError) as error:
         print(f"Normalization failed: {error}", file=sys.stderr)
         return 1
