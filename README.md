@@ -77,6 +77,8 @@ The application transformer preserves request and response evidence, request-ID 
 
 The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the Data stacks; they do not bootstrap or deploy the foundation stack.
 
+The application job configures EMRFS with `spark.hadoop.fs.s3.useDirectoryHeaderAsFolderObject=true` and `spark.hadoop.fs.s3.folderObject.autoAction.disabled=true` at startup. This avoids legacy `_$folder$` marker handling during Parquet commits, which can request listings outside the role's approved application prefixes. The scoped S3 permissions and evaluation-data protections remain unchanged. Redeploy the matching Data stack to apply these job arguments; no foundation-stack change is required for this configuration fix. A failed commit can leave Parquet files already uploaded, so rerun the affected date partitions after the update rather than treating a failed run as complete. See the [AWS Glue EMRFS configuration reference](https://docs.aws.amazon.com/glue/latest/dg/security-access-control-fta.html) for the folder settings; this job does not enable Lake Formation full table access.
+
 ### Local application normalization
 
 Place local JSONL fixtures in `glue/test/sample_logs/`, then run:
