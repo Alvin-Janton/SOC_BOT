@@ -16,6 +16,7 @@ cdk.out-*/
 # Python and Glue development
 glue/test/sample_logs/
 glue/test/output/
+glue/test/sample_logs_S3/
 __pycache__/
 *.py[cod]
 *.egg-info/
