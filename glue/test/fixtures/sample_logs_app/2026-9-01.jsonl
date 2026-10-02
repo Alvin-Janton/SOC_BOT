@@ -1,0 +1,2 @@
+{"event_time":"2026-09-01T12:00:00Z","request_id":"synthetic-app-health","method":"GET","path":"/health","status_code":200,"source_ip":"198.51.100.20","headers":{"User-Agent":"SOC Bot synthetic fixture"}}
+{"event_time":"2026-09-01T08:00:01-04:00","request_id":"synthetic-app-search","method":"GET","path":"/search","status_code":200,"source_ip":"198.51.100.20","query_string":"q=%3Cscript%3Ealert%281%29%3C%2Fscript%3E","query_params":{"q":["<script>alert(1)</script>"],"display":["café"]}}

@@ -1,0 +1,3 @@
+# Local/CI Parquet comparison dependencies; never included in Glue library assets.
+pandas==3.0.6
+pyarrow==25.0.1

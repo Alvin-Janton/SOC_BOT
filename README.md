@@ -101,6 +101,33 @@ The runner reuses production `routing.classify`, including source-specific parse
 
 The `soc-bot-local-fixtures` bucket is a local placeholder; no S3 connection is made. Provenance keys use `raw/<source>/<relative-filename>`, matching Glue when fixture-relative paths mirror raw object-key suffixes (including nested folders). With the same request ID and source key, key-derived `event_uid` values match the production transformation. Fixtures and default normalized/quarantine outputs are ignored by Git; the entire `glue/test/` subtree is excluded from CDK Glue library assets. Custom outputs must also remain untracked. This runner does not verify Spark execution, partition commits, Parquet writing, S3 permissions, rejection thresholds, or Glue job arguments.
 
+### Automated local checks and offline Parquet parity
+
+Install the pinned local comparison dependencies and run the Python suite:
+
+```console
+python -m pip install -r glue/test/requirements-test.txt
+python -m unittest discover -s glue/test -p "test_*.py"
+```
+
+PR checks run the same suite with Python 3.11, without AWS credentials, Spark, or downloaded results. Tracked fixtures under `glue/test/fixtures/sample_logs_app/` and `sample_logs_waf/` are small, synthetic inputs independent of user-local datasets. The three WAF files contain 10 records each: 10 Informational; 6 Informational and 4 Medium; then 5 Informational, 3 Medium, and 2 High. Expected outcomes live in the tests, not in input labels. All local test utilities, fixtures, and comparison dependencies remain excluded from Glue deployment assets.
+
+To inspect tracked fixture output locally, use an ignored output root:
+
+```console
+python glue/test/run_local.py --input-dir glue/test/fixtures --input-prefix raw/ --output-dir glue/test/output
+```
+
+After a real Glue run, download only the matching normalized Parquet files. Generate expected JSONL from the **same raw records and relative object paths**, then compare one source at a time:
+
+```console
+python glue/test/compare_parquet.py --parquet "path/part-00000.parquet" "path/part-00001.parquet" --expected "glue/test/output/output_waf/2026-9-01.jsonl"
+```
+
+Supply every expected JSONL file and downloaded Parquet file covering the same selected data. The offline utility uses Pandas/PyArrow to compare every persisted source column, including `source_s3_key` and `event_uid`, as a multiset: row order does not matter, but duplicate occurrences do. It normalizes UTC timestamps, nullable integers, and null representations; serialized evidence strings are still compared exactly. A mismatch or invalid schema exits unsuccessfully with counts and concise identifiers, not raw request payloads. Local `year`/`month`/`day` helpers are checked against each event's UTC date but are not expected as Parquet columns. Preserve `year=YYYY/month=MM/day=DD/` directories when downloading to additionally verify partition placement; flattened downloads cannot prove the original S3 partition path. Keep actual AWS downloads and expected/generated outputs in ignored folders.
+
+The comparison is manual and offline; it does not download from S3, invoke Glue, or verify Spark commits, IAM permissions, or job orchestration. Actual AWS-output parity remains an operator check after a matching Glue run.
+
 ### Data stack deployment and teardown
 
 - A push to `dev` deploys only `SOC-BOT-DEV-DATA` through the `dev` GitHub Environment. A push to `main` deploys only `SOC-BOT-DEMO-DATA` through the `demo` Environment. Both workflows lint, build, and synthesize before deployment.
