@@ -53,6 +53,19 @@ jobs:
       - name: Validate GitHub Actions workflows
         run: '"${RUNNER_TEMP}/actionlint" .github/workflows/*.yml'
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: glue/test/requirements-test.txt
+
+      - name: Install local comparison dependencies
+        run: python -m pip install -r glue/test/requirements-test.txt
+
+      - name: Test Glue routing, normalization, and offline parity
+        run: python -m unittest discover -s glue/test -p "test_*.py"
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

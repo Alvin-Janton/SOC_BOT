@@ -41,8 +41,14 @@ const WAF_COLUMNS: Array<[string, string]> = [
   ['http_source_name', 'string'], ['http_source_id', 'string'], ['method', 'string'],
   ['path', 'string'], ['query_string', 'string'], ['country', 'string'], ['headers', 'string'], ['http_version', 'string'],
 ];
+const VPC_COLUMNS: Array<[string, string]> = [
+  ['flow_log_version', 'int'], ['account_id', 'string'], ['interface_id', 'string'],
+  ['srcaddr', 'string'], ['dstaddr', 'string'], ['srcport', 'int'], ['dstport', 'int'],
+  ['protocol', 'int'], ['packets', 'bigint'], ['bytes', 'bigint'],
+  ['start', 'bigint'], ['end', 'bigint'], ['action', 'string'], ['log_status', 'string'],
+];
 
-/** Defines one shared on-demand job with separate application and WAF catalog tables. */
+/** Defines one shared on-demand job with separate application, WAF, and VPC Flow catalog tables. */
 export class ApplicationGlue extends Construct {
   public constructor(scope: Construct, id: string, props: ApplicationGlueProps) {
     super(scope, id);
@@ -51,7 +57,7 @@ export class ApplicationGlue extends Construct {
     const jobName = `SOC-BOT-${upper}-NORMALIZE-APP`;
     const logPrefix = `/aws-glue/${jobName}`;
     const dataArn = dataBucket.bucketArn;
-    const sources = ['app', 'waf'];
+    const sources = ['app', 'waf', 'vpc'];
 
     const role = new Role(this, 'JobRole', {
       roleName: `SOC_BOT_${upper}_RUNTIME_GLUE_APP`,
@@ -172,6 +178,37 @@ export class ApplicationGlue extends Construct {
       },
     });
     wafTable.addResourceDependency(database);
+
+    const vpcTable = new CfnTable(this, 'VpcFlowTable', {
+      catalogId: Aws.ACCOUNT_ID,
+      databaseName,
+      tableInput: {
+        name: 'vpc_flow_events',
+        tableType: 'EXTERNAL_TABLE',
+        parameters: {
+          classification: 'parquet',
+          'projection.enabled': 'true',
+          'projection.year.type': 'integer',
+          'projection.year.range': '2026,2036',
+          'projection.month.type': 'integer',
+          'projection.month.range': '1,12',
+          'projection.month.digits': '2',
+          'projection.day.type': 'integer',
+          'projection.day.range': '1,31',
+          'projection.day.digits': '2',
+          'storage.location.template': `s3://${dataBucket.bucketName}/normalized/vpc/year=\${year}/month=\${month}/day=\${day}/`,
+        },
+        partitionKeys: ['year', 'month', 'day'].map((name) => ({ name, type: 'string' })),
+        storageDescriptor: {
+          columns: [...COMMON_COLUMNS, ...VPC_COLUMNS].map(([name, type]) => ({ name, type })),
+          location: `s3://${dataBucket.bucketName}/normalized/vpc/`,
+          inputFormat: 'org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat',
+          outputFormat: 'org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat',
+          serdeInfo: { serializationLibrary: 'org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe' },
+        },
+      },
+    });
+    vpcTable.addResourceDependency(database);
 
     const job = new CfnJob(this, 'NormalizeApplicationJob', {
       name: jobName,

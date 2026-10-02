@@ -6,7 +6,7 @@ import re
 import sys
 from urllib.parse import urlparse
 
-SUPPORTED_SOURCES = ("app", "waf")
+SUPPORTED_SOURCES = ("app", "waf", "vpc")
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class JobConfig:
 
     @property
     def sources(self) -> tuple[str, ...]:
-        """Select both supported sources or only the explicitly requested one."""
+        """Select all supported sources or only the explicitly requested one."""
         key = urlparse(self.input_prefix).path.strip("/")
         return SUPPORTED_SOURCES if key == "raw" else (key.split("/")[1],)
 
@@ -38,7 +38,7 @@ class JobConfig:
 def validate_prefixes(arguments: dict[str, str]) -> dict[str, str]:
     """Validate exact S3 roots, normalize trailing slashes, and enforce one bucket."""
     allowed = {
-        "input_prefix": {"raw", "raw/app", "raw/waf"},
+        "input_prefix": {"raw", "raw/app", "raw/waf", "raw/vpc"},
         "output_prefix": {"normalized"},
         "quarantine_prefix": {"quarantine"},
     }

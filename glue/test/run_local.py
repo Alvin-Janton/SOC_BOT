@@ -1,19 +1,20 @@
-"""Normalize local fixtures without Spark or AWS; source keys are placeholders."""
+"""Normalize local fixtures without Spark or AWS using Glue-equivalent source keys."""
 
 import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
-from typing import TextIO
+from typing import Iterator, TextIO
 
 # Match the Glue library's module layout when this script is run directly.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import SUPPORTED_SOURCES
-from routing import classify, source_key
+from routing import classify, classify_vpc_object, source_key
 
 LOCAL_BUCKET = "soc-bot-local-fixtures"
+SOURCE_PATTERNS = {"app": "*.jsonl", "waf": "*.jsonl", "vpc": "*.log"}
 
 
 def serialize_datetime(value: object) -> str:
@@ -24,30 +25,48 @@ def serialize_datetime(value: object) -> str:
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
-def convert_file(input_path: Path, uri: str, output: TextIO, quarantine: TextIO) -> tuple[int, int]:
-    """Route nonblank records through production classification into separate outputs."""
-    normalized_count = rejected_count = 0
-    with input_path.open(encoding="utf-8-sig") as source:
-        for line_number, line in enumerate(source, 1):
-            if not line.strip():
-                continue
-
+def classify_file(input_path: Path, uri: str) -> Iterator[tuple[int, str, dict]]:
+    """Use Glue's object reader for VPC and the existing nonblank JSONL reader otherwise."""
+    is_vpc = source_key(uri, LOCAL_BUCKET).split("/")[1] == "vpc"
+    with input_path.open(encoding="utf-8" if is_vpc else "utf-8-sig", newline="" if is_vpc else None) as source:
+        if is_vpc:
+            # Preserve physical lines and their terminators just like Glue's wholetext reader.
+            line_number = 1
             try:
-                _, disposition, record = classify(line, uri, LOCAL_BUCKET)
-                encoded = json.dumps(
-                    record, ensure_ascii=False, separators=(",", ":"),
-                    default=serialize_datetime, allow_nan=False,
-                )
-
+                for _, disposition, record in classify_vpc_object(source.read(), uri, LOCAL_BUCKET):
+                    yield line_number, disposition, record
+                    line_number += 1
             except (ValueError, TypeError, KeyError, RecursionError) as error:
                 raise ValueError(f"{input_path}:{line_number}: {error}") from error
+        else:
+            for line_number, line in enumerate(source, 1):
+                if not line.strip():
+                    continue
+                try:
+                    _, disposition, record = classify(line, uri, LOCAL_BUCKET)
+                except (ValueError, TypeError, KeyError, RecursionError) as error:
+                    raise ValueError(f"{input_path}:{line_number}: {error}") from error
+                yield line_number, disposition, record
 
-            if disposition == "valid":
-                output.write(encoded + "\n")
-                normalized_count += 1
-            else:
-                quarantine.write(encoded + "\n")
-                rejected_count += 1
+
+def convert_file(input_path: Path, uri: str, output: TextIO, quarantine: TextIO) -> tuple[int, int]:
+    """Serialize classified records into source-separated normalized and quarantine JSONL."""
+    normalized_count = rejected_count = 0
+    for line_number, disposition, record in classify_file(input_path, uri):
+        try:
+            encoded = json.dumps(
+                record, ensure_ascii=False, separators=(",", ":"),
+                default=serialize_datetime, allow_nan=False,
+            )
+        except (ValueError, TypeError, KeyError, RecursionError) as error:
+            raise ValueError(f"{input_path}:{line_number}: {error}") from error
+
+        if disposition == "valid":
+            output.write(encoded + "\n")
+            normalized_count += 1
+        else:
+            quarantine.write(encoded + "\n")
+            rejected_count += 1
     return normalized_count, rejected_count
 
 
@@ -61,18 +80,18 @@ def reject_input_overwrite(output_path: Path, inputs: list[Path]) -> None:
 
 
 def main() -> int:
-    """Normalize selected app/WAF fixture folders without Spark or AWS access."""
+    """Normalize selected App/WAF/VPC fixture folders without Spark or AWS access."""
     directory = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
         "--input-dir", type=Path, default=directory,
-        help="Fixture root containing sample_logs_app/ and sample_logs_waf/ (default: glue/test).",
+        help="Fixture root containing sample_logs_app/, sample_logs_waf/, and sample_logs_vpc/ (default: glue/test).",
     )
 
     parser.add_argument(
         "--input-prefix", default="raw/",
-        choices=("raw", "raw/", "raw/app", "raw/app/", "raw/waf", "raw/waf/"),
+        choices=("raw", "raw/", "raw/app", "raw/app/", "raw/waf", "raw/waf/", "raw/vpc", "raw/vpc/"),
         help="Logical raw source selection (default: raw/).",
     )
     parser.add_argument(
@@ -87,7 +106,8 @@ def main() -> int:
         prefix = args.input_prefix.rstrip("/")
         sources = SUPPORTED_SOURCES if prefix == "raw" else (prefix.split("/")[1],)
         fixture_dirs = [(root / f"sample_logs_{source}").resolve() for source in SUPPORTED_SOURCES]
-        inputs = [path.resolve() for folder in fixture_dirs for path in folder.rglob("*.jsonl") if path.is_file()]
+        inputs = [path.resolve() for source, folder in zip(SUPPORTED_SOURCES, fixture_dirs)
+                  for path in folder.rglob(SOURCE_PATTERNS[source]) if path.is_file()]
         outputs = []
         for source in sources:
             folder = root / f"sample_logs_{source}"
@@ -96,18 +116,19 @@ def main() -> int:
                     raise ValueError(f"Selected fixture directory is missing: {folder}")
                 print(f"{source}: skipping absent fixture directory {folder}")
                 continue
-            files = sorted(path for path in folder.rglob("*.jsonl") if path.is_file())
+            files = sorted(path for path in folder.rglob(SOURCE_PATTERNS[source]) if path.is_file())
             if not files:
-                raise ValueError(f"No JSONL inputs found in {folder}")
+                raise ValueError(f"No {SOURCE_PATTERNS[source]} inputs found in {folder}")
             for path in files:
                 relative = path.relative_to(folder)
-                uri = f"s3://{LOCAL_BUCKET}/raw/{source}/test/{relative.as_posix()}"
+                uri = f"s3://{LOCAL_BUCKET}/raw/{source}/{relative.as_posix()}"
                 source_key(uri, LOCAL_BUCKET)
-                output = (args.output_dir / f"output_{source}" / relative).resolve()
-                quarantine = (args.output_dir / f"quarantine_{source}" / relative).resolve()
+                output_relative = relative.with_suffix(".jsonl")
+                output = (args.output_dir / f"output_{source}" / output_relative).resolve()
+                quarantine = (args.output_dir / f"quarantine_{source}" / output_relative).resolve()
                 outputs.append((source, path, uri, output, quarantine))
         if not outputs:
-            raise ValueError(f"No supported JSONL inputs found in {root}")
+            raise ValueError(f"No supported inputs found in {root}")
 
         # Check every destination before creating or truncating any output.
         destinations: list[Path] = []
@@ -119,7 +140,8 @@ def main() -> int:
                 reject_input_overwrite(destination, destinations)
                 destinations.append(destination)
 
-        print("Local provenance: raw/<source>/test/<relative-filename> is a placeholder, not an S3 object.")
+        print(f"Local provenance: bucket {LOCAL_BUCKET} is a local placeholder; "
+              "raw/<source>/<relative-filename> mirrors Glue's source key.")
         totals = {source: [0, 0, 0] for source in sources}
         for source, input_path, uri, output_path, quarantine_path in outputs:
             output_path.parent.mkdir(parents=True, exist_ok=True)

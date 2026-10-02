@@ -47,7 +47,7 @@ def normalize_waf(record: dict, timestamp: datetime, source_key: str) -> dict:
         "headers": [],
     },
     datetime(2026, 9, 7, 18, 12, 6, tzinfo=timezone.utc),
-    "raw/app/WEEK_2/2026-9-07.jsonl"
+    "raw/waf/WEEK_2/2026-9-07.jsonl"
     }
 
     Example Output:
