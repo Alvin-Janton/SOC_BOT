@@ -84,7 +84,7 @@ def classify_vpc_object(content: str, uri: str, expected_bucket: str | None = No
     key = source_key(uri, expected_bucket)
     if key.split("/")[1] != "vpc" or not key.endswith(".log"):
         raise ValueError("VPC object reader requires a raw/vpc/ .log object")
-        
+
     # Whole-object enumeration is stable across Spark task/split ordering. Universal
     # newline handling retains original LF/CRLF/CR delimiters in raw_event.
     with StringIO(content, newline="") as stream:

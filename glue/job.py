@@ -79,7 +79,7 @@ def main() -> None:
             source_rows.append(spark.read.option("recursiveFileLookup", "true").option("pathGlobFilter", "*.jsonl").text(inputs).select(
                 F.col("value"), F.input_file_name().alias("source_uri"),
             ).rdd.map(lambda row: classify(row.value, row.source_uri, bucket)))
-            
+
         if vpc_inputs:
             # One row per object retains file-relative line order; these prepared
             # daily files must fit in executor memory. JSONL readers stay unchanged.
