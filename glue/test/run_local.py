@@ -1,4 +1,4 @@
-"""Normalize local fixtures without Spark or AWS; source keys are placeholders."""
+"""Normalize local fixtures without Spark or AWS using Glue-equivalent source keys."""
 
 import argparse
 from datetime import datetime, timezone
@@ -101,7 +101,7 @@ def main() -> int:
                 raise ValueError(f"No JSONL inputs found in {folder}")
             for path in files:
                 relative = path.relative_to(folder)
-                uri = f"s3://{LOCAL_BUCKET}/raw/{source}/test/{relative.as_posix()}"
+                uri = f"s3://{LOCAL_BUCKET}/raw/{source}/{relative.as_posix()}"
                 source_key(uri, LOCAL_BUCKET)
                 output = (args.output_dir / f"output_{source}" / relative).resolve()
                 quarantine = (args.output_dir / f"quarantine_{source}" / relative).resolve()
@@ -119,7 +119,8 @@ def main() -> int:
                 reject_input_overwrite(destination, destinations)
                 destinations.append(destination)
 
-        print("Local provenance: raw/<source>/test/<relative-filename> is a placeholder, not an S3 object.")
+        print(f"Local provenance: bucket {LOCAL_BUCKET} is a local placeholder; "
+              "raw/<source>/<relative-filename> mirrors Glue's source key.")
         totals = {source: [0, 0, 0] for source in sources}
         for source, input_path, uri, output_path, quarantine_path in outputs:
             output_path.parent.mkdir(parents=True, exist_ok=True)
