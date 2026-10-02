@@ -1,4 +1,4 @@
-"""Offline checks for synthetic WAF rules and the shared JSONL runner."""
+"""Offline checks for synthetic WAF rules and shared JSONL/VPC local routing."""
 
 from collections import Counter
 from datetime import datetime, timezone
@@ -15,6 +15,7 @@ TEST_DIRECTORY = Path(__file__).resolve().parent
 sys.path.insert(0, str(TEST_DIRECTORY.parent))
 
 from schemas.app import APP_COLUMNS, PARTITION_COLUMNS
+from schemas.vpc import VPC_COLUMNS
 from schemas.waf import WAF_COLUMNS
 from severity import waf_severity
 from transforms.app import normalize_application
@@ -215,6 +216,150 @@ class LocalRunnerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Output must stay outside fixture directories", result.stderr)
             self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def assert_vpc_output(self, output_root: Path) -> list[dict]:
+        """Check the synthetic VPC fixture's typed evidence and physical-line provenance."""
+        fixture = FIXTURES / "sample_logs_vpc/2026-9-01.log"
+        with fixture.open(encoding="utf-8", newline="") as source:
+            lines = list(source)
+        rows = read_jsonl(output_root / "output_vpc/2026-9-01.jsonl")
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(read_jsonl(output_root / "quarantine_vpc/2026-9-01.jsonl"), [])
+        native_fields = (
+            "flow_log_version", "account_id", "interface_id", "srcaddr", "dstaddr",
+            "srcport", "dstport", "protocol", "packets", "bytes", "start", "end",
+            "action", "log_status",
+        )
+        integer_fields = {"flow_log_version", "srcport", "dstport", "protocol", "packets", "bytes", "start", "end"}
+        key = "raw/vpc/2026-9-01.log"
+        for line_number, (line, row) in enumerate(zip(lines, rows), 1):
+            with self.subTest(source="vpc", line=line_number):
+                expected = {
+                    field: None if value == "-" else int(value) if field in integer_fields else value
+                    for field, value in zip(native_fields, line.split())
+                }
+                self.assertEqual(set(row), {column for column, _ in VPC_COLUMNS + PARTITION_COLUMNS})
+                self.assertEqual({field: row[field] for field in native_fields}, expected)
+                self.assertIsInstance(row["account_id"], str)
+                for field in integer_fields:
+                    self.assertTrue(row[field] is None or type(row[field]) is int)
+                timestamp = datetime.fromtimestamp(expected["start"], timezone.utc)
+                self.assertEqual(row["event_time"], timestamp.isoformat().replace("+00:00", "Z"))
+                self.assertEqual((row["year"], row["month"], row["day"]),
+                                 (timestamp.strftime("%Y"), timestamp.strftime("%m"), timestamp.strftime("%d")))
+                self.assertEqual((row["source_type"], row["activity_name"], row["activity_id"], row["status"]),
+                                 ("vpc_flow", "VPC Flow ACCEPT", "vpc_flow_accept", "allowed"))
+                self.assertEqual((row["severity_id"], row["severity"]), (1, "Informational"))
+                self.assertIsInstance(row["severity_source"], str)
+                self.assertEqual(json.loads(row["severity_source"]), {
+                    "rule_version": "vpc_rules_v1", "rule": "flow_context_only",
+                    "reason": "Flow action and IP addresses alone do not establish maliciousness",
+                })
+                self.assertEqual((row["src_ip"], row["dst_ip"], row["resource"]),
+                                 (expected["srcaddr"], expected["dstaddr"], expected["interface_id"]))
+                self.assertIsNone(row["actor"])
+                self.assertIsNone(row["request_id"])
+                self.assertEqual(row["schema_version"], 1)
+                self.assertEqual(row["source_s3_key"], key)
+                self.assertEqual(row["source_record_ref"], str(line_number))
+                self.assertEqual(row["event_uid"], sha256(f"vpc:{key}:{line_number}:{line}".encode()).hexdigest())
+                self.assertEqual(row["raw_event"], line)
+        self.assertEqual(rows[0]["raw_event"], rows[1]["raw_event"])
+        self.assertNotEqual(rows[0]["event_uid"], rows[1]["event_uid"])
+        self.assertEqual(rows[5]["account_id"], "000000000123")
+        self.assertEqual(rows[-2]["day"], "01")
+        self.assertEqual(rows[-1]["day"], "02")
+        return rows
+
+    def test_vpc_fields_and_repeatable_line_provenance(self) -> None:
+        """Normalize only VPC logs and preserve duplicate occurrences across identical reruns."""
+        fixture = FIXTURES / "sample_logs_vpc/2026-9-01.log"
+        before = fixture.read_bytes()
+        with tempfile.TemporaryDirectory(prefix="soc-bot-vpc-mapping-") as temporary:
+            output = Path(temporary) / "outputs"
+            result = run_runner(FIXTURES, output, "raw/vpc/")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("10 input records, 10 normalized, 0 rejected", result.stdout)
+            rows = self.assert_vpc_output(output)
+            for source in ("app", "waf"):
+                self.assertFalse((output / f"output_{source}").exists())
+                self.assertFalse((output / f"quarantine_{source}").exists())
+            result = run_runner(FIXTURES, output, "raw/vpc/")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.assert_vpc_output(output), rows)
+        self.assertEqual(fixture.read_bytes(), before)
+
+    def test_vpc_blank_and_malformed_quarantine_keep_object_lines(self) -> None:
+        """Preserve nested keys, CRLF evidence, blank rejection, and numbering per log object."""
+        fixture = FIXTURES / "sample_logs_vpc/2026-9-01.log"
+        raw_lines = fixture.read_text(encoding="utf-8").splitlines()
+        lines = [raw_lines[0] + "\r\n", "\r\n", raw_lines[1] + "\r\n", "2 too few fields\r\n"]
+        lines.extend(line + "\r\n" for line in raw_lines[2:])
+        with tempfile.TemporaryDirectory(prefix="soc-bot-vpc-quarantine-") as temporary:
+            root = Path(temporary)
+            folder = root / "fixtures/sample_logs_vpc"
+            nested = folder / "WEEK_1/2026-9-01.log"
+            nested.parent.mkdir(parents=True)
+            nested.write_bytes("".join(lines).encode("utf-8"))
+            other = folder / "2026-9-02.log"
+            other.write_bytes(lines[0].encode("utf-8"))
+            before = {path: path.read_bytes() for path in folder.rglob("*.log")}
+            result = run_runner(root / "fixtures", root / "outputs", "raw/vpc/")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("13 input records, 11 normalized, 2 rejected", result.stdout)
+            key = "raw/vpc/WEEK_1/2026-9-01.log"
+            normalized = read_jsonl(root / "outputs/output_vpc/WEEK_1/2026-9-01.jsonl")
+            expected_lines = [1, 3, *range(5, 13)]
+            self.assertEqual(len(normalized), 10)
+            self.assertEqual([row["source_record_ref"] for row in normalized], [str(number) for number in expected_lines])
+            for row, line_number in zip(normalized, expected_lines):
+                self.assertEqual(row["source_s3_key"], key)
+                self.assertEqual(row["raw_event"], lines[line_number - 1])
+                self.assertEqual(row["event_uid"], sha256(f"vpc:{key}:{line_number}:{lines[line_number - 1]}".encode()).hexdigest())
+            rejected = read_jsonl(root / "outputs/quarantine_vpc/WEEK_1/2026-9-01.jsonl")
+            self.assertEqual(rejected, [{
+                "source_s3_key": key, "source_record_ref": str(line_number),
+                "error_code": "invalid_vpc_field_count", "raw_event": lines[line_number - 1],
+                "year": "2026", "month": "09", "day": "01",
+            } for line_number in (2, 4)])
+            other_rows = read_jsonl(root / "outputs/output_vpc/2026-9-02.jsonl")
+            self.assertEqual(len(other_rows), 1)
+            self.assertEqual(other_rows[0]["source_record_ref"], "1")
+            self.assertEqual(other_rows[0]["source_s3_key"], "raw/vpc/2026-9-02.log")
+            self.assertNotEqual(other_rows[0]["event_uid"], normalized[0]["event_uid"])
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_vpc_root_reruns_and_fixture_guards(self) -> None:
+        """Include all available sources at root while protecting fixtures and unselected outputs."""
+        before = {path: path.read_bytes() for path in FIXTURES.rglob("*") if path.is_file()}
+        with tempfile.TemporaryDirectory(prefix="soc-bot-vpc-isolation-") as temporary:
+            root = Path(temporary)
+            output = root / "outputs"
+            result = run_runner(FIXTURES, output, "raw/")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assert_source_output(output, "app")
+            self.assert_source_output(output, "waf")
+            self.assert_vpc_output(output)
+            for selected in ("vpc", "app", "waf"):
+                with self.subTest(selected=selected):
+                    untouched = {source: snapshot_outputs(output, source) for source in ("app", "waf", "vpc") if source != selected}
+                    result = run_runner(FIXTURES, output, f"raw/{selected}/")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    for source, snapshot in untouched.items():
+                        self.assertTrue(snapshot)
+                        self.assertEqual(snapshot_outputs(output, source), snapshot)
+            fixtures = root / "fixtures"
+            shutil.copytree(FIXTURES / "sample_logs_app", fixtures / "sample_logs_app")
+            result = run_runner(fixtures, root / "missing-outputs", "raw/vpc/")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Selected fixture directory is missing", result.stderr)
+            result = run_runner(fixtures, root / "partial-outputs", "raw/")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "partial-outputs/output_vpc").exists())
+            result = run_runner(FIXTURES, FIXTURES / "sample_logs_vpc", "raw/vpc/")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Output must stay outside fixture directories", result.stderr)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
 
 
 if __name__ == "__main__":

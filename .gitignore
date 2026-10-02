@@ -16,11 +16,14 @@ cdk.out-*/
 # Python and Glue development
 glue/test/sample_logs_app/
 glue/test/sample_logs_waf/
+glue/test/sample_logs_vpc/
 glue/test/output/
 glue/test/output_app/
 glue/test/output_waf/
+glue/test/output_vpc/
 glue/test/quarantine_app/
 glue/test/quarantine_waf/
+glue/test/quarantine_vpc/
 glue/test/sample_logs_S3/
 __pycache__/
 *.py[cod]
@@ -50,6 +53,8 @@ temp/
 
 # Logs
 *.log
+# Keep only the explicitly approved synthetic VPC fixture trackable.
+!glue/test/fixtures/sample_logs_vpc/2026-9-01.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
