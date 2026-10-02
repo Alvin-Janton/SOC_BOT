@@ -1,4 +1,4 @@
-"""Validate untrusted application JSONL without mutating source records."""
+"""Validate untrusted source records without mutating their raw evidence."""
 
 from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address
@@ -126,3 +126,90 @@ def parse_waf_record(raw_line: str) -> tuple[dict, datetime]:
         raise ValueError("invalid_responseCodeSent")
 
     return record, timestamp
+
+
+def _vpc_integer(value: str | None, field: str, maximum: int, required: bool = False) -> int | None:
+    """Parse an available unsigned VPC field within its normalized integer range."""
+    if value is None:
+        if required:
+            raise ValueError(f"missing_{field}")
+        return None
+
+    if not value.isascii() or not value.isdecimal():
+        raise ValueError(f"invalid_{field}")
+
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise ValueError(f"invalid_{field}") from error
+
+    if number > maximum:
+        raise ValueError(f"invalid_{field}")
+    return number
+
+
+def parse_vpc_record(raw_line: str) -> tuple[dict, datetime]:
+    """Validate the 14-field version-2 flow format and return its UTC start time.
+
+    A positional ``-`` becomes null for unavailable native evidence. Version and
+    start/end are required because unsupported versions and undated records
+    cannot be safely mapped to the explicit schema and UTC output partitions.
+    Account IDs remain strings, including AWS's ``unknown`` service-owned value.
+    """
+    if not isinstance(raw_line, str):
+        raise ValueError("invalid_vpc_record")
+
+    fields = (
+        "flow_log_version", "account_id", "interface_id", "srcaddr", "dstaddr",
+        "srcport", "dstport", "protocol", "packets", "bytes", "start", "end",
+        "action", "log_status",
+    )
+    values = raw_line.split()
+    if len(values) != len(fields):
+        raise ValueError("invalid_vpc_field_count")
+
+    record = {field: None if value == "-" else value for field, value in zip(fields, values)}
+    record["flow_log_version"] = _vpc_integer(record["flow_log_version"], "flow_log_version", 2147483647, True)
+    if record["flow_log_version"] != 2:
+        raise ValueError("unsupported_flow_log_version")
+
+    account_id = record["account_id"]
+    if account_id not in (None, "unknown") and (
+        len(account_id) != 12 or not account_id.isascii() or not account_id.isdecimal()
+    ):
+        raise ValueError("invalid_account_id")
+
+    interface_id = record["interface_id"]
+    if interface_id is not None and (
+        not interface_id.startswith("eni-") or not interface_id[4:].isascii() or not interface_id[4:].isalnum()
+    ):
+        raise ValueError("invalid_interface_id")
+
+    for field in ("srcaddr", "dstaddr"):
+        if record[field] is not None:
+            try:
+                ip_address(record[field])
+            except ValueError as error:
+                raise ValueError(f"invalid_{field}") from error
+
+    for field in ("srcport", "dstport"):
+        record[field] = _vpc_integer(record[field], field, 65535)
+    record["protocol"] = _vpc_integer(record["protocol"], "protocol", 255)
+    for field in ("packets", "bytes", "start", "end"):
+        record[field] = _vpc_integer(record[field], field, 9223372036854775807, field in ("start", "end"))
+
+    timestamps = {}
+    for field in ("start", "end"):
+        try:
+            timestamps[field] = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=record[field])
+        except (OverflowError, ValueError) as error:
+            raise ValueError(f"invalid_{field}") from error
+
+    if record["end"] < record["start"]:
+        raise ValueError("end_before_start")
+    if record["action"] not in (None, "ACCEPT", "REJECT"):
+        raise ValueError("invalid_action")
+    if record["log_status"] not in (None, "OK", "NODATA", "SKIPDATA"):
+        raise ValueError("invalid_log_status")
+
+    return record, timestamps["start"]

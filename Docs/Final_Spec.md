@@ -659,21 +659,21 @@ s3://soc-bot-{environment}-data-{account}-{region}/
 |   |-- cloudtrail/
 |   |-- app/
 |   |-- waf/
-|   |-- vpc-flow/
+|   |-- vpc/
 |   |-- guardduty/
 |   |-- route53/
 |-- normalized/
 |   |-- cloudtrail/year=2026/month=09/day=01/
 |   |-- app/year=2026/month=09/day=01/
 |   |-- waf/year=2026/month=09/day=01/
-|   |-- vpc-flow/year=2026/month=09/day=01/
+|   |-- vpc/year=2026/month=09/day=01/
 |   |-- guardduty/year=2026/month=09/day=01/
 |   |-- route53/year=2026/month=09/day=01/
 |-- quarantine/
 |   |-- cloudtrail/
 |   |-- app/
 |   |-- waf/
-|   |-- vpc-flow/
+|   |-- vpc/
 |-- athena-results/
 |-- playbooks/
 ```
@@ -780,6 +780,8 @@ Severity is an analytical aid, not ground truth. The original status and native 
 
 WAF events initially use `waf_rules_v1`, independently of application signatures. `ALLOW` without native match evidence is Informational; `BLOCK` with positive match evidence is Medium; `ALLOW` with positive match evidence is High. Unsupported actions, or a `BLOCK` without match evidence, are Unknown. Positive evidence means a non-default terminating rule ID, terminating match details, non-terminating matches, matched rules inside rule groups, rate-based rules, or native labels. Labels represent WAF evidence, not a guarantee of maliciousness. `severity_source` is compact JSON text containing `rule_version`, the selected `rule`, `action`, and native rule/label `evidence`, including matched-data details when supplied. This is an initial mapping subject to review; an allowed match is not proof of successful exploitation.
 
+VPC Flow events use fixed Informational (1) severity with `vpc_rules_v1`. `severity_source` remains compact JSON text containing that version, `rule=flow_context_only`, and a reason explaining that flow action and IP addresses alone do not establish maliciousness. Neither `ACCEPT`/`REJECT` nor synthetic IP ranges raise severity; native network evidence remains available for correlation.
+
 Application events use `app_rules_v2`, with the following source-specific mapping:
 
 | Request evidence | HTTP status | Severity |
@@ -830,12 +832,7 @@ Athena
 
 ### 15.2 Job Structure
 
-Use one shared Glue job per environment with source-specific validators, transformer modules, and explicit output schemas. A run may select all supported sources using the `raw/` root, or one source using `raw/app/` or `raw/waf/`. Root runs expand to supported source prefixes directly; they do not list the bucket or shared `raw/` root. Unsupported explicit prefixes and unexpected source URIs fail closed. Sources planned for later increments are:
-
-- `normalize-cloudtrail`
-- `normalize-app`
-- `normalize-waf`
-- `normalize-vpc-flow`
+Use one shared Glue job per environment with source-specific validators, transformer modules, and explicit output schemas. A run may select all supported sources using the `raw/` root, or one source using `raw/app/`, `raw/waf/`, or `raw/vpc/`. Root runs expand to supported source prefixes directly; they do not list the bucket or shared `raw/` root. Unsupported explicit prefixes and unexpected source URIs fail closed. Application and WAF sources read `.jsonl`; VPC reads version-2 space-delimited `.log` files. CloudTrail support remains a later increment, not an empty module or separate job.
 
 Example parameters:
 
@@ -847,11 +844,15 @@ Example parameters:
 --schema_version 1
 ```
 
-Raw JSONL lines are dispatched using their S3 object path before source-specific validation and transformation. Different normalized schemas must never be combined into one DataFrame or table. App-only and WAF-only runs leave the other source's output and quarantine partitions untouched. Full runs replace only source/date partitions represented in input; incremental runs intersect the requested dates with each source's available dates. Missing supported prefixes are reported and skipped only in a root run; an explicitly selected missing prefix fails. Reject-fraction checks are source-specific and complete before any writes. Writes across partitions are not transactional; a failed write requires a rerun.
+Raw records are dispatched using their S3 object path before source-specific validation and transformation. Different normalized schemas must never be combined into one DataFrame or table. Source-only runs leave every unselected source's output and quarantine partitions untouched. Full runs replace only source/date partitions represented in input; incremental runs intersect the requested dates with each source's available dates. Missing supported prefixes are reported and skipped only in a root run; an explicitly selected missing prefix fails. Reject-fraction checks are source-specific and complete before any writes. Writes across partitions are not transactional; a failed write requires a rerun.
 
-The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role names are retained for deployment continuity; they now support both app and WAF. One concurrent run per environment serializes all supported sources. Input and output roots must share a bucket; source roots accept an optional trailing slash.
+The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role names are retained for deployment continuity; they now support app, WAF, and VPC Flow. One concurrent run per environment serializes all supported sources. Input and output roots must share a bucket; source roots accept an optional trailing slash.
 
 WAF `timestamp` (integer epoch milliseconds) is canonical UTC time. Optional `event_time` must contain a timezone and agree exactly. Preserve native request, rule, label, response, and object evidence. Keep each input occurrence, including repeated request IDs: `request_id` and `source_record_ref` retain the native ID, while `event_uid` hashes source type, raw object key, and request ID. Copies in different objects have different identifiers; repeated IDs in the same object can share an identifier and are still separate rows. Request ID or event UID alone is not a unique occurrence/join key. `waf_events` uses the common envelope plus WAF-specific columns; nested rule evidence and headers are serialized as JSON strings, with projected UTC year/month/day partitions. The supplied WAF records contain native WAF evidence, not application ground-truth annotations. Select native fields for output and raw-event provenance without recursive synthetic-field filtering; preserve native nested rule and label details unchanged. Application annotation filtering remains in place, and raw JSONL remains unchanged. If the WAF source contract later introduces hidden evaluation annotations, its normalization must be reviewed before those inputs are used.
+
+VPC input uses the 14-field version-2 order: `version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status`. Preserve `account_id` as a source string, including AWS's `unknown` marker; do not substitute the deployment account. Unavailable `-` fields become null, but version and start/end timestamps are required. Validate IP addresses, integer ranges, `end >= start`, `ACCEPT`/`REJECT`, and `OK`/`NODATA`/`SKIPDATA` when those fields are available. Convert start/end epoch seconds using UTC; `event_time` is start, `source_type` is `vpc_flow`, and status is allowed/blocked/unknown. The projected `vpc_flow_events` table has the common envelope plus the 14 native columns at `normalized/vpc/year=YYYY/month=MM/day=DD/`; rejected rows use `quarantine/vpc/` with the existing quarantine schema.
+
+VPC objects are read whole to number physical lines consistently within each object, not by Spark's global row order. Prepared daily `.log` files must fit executor memory; this reader is not intended for arbitrarily large objects. Preserve the original line, including its line terminator, in `raw_event`; `source_record_ref` is the one-based line number as a string. `event_uid` hashes source type, source key, line number, and original line, so identical lines at different positions or in different objects remain distinct. Blank lines, headers, malformed rows, and unsupported versions are rejected without shifting subsequent line numbers. Rejected VPC records require a dated `YYYY-M-D.log` filename for quarantine date fallback; an unavailable fallback fails the run. Raw source objects remain unchanged. Runtime S3 access adds only `raw/vpc/` reads and scoped `normalized/vpc/`/`quarantine/vpc/` output operations, with no raw writes or evaluation access.
 
 ### 15.3 Transformation Modules
 
@@ -859,17 +860,18 @@ WAF `timestamp` (integer epoch milliseconds) is canonical UTC time. Optional `ev
 glue/
 |-- job.py
 |-- config.py
+|-- routing.py
 |-- schemas/
 |   |-- common.py
 |   |-- cloudtrail.py
 |   |-- app.py
 |   |-- waf.py
-|   |-- vpc_flow.py
+|   |-- vpc.py
 |-- transforms/
 |   |-- cloudtrail.py
 |   |-- app.py
 |   |-- waf.py
-|   |-- vpc_flow.py
+|   |-- vpc.py
 |-- validation.py
 |-- severity.py
 ```
