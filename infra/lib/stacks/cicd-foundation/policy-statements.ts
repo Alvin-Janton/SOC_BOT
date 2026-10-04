@@ -183,6 +183,15 @@ export function dataAndAnalyticsStatements(resources: EnvironmentResources): Pol
         `arn:${Aws.PARTITION}:glue:${Aws.REGION}:${Aws.ACCOUNT_ID}:trigger/${resources.prefix}-*`,
       ],
     }),
+    ...(resources.environment === 'dev' ? [
+      new PolicyStatement({
+        sid: 'DeleteDevGlueDatabaseUserDefinedFunctions',
+        actions: ['glue:DeleteDatabase'],
+        resources: [
+          `arn:${Aws.PARTITION}:glue:${Aws.REGION}:${Aws.ACCOUNT_ID}:userDefinedFunction/${resources.databasePrefix}*/*`,
+        ],
+      }),
+    ] : []),
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}AthenaWorkgroups`,
       actions: [

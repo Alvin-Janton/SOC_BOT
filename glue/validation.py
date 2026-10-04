@@ -128,6 +128,69 @@ def parse_waf_record(raw_line: str) -> tuple[dict, datetime]:
     return record, timestamp
 
 
+def parse_cloudtrail_record(raw_line: str) -> tuple[dict, datetime]:
+    """Validate CloudTrail identity and typed evidence while allowing sparse events."""
+    try:
+        record = json.loads(raw_line)
+        # Reject nonstandard NaN/Infinity, including inside retained raw details.
+        json.dumps(record, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError("malformed_json") from error
+
+    if not isinstance(record, dict):
+        raise ValueError("record_not_object")
+
+    for key in ("eventTime", "eventSource", "eventName", "eventID"):
+        if not isinstance(record.get(key), str) or not record[key].strip():
+            raise ValueError(f"invalid_{key}")
+
+    identity = record.get("userIdentity")
+    if not isinstance(identity, dict):
+        raise ValueError("invalid_userIdentity")
+
+    for key in ("requestParameters", "responseElements", "additionalEventData"):
+        if record.get(key) is not None and not isinstance(record[key], dict):
+            raise ValueError(f"invalid_{key}")
+
+    context = identity.get("sessionContext")
+    if context is not None and not isinstance(context, dict):
+        raise ValueError("invalid_userIdentity_sessionContext")
+
+    issuer = (context or {}).get("sessionIssuer")
+    if issuer is not None and not isinstance(issuer, dict):
+        raise ValueError("invalid_userIdentity_sessionContext_sessionIssuer")
+
+    s3_parameters = (record.get("requestParameters") or {}) if record["eventSource"] == "s3.amazonaws.com" else {}
+
+    for fields, container, prefix in (
+        (("eventVersion", "awsRegion", "userAgent", "sourceIPAddress", "requestID",
+          "recipientAccountId", "errorCode", "errorMessage"), record, ""),
+        (("type", "arn", "accountId", "userName"), identity, "userIdentity_"),
+        (("arn",), issuer or {}, "sessionIssuer_"),
+        (("bucketName", "key", "prefix"), s3_parameters, "requestParameters_"),
+        (("ConsoleLogin",), record.get("responseElements") or {}, "responseElements_"),
+    ):
+        for key in fields:
+            if container.get(key) is not None and not isinstance(container[key], str):
+                raise ValueError(f"invalid_{prefix}{key}")
+
+    transferred = (record.get("additionalEventData") or {}).get("bytesTransferredOut")
+
+    if transferred is not None and (type(transferred) is not int or not 0 <= transferred < 2 ** 63):
+        raise ValueError("invalid_bytesTransferredOut")
+
+    try:
+        timestamp = datetime.fromisoformat(record["eventTime"].replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            raise ValueError("missing_timezone")
+
+        timestamp = timestamp.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as error:
+        raise ValueError("invalid_eventTime") from error
+
+    return record, timestamp
+
+
 def _vpc_integer(value: str | None, field: str, maximum: int, required: bool = False) -> int | None:
     """Parse an available unsigned VPC field within its normalized integer range."""
     if value is None:

@@ -1,4 +1,4 @@
-"""On-demand PySpark entry point for App/WAF JSONL and version-2 VPC text."""
+"""On-demand PySpark entry point for App/WAF/CloudTrail JSONL and VPC text."""
 
 from urllib.parse import urlparse
 
@@ -7,12 +7,13 @@ from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.types import IntegerType, LongType, StringType, StructField, StructType, TimestampType
 
 from config import parse_config
-from routing import classify, classify_vpc_object
+from routing import classify, classify_cloudtrail_object, classify_vpc_object
 from schemas.app import APP_COLUMNS, PARTITION_COLUMNS
+from schemas.cloudtrail import CLOUDTRAIL_COLUMNS
 from schemas.waf import WAF_COLUMNS
 from schemas.vpc import VPC_COLUMNS
 
-SOURCE_COLUMNS = {"app": APP_COLUMNS, "waf": WAF_COLUMNS, "vpc": VPC_COLUMNS}
+SOURCE_COLUMNS = {"app": APP_COLUMNS, "waf": WAF_COLUMNS, "vpc": VPC_COLUMNS, "cloudtrail": CLOUDTRAIL_COLUMNS}
 QUARANTINE_COLUMNS = (
     ("source_s3_key", "string"), ("source_record_ref", "string"),
     ("error_code", "string"), ("raw_event", "string"),
@@ -50,6 +51,7 @@ def main() -> None:
     bucket = urlparse(config.input_prefix).netloc
     inputs = []
     vpc_inputs = []
+    cloudtrail_inputs = []
     frames = []
     rows = None
 
@@ -69,9 +71,12 @@ def main() -> None:
             if source == "vpc":
                 vpc_inputs.append(prefix)
 
+            elif source == "cloudtrail":
+                cloudtrail_inputs.append(prefix)
+
             else:
                 inputs.append(prefix)
-        if not inputs and not vpc_inputs:
+        if not inputs and not vpc_inputs and not cloudtrail_inputs:
             raise ValueError("No supported input prefixes found")
 
         source_rows = []
@@ -79,6 +84,15 @@ def main() -> None:
             source_rows.append(spark.read.option("recursiveFileLookup", "true").option("pathGlobFilter", "*.jsonl").text(inputs).select(
                 F.col("value"), F.input_file_name().alias("source_uri"),
             ).rdd.map(lambda row: classify(row.value, row.source_uri, bucket)))
+
+        if cloudtrail_inputs:
+            # Whole objects preserve rejected records' physical line numbers.
+            # Prepared daily CloudTrail objects must fit in executor memory.
+            source_rows.append(spark.read.option("recursiveFileLookup", "true").option("pathGlobFilter", "*.jsonl").text(
+                cloudtrail_inputs, wholetext=True,
+            ).select(F.col("value"), F.input_file_name().alias("source_uri")).rdd.flatMap(
+                lambda row: classify_cloudtrail_object(row.value, row.source_uri, bucket),
+            ))
 
         if vpc_inputs:
             # One row per object retains file-relative line order; these prepared

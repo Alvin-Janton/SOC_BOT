@@ -14,7 +14,7 @@ from config import SUPPORTED_SOURCES
 from routing import classify, classify_vpc_object, source_key
 
 LOCAL_BUCKET = "soc-bot-local-fixtures"
-SOURCE_PATTERNS = {"app": "*.jsonl", "waf": "*.jsonl", "vpc": "*.log"}
+SOURCE_PATTERNS = {"app": "*.jsonl", "waf": "*.jsonl", "vpc": "*.log", "cloudtrail": "*.jsonl"}
 
 
 def serialize_datetime(value: object) -> str:
@@ -26,9 +26,11 @@ def serialize_datetime(value: object) -> str:
 
 
 def classify_file(input_path: Path, uri: str) -> Iterator[tuple[int, str, dict]]:
-    """Use Glue's object reader for VPC and the existing nonblank JSONL reader otherwise."""
-    is_vpc = source_key(uri, LOCAL_BUCKET).split("/")[1] == "vpc"
-    with input_path.open(encoding="utf-8" if is_vpc else "utf-8-sig", newline="" if is_vpc else None) as source:
+    """Use VPC's object reader and retain physical CloudTrail quarantine line references."""
+    selected_source = source_key(uri, LOCAL_BUCKET).split("/")[1]
+    is_vpc = selected_source == "vpc"
+    preserve_lines = selected_source in {"vpc", "cloudtrail"}
+    with input_path.open(encoding="utf-8" if preserve_lines else "utf-8-sig", newline="" if preserve_lines else None) as source:
         if is_vpc:
             # Preserve physical lines and their terminators just like Glue's wholetext reader.
             line_number = 1
@@ -43,7 +45,7 @@ def classify_file(input_path: Path, uri: str) -> Iterator[tuple[int, str, dict]]
                 if not line.strip():
                     continue
                 try:
-                    _, disposition, record = classify(line, uri, LOCAL_BUCKET)
+                    _, disposition, record = classify(line, uri, LOCAL_BUCKET, line_number=line_number)
                 except (ValueError, TypeError, KeyError, RecursionError) as error:
                     raise ValueError(f"{input_path}:{line_number}: {error}") from error
                 yield line_number, disposition, record
@@ -80,18 +82,19 @@ def reject_input_overwrite(output_path: Path, inputs: list[Path]) -> None:
 
 
 def main() -> int:
-    """Normalize selected App/WAF/VPC fixture folders without Spark or AWS access."""
+    """Normalize selected App/WAF/VPC/CloudTrail fixture folders without AWS access."""
     directory = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
         "--input-dir", type=Path, default=directory,
-        help="Fixture root containing sample_logs_app/, sample_logs_waf/, and sample_logs_vpc/ (default: glue/test).",
+        help="Fixture root containing sample_logs_app/, sample_logs_waf/, sample_logs_vpc/, and sample_logs_cloudtrail/ (default: glue/test).",
     )
 
     parser.add_argument(
         "--input-prefix", default="raw/",
-        choices=("raw", "raw/", "raw/app", "raw/app/", "raw/waf", "raw/waf/", "raw/vpc", "raw/vpc/"),
+        choices=("raw", "raw/", "raw/app", "raw/app/", "raw/waf", "raw/waf/", "raw/vpc", "raw/vpc/",
+                 "raw/cloudtrail", "raw/cloudtrail/"),
         help="Logical raw source selection (default: raw/).",
     )
     parser.add_argument(

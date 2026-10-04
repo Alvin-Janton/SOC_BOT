@@ -265,6 +265,10 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:s3:::soc-bot-${environment}-*/*`),
         resource(`arn:${partition}:glue:${region}:${account}:database/soc_bot_${environment}*`),
         resource(`arn:${partition}:glue:${region}:${account}:table/soc_bot_${environment}*/*`),
+        // Dev database deletion authorizes descendant UDFs within the same database namespace.
+        ...(environment === 'dev' ? [
+          resource(`arn:${partition}:glue:${region}:${account}:userDefinedFunction/soc_bot_${environment}*/*`),
+        ] : []),
         resource(`arn:${partition}:glue:${region}:${account}:job/SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:glue:${region}:${account}:trigger/SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:athena:${region}:${account}:workgroup/SOC-BOT-${upper}-*`),

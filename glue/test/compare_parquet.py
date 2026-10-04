@@ -4,8 +4,9 @@ Install dependencies: python -m pip install -r glue/test/requirements-test.txt
 Usage: python glue/test/compare_parquet.py --parquet downloaded/part-00000.parquet \
     downloaded/part-00001.parquet --expected glue/test/output_waf/2026-9-11.jsonl
 
-Pass one source per invocation and only matching input objects/partitions. All
-persisted fields, including JSON-text evidence, are compared exactly as a row
+Pass one source per invocation and only matching input objects/partitions.
+Supported sources (app, waf, and vpc_flow) use their production column schemas.
+All persisted fields, including JSON-text evidence, are compared exactly as a row
 multiset: ordering is irrelevant, but repeated rows are not discarded. Naive
 Parquet timestamps represent UTC, matching the Glue job's Spark configuration.
 Expected date helpers and any downloaded Hive partition paths/columns must agree
@@ -26,9 +27,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from schemas.app import APP_COLUMNS
+from schemas.vpc import VPC_COLUMNS
 from schemas.waf import WAF_COLUMNS
 
-SOURCE_COLUMNS = {"app": APP_COLUMNS, "waf": WAF_COLUMNS}
+SOURCE_COLUMNS = {"app": APP_COLUMNS, "waf": WAF_COLUMNS, "vpc_flow": VPC_COLUMNS}
 PARTITION_NAMES = ("year", "month", "day")
 
 
@@ -152,7 +154,7 @@ def validate_date(parts: dict, timestamp: str, location: str) -> None:
 def canonical_row(record: dict, source: str, location: str, path_parts: dict | None = None) -> tuple:
     """Create an exact persisted-field row after validating source and date provenance."""
     if record.get("source_type") != source:
-        raise ValueError(f"{location}: mixed sources; compare app and WAF in separate invocations")
+        raise ValueError(f"{location}: mixed sources; compare app, waf, and vpc_flow in separate invocations")
     columns = SOURCE_COLUMNS[source]
     values = tuple(normalize_value(record[name], kind, f"{location}.{name}") for name, kind in columns)
     timestamp = values[[name for name, _ in columns].index("event_time")]
@@ -189,7 +191,7 @@ def read_expected(paths: list[Path]) -> tuple[str, Counter]:
                     raise ValueError(f"{location}: expected a JSON object")
                 record_source = record.get("source_type")
                 if record_source not in SOURCE_COLUMNS:
-                    raise ValueError(f"{location}: source_type must be app or waf")
+                    raise ValueError(f"{location}: source_type must be app, waf, or vpc_flow")
                 source = source or record_source
                 validate_columns(record, source, location, require_partitions=True)
                 rows[canonical_row(record, source, location)] += 1
@@ -234,8 +236,9 @@ def print_differences(label: str, rows: Counter, source: str) -> None:
     print(f"{label}: {rows.total()} rows")
     for row, count in list(rows.items())[:5]:
         key = str(row[names.index("source_s3_key")])[:160]
-        request_id = str(row[names.index("request_id")])[:80]
-        print(f"  {count} occurrence(s): source_s3_key={key!r}, request_id={request_id!r}")
+        reference_name = "source_record_ref" if source == "vpc_flow" else "request_id"
+        reference = str(row[names.index(reference_name)])[:80]
+        print(f"  {count} occurrence(s): source_s3_key={key!r}, {reference_name}={reference!r}")
     if len(rows) > 5:
         print(f"  ... {len(rows) - 5} additional distinct rows")
 
