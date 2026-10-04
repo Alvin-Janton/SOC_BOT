@@ -214,7 +214,9 @@ def waf_severity(record: dict) -> tuple[int, str, str]:
 def cloudtrail_status(record: dict) -> str:
     """Apply the MVP failure rule to validated error and ConsoleLogin evidence."""
     response = record.get("responseElements") or {}
-    return "failure" if record.get("errorMessage") or response.get("ConsoleLogin") == "Failure" else "success"
+    return "failure" if (
+        record.get("errorCode") or record.get("errorMessage") or response.get("ConsoleLogin") == "Failure"
+    ) else "success"
 
 def cloudtrail_severity(record: dict) -> tuple[int, str, str]:
     """Rate exact prepared-dataset indicators with deterministic per-event evidence."""
@@ -232,7 +234,7 @@ def cloudtrail_severity(record: dict) -> tuple[int, str, str]:
     status = cloudtrail_status(record)
     transferred = (record.get("additionalEventData") or {}).get("bytesTransferredOut")
     s3_success = record["eventSource"] == "s3.amazonaws.com" and status == "success"
-    
+
     if not matches:
         score, rule = 1, "no_known_indicator"
 

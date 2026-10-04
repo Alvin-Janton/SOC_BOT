@@ -187,7 +187,7 @@ def parse_cloudtrail_record(raw_line: str) -> tuple[dict, datetime]:
         timestamp = timestamp.astimezone(timezone.utc)
     except (ValueError, OverflowError) as error:
         raise ValueError("invalid_eventTime") from error
-        
+
     return record, timestamp
 
 

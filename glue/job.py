@@ -73,7 +73,7 @@ def main() -> None:
 
             elif source == "cloudtrail":
                 cloudtrail_inputs.append(prefix)
-                
+
             else:
                 inputs.append(prefix)
         if not inputs and not vpc_inputs and not cloudtrail_inputs:

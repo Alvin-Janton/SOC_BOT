@@ -104,7 +104,7 @@ def classify_cloudtrail_object(content: str, uri: str, expected_bucket: str | No
 
     if key.split("/")[1] != "cloudtrail" or not key.endswith(".jsonl"):
         raise ValueError("CloudTrail object reader requires a raw/cloudtrail/ .jsonl object")
-        
+
     with StringIO(content, newline="") as stream:
         for line_number, line in enumerate(stream, 1):
             if line.strip():
