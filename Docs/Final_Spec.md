@@ -755,6 +755,18 @@ Common fields should include:
 
 Source-specific columns remain available in the corresponding table.
 
+`cloudtrail_events` uses the unchanged common schema version and adds the following columns:
+
+| CloudTrail columns | Glue/Athena type |
+| --- | --- |
+| `event_version`, `event_source`, `event_name`, `aws_region`, `user_agent` | `string` |
+| `identity_type`, `identity_account_id`, `identity_user_name` | `string` |
+| `error_code`, `error_message` | `string` |
+| `s3_bucket_name`, `s3_object_key`, `s3_prefix` | `string` |
+| `bytes_transferred_out` | `bigint` |
+
+Preserve `eventVersion` as a string. Optional fields are nullable, and variable nested details remain in the full original event serialized as JSON in `raw_event`. Do not add duplicate identity ARN, principal ID, MFA, bytes-in, or console-login-result columns; the common `actor` and raw event retain the relevant evidence.
+
 ### 14.2 Severity Mapping
 
 Use the following common scale:
@@ -781,6 +793,23 @@ Severity is an analytical aid, not ground truth. The original status and native 
 WAF events initially use `waf_rules_v1`, independently of application signatures. `ALLOW` without native match evidence is Informational; `BLOCK` with positive match evidence is Medium; `ALLOW` with positive match evidence is High. Unsupported actions, or a `BLOCK` without match evidence, are Unknown. Positive evidence means a non-default terminating rule ID, terminating match details, non-terminating matches, matched rules inside rule groups, rate-based rules, or native labels. Labels represent WAF evidence, not a guarantee of maliciousness. `severity_source` is compact JSON text containing `rule_version`, the selected `rule`, `action`, and native rule/label `evidence`, including matched-data details when supplied. This is an initial mapping subject to review; an allowed match is not proof of successful exploitation.
 
 VPC Flow events use fixed Informational (1) severity with `vpc_rules_v1`. `severity_source` remains compact JSON text containing that version, `rule=flow_context_only`, and a reason explaining that flow action and IP addresses alone do not establish maliciousness. Neither `ACCEPT`/`REJECT` nor synthetic IP ranges raise severity; native network evidence remains available for correlation.
+
+CloudTrail events use `cloudtrail_rules_v1` with exact, case-sensitive matches against the prepared dataset's approved indicators:
+
+- Source IPs: `24.5.32.5`, `95.90.195.80`, and `203.0.113.77`, matched only in `sourceIPAddress`.
+- Identity ARNs: `arn:aws:iam::123456789012:user/cloudsploit` and `arn:aws:iam::123456789012:role/MordorNginxStack-BankingWAFRole-9S3E0UAE1MM0`, matched in `userIdentity.arn` or `userIdentity.sessionContext.sessionIssuer.arn`.
+
+These account IDs belong to synthetic source evidence, not infrastructure configuration. Match the original fields exactly; do not expand the rules to arbitrary ARNs, IP ranges, or usernames. The approved role can appear as the issuer of an assumed-role session, so issuer evidence is checked separately from the session ARN.
+
+| CloudTrail evidence | Severity |
+| --- | --- |
+| No approved indicator matches | Informational (1) |
+| Approved indicator matches a failed `ConsoleLogin` | Medium (3) |
+| Approved indicator matches successful `s3.amazonaws.com` `ListObjects` or `ListBuckets` | High (4) |
+| Approved indicator matches successful `s3.amazonaws.com` `GetObject` with positive `bytesTransferredOut` | Critical (5) |
+| Other activity with an approved indicator, including scanner/context events | Medium (3) |
+
+Failure means a non-empty `errorMessage` or `responseElements.ConsoleLogin == "Failure"`; otherwise status is success. `errorCode` alone does not mark failure under this prepared-source contract. Missing or zero transferred-out bytes never qualify for Critical. `severity_source` remains a `string` containing compact JSON with `rule_version`, the selected `rule`, matched indicator field/value pairs, and minimal event evidence. Unmatched events have an empty matches array. These deterministic MVP rules are dataset heuristics, not general-purpose threat intelligence or proof of compromise; an arbitrary ARN or the presence of a ConsoleLogin result is insufficient to raise severity.
 
 Application events use `app_rules_v2`, with the following source-specific mapping:
 
@@ -832,7 +861,7 @@ Athena
 
 ### 15.2 Job Structure
 
-Use one shared Glue job per environment with source-specific validators, transformer modules, and explicit output schemas. A run may select all supported sources using the `raw/` root, or one source using `raw/app/`, `raw/waf/`, or `raw/vpc/`. Root runs expand to supported source prefixes directly; they do not list the bucket or shared `raw/` root. Unsupported explicit prefixes and unexpected source URIs fail closed. Application and WAF sources read `.jsonl`; VPC reads version-2 space-delimited `.log` files. CloudTrail support remains a later increment, not an empty module or separate job.
+Use one shared Glue job per environment with source-specific validators, transformer modules, and explicit output schemas. A run may select all supported sources using the `raw/` root, or one source using `raw/app/`, `raw/waf/`, `raw/vpc/`, or `raw/cloudtrail/`. Root runs expand to supported source prefixes directly; they do not list the bucket or shared `raw/` root. Unsupported explicit prefixes and unexpected source URIs fail closed. Application, WAF, and CloudTrail sources read `.jsonl`; VPC reads version-2 space-delimited `.log` files.
 
 Example parameters:
 
@@ -846,13 +875,19 @@ Example parameters:
 
 Raw records are dispatched using their S3 object path before source-specific validation and transformation. Different normalized schemas must never be combined into one DataFrame or table. Source-only runs leave every unselected source's output and quarantine partitions untouched. Full runs replace only source/date partitions represented in input; incremental runs intersect the requested dates with each source's available dates. Missing supported prefixes are reported and skipped only in a root run; an explicitly selected missing prefix fails. Reject-fraction checks are source-specific and complete before any writes. Writes across partitions are not transactional; a failed write requires a rerun.
 
-The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role names are retained for deployment continuity; they now support app, WAF, and VPC Flow. One concurrent run per environment serializes all supported sources. Input and output roots must share a bucket; source roots accept an optional trailing slash.
+The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role names are retained for deployment continuity; they now support app, WAF, VPC Flow, and CloudTrail. One concurrent run per environment serializes all supported sources. Input and output roots must share a bucket; source roots accept an optional trailing slash.
 
 WAF `timestamp` (integer epoch milliseconds) is canonical UTC time. Optional `event_time` must contain a timezone and agree exactly. Preserve native request, rule, label, response, and object evidence. Keep each input occurrence, including repeated request IDs: `request_id` and `source_record_ref` retain the native ID, while `event_uid` hashes source type, raw object key, and request ID. Copies in different objects have different identifiers; repeated IDs in the same object can share an identifier and are still separate rows. Request ID or event UID alone is not a unique occurrence/join key. `waf_events` uses the common envelope plus WAF-specific columns; nested rule evidence and headers are serialized as JSON strings, with projected UTC year/month/day partitions. The supplied WAF records contain native WAF evidence, not application ground-truth annotations. Select native fields for output and raw-event provenance without recursive synthetic-field filtering; preserve native nested rule and label details unchanged. Application annotation filtering remains in place, and raw JSONL remains unchanged. If the WAF source contract later introduces hidden evaluation annotations, its normalization must be reviewed before those inputs are used.
 
 VPC input uses the 14-field version-2 order: `version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status`. Preserve `account_id` as a source string, including AWS's `unknown` marker; do not substitute the deployment account. Unavailable `-` fields become null, but version and start/end timestamps are required. Validate IP addresses, integer ranges, `end >= start`, `ACCEPT`/`REJECT`, and `OK`/`NODATA`/`SKIPDATA` when those fields are available. Convert start/end epoch seconds using UTC; `event_time` is start, `source_type` is `vpc_flow`, and status is allowed/blocked/unknown. The projected `vpc_flow_events` table has the common envelope plus the 14 native columns at `normalized/vpc/year=YYYY/month=MM/day=DD/`; rejected rows use `quarantine/vpc/` with the existing quarantine schema.
 
 VPC objects are read whole to number physical lines consistently within each object, not by Spark's global row order. Prepared daily `.log` files must fit executor memory; this reader is not intended for arbitrarily large objects. Preserve the original line, including its line terminator, in `raw_event`; `source_record_ref` is the one-based line number as a string. `event_uid` hashes source type, source key, line number, and original line, so identical lines at different positions or in different objects remain distinct. Blank lines, headers, malformed rows, and unsupported versions are rejected without shifting subsequent line numbers. Rejected VPC records require a dated `YYYY-M-D.log` filename for quarantine date fallback; an unavailable fallback fails the run. Raw source objects remain unchanged. Runtime S3 access adds only `raw/vpc/` reads and scoped `normalized/vpc/`/`quarantine/vpc/` output operations, with no raw writes or evaluation access.
+
+CloudTrail JSONL requires a valid timezone-aware `eventTime`, non-empty `eventSource`, `eventName`, and `eventID`, and a `userIdentity` object. Optional ARN, username, request ID, error fields, and nested structures may be absent or null. Map `eventTime` to UTC `event_time` and partition date, `eventName` to `activity_name`, and the normalized service/event pair to `activity_id`. Preserve `sourceIPAddress` as `src_ip`, nullable `requestID` as `request_id`, and the original JSON event in `raw_event`. Set `actor` from identity ARN, then username, else null; do not use `principalId`. Identity account comes from `userIdentity.accountId`, falling back to `recipientAccountId`. Extract S3 bucket/key/prefix from `requestParameters` only for `eventSource == "s3.amazonaws.com"`; other services' variable request keys remain in `raw_event`. Extract transferred-out bytes from `additionalEventData` when present. Failure and severity follow section 14.2.
+
+The projected `cloudtrail_events` table stores the common envelope plus the 14 CloudTrail columns at `normalized/cloudtrail/year=YYYY/month=MM/day=DD/`. `source_type` is `cloudtrail`, `source_s3_key` is the unchanged raw object key, and `source_record_ref` is native `eventID`. Hash source type, source key, and event ID for stable `event_uid`; repeats of the same ID in the same object remain separate occurrences even if their IDs match. Production Glue reads CloudTrail objects whole so rejected records preserve one-based physical line references. Prepared daily JSONL objects must fit executor memory. Preserve CRLF, CR, and LF line endings; skip blank lines while still counting them toward subsequent references. Rejected records use `quarantine/cloudtrail/` with the existing quarantine schema and dated `YYYY-M-D.jsonl` filename fallback. Runtime access adds only the CloudTrail raw read and normalized/quarantine output prefixes; source inputs remain unchanged and evaluation access stays denied.
+
+The offline runner maps `sample_logs_cloudtrail/` to `raw/cloudtrail/`, streams each nonblank JSONL line and its physical line number through `routing.classify`, and writes `output_cloudtrail/` and `quarantine_cloudtrail/`. Glue's whole-object reader uses that same record classifier. Both paths preserve CRLF, CR, and LF line endings and count skipped blank lines. Local placeholder bucket names never enter source keys or event IDs. CloudTrail automated fixtures/tests and downloaded-Parquet parity support are deferred; existing App/WAF/VPC coverage remains in place.
 
 ### 15.3 Transformation Modules
 

@@ -24,7 +24,10 @@ glue/test/output_vpc/
 glue/test/quarantine_app/
 glue/test/quarantine_waf/
 glue/test/quarantine_vpc/
+glue/test/output_cloudtrail/
+glue/test/quarantine_cloudtrail/
 glue/test/sample_logs_S3/
+glue/test/sample_logs_cloudtrail
 __pycache__/
 *.py[cod]
 *.egg-info/

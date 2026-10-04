@@ -9,9 +9,10 @@ from urllib.parse import urlparse
 
 from config import SUPPORTED_SOURCES
 from transforms.app import normalize_application
+from transforms.cloudtrail import normalize_cloudtrail
 from transforms.waf import normalize_waf
 from transforms.vpc import normalize_vpc
-from validation import parse_application_record, parse_waf_record, parse_vpc_record
+from validation import parse_application_record, parse_cloudtrail_record, parse_waf_record, parse_vpc_record
 
 
 def source_key(uri: str, expected_bucket: str | None = None) -> str:
@@ -44,6 +45,9 @@ def classify(line: str, uri: str, expected_bucket: str | None = None, line_numbe
     key = source_key(uri, expected_bucket)
     source = key.split("/")[1]
 
+    if source == "cloudtrail" and (type(line_number) is not int or line_number < 1):
+        raise ValueError("CloudTrail records require a positive object-relative line number")
+
     if source == "vpc":
         # Missing object-relative provenance is a reader error, not an invalid log.
         if type(line_number) is not int or line_number < 1:
@@ -64,6 +68,7 @@ def classify(line: str, uri: str, expected_bucket: str | None = None, line_numbe
     parser, normalizer = {
         "app": (parse_application_record, normalize_application),
         "waf": (parse_waf_record, normalize_waf),
+        "cloudtrail": (parse_cloudtrail_record, normalize_cloudtrail),
     }[source]
 
     try:
@@ -73,7 +78,8 @@ def classify(line: str, uri: str, expected_bucket: str | None = None, line_numbe
     except ValueError as error:
         day = fallback_date(uri)
         return source, "invalid", {
-            "source_s3_key": key, "source_record_ref": sha256(f"{key}:{line}".encode()).hexdigest(),
+            "source_s3_key": key,
+            "source_record_ref": str(line_number) if source == "cloudtrail" else sha256(f"{key}:{line}".encode()).hexdigest(),
             "error_code": str(error), "raw_event": line,
             "year": day.strftime("%Y"), "month": day.strftime("%m"), "day": day.strftime("%d"),
         }
@@ -90,3 +96,16 @@ def classify_vpc_object(content: str, uri: str, expected_bucket: str | None = No
     with StringIO(content, newline="") as stream:
         for line_number, line in enumerate(stream, 1):
             yield classify(line, uri, expected_bucket, line_number=line_number)
+
+
+def classify_cloudtrail_object(content: str, uri: str, expected_bucket: str | None = None) -> Iterator[tuple[str, str, dict]]:
+    """Dispatch nonblank CloudTrail JSONL with physical line references for rejects."""
+    key = source_key(uri, expected_bucket)
+
+    if key.split("/")[1] != "cloudtrail" or not key.endswith(".jsonl"):
+        raise ValueError("CloudTrail object reader requires a raw/cloudtrail/ .jsonl object")
+        
+    with StringIO(content, newline="") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if line.strip():
+                yield classify(line, uri, expected_bucket, line_number=line_number)

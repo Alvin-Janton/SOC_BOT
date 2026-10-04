@@ -6,7 +6,7 @@ import re
 import sys
 from urllib.parse import urlparse
 
-SUPPORTED_SOURCES = ("app", "waf", "vpc")
+SUPPORTED_SOURCES = ("app", "waf", "vpc", "cloudtrail")
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class JobConfig:
 def validate_prefixes(arguments: dict[str, str]) -> dict[str, str]:
     """Validate exact S3 roots, normalize trailing slashes, and enforce one bucket."""
     allowed = {
-        "input_prefix": {"raw", "raw/app", "raw/waf", "raw/vpc"},
+        "input_prefix": {"raw", "raw/app", "raw/waf", "raw/vpc", "raw/cloudtrail"},
         "output_prefix": {"normalized"},
         "quarantine_prefix": {"quarantine"},
     }

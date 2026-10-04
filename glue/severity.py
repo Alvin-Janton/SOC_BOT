@@ -1,4 +1,4 @@
-"""Versioned application severity from independently inspected request evidence."""
+"""Versioned source-specific severity from observed event evidence."""
 
 import json
 import re
@@ -7,6 +7,14 @@ from urllib.parse import unquote_plus
 
 RULE_VERSION = "app_rules_v2"
 LABELS = ("Unknown", "Informational", "Low", "Medium", "High", "Critical")
+
+# Exact synthetic dataset indicators, not general-purpose threat intelligence.
+CLOUDTRAIL_RULE_VERSION = "cloudtrail_rules_v1"
+_CLOUDTRAIL_MALICIOUS_IPS = frozenset({"24.5.32.5", "95.90.195.80", "203.0.113.77"})
+_CLOUDTRAIL_MALICIOUS_ARNS = frozenset({
+    "arn:aws:iam::123456789012:user/cloudsploit",
+    "arn:aws:iam::123456789012:role/MordorNginxStack-BankingWAFRole-9S3E0UAE1MM0",
+})
 
 # Adapted from the local CSIC extractor; a bare URL fragment or comment marker
 # is insufficient SQL evidence. Patterns never combine unrelated request fields.
@@ -200,4 +208,55 @@ def waf_severity(record: dict) -> tuple[int, str, str]:
         ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False,
     )
 
+    return score, LABELS[score], source
+
+
+def cloudtrail_status(record: dict) -> str:
+    """Apply the MVP failure rule to validated error and ConsoleLogin evidence."""
+    response = record.get("responseElements") or {}
+    return "failure" if record.get("errorMessage") or response.get("ConsoleLogin") == "Failure" else "success"
+
+def cloudtrail_severity(record: dict) -> tuple[int, str, str]:
+    """Rate exact prepared-dataset indicators with deterministic per-event evidence."""
+    identity = record["userIdentity"]
+    issuer = (identity.get("sessionContext") or {}).get("sessionIssuer") or {}
+    matches = [
+        {"field": field, "value": value}
+        for field, value, approved in (
+            ("sourceIPAddress", record.get("sourceIPAddress"), _CLOUDTRAIL_MALICIOUS_IPS),
+            ("userIdentity.arn", identity.get("arn"), _CLOUDTRAIL_MALICIOUS_ARNS),
+            ("userIdentity.sessionContext.sessionIssuer.arn", issuer.get("arn"), _CLOUDTRAIL_MALICIOUS_ARNS),
+        ) if value in approved
+    ]
+    event = record["eventName"]
+    status = cloudtrail_status(record)
+    transferred = (record.get("additionalEventData") or {}).get("bytesTransferredOut")
+    s3_success = record["eventSource"] == "s3.amazonaws.com" and status == "success"
+    
+    if not matches:
+        score, rule = 1, "no_known_indicator"
+
+    elif s3_success and event == "GetObject" and transferred is not None and transferred > 0:
+        score, rule = 5, "known_indicator_s3_object_transfer"
+
+    elif s3_success and event in {"ListObjects", "ListBuckets"}:
+        score, rule = 4, "known_indicator_s3_listing"
+
+    elif event == "ConsoleLogin" and status == "failure":
+        score, rule = 3, "known_indicator_login_failure"
+
+    else:
+        score, rule = 3, "known_indicator_activity"
+
+    evidence = {
+        "eventSource": record["eventSource"], "eventName": event, "status": status,
+        "errorCode": record.get("errorCode"),
+        "consoleLogin": (record.get("responseElements") or {}).get("ConsoleLogin"),
+        "bytesTransferredOut": transferred,
+    }
+
+    source = json.dumps({
+        "rule_version": CLOUDTRAIL_RULE_VERSION, "rule": rule,
+        "matches": matches, "evidence": evidence,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return score, LABELS[score], source
