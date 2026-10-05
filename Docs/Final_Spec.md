@@ -955,6 +955,8 @@ After the backfill:
 
 Define the Glue database and normalized table schemas in CDK. Use Athena partition projection for the known date-based S3 layout. This avoids requiring a recurring crawler for every run.
 
+Maintain table descriptions and comments for every data column and the `year`, `month`, and `day` partition keys in CDK alongside the catalog definitions. Glue Catalog exposes this metadata to Athena users and future metadata consumers. Share common field descriptions while documenting source-specific mappings, units, JSON-text fields, provenance, and interpretation limits. These annotations do not change normalized schemas or ETL behavior: VPC flow records alone do not establish maliciousness, and CloudTrail severity follows the current synthetic-data heuristics in section 14.2.
+
 A crawler may be used temporarily during schema exploration, but it is not the production MVP dependency and should not crawl the mixed-schema `raw/` root.
 
 ---
