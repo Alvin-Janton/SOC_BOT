@@ -686,7 +686,7 @@ GuardDuty and Route 53 prefixes are reserved but do not require populated MVP da
 - Enforce TLS
 - Default encryption
 - Versioning for metadata and playbooks where useful
-- Lifecycle expiration for Athena results and temporary transformation output
+- Expire only `athena-results/` objects after seven days, without storage-class transitions; temporary transformation-output retention remains deferred
 - Separate IAM access to raw, normalized, evaluation, and playbook prefixes
 - Retain raw input; treat normalized and Athena result data as reproducible
 
@@ -991,6 +991,10 @@ Tool Lambdas must:
 - Set a bytes-scanned cutoff per query
 - Store results only in the controlled Athena results prefix
 - Return compact evidence objects
+
+Each Data stack defines an enabled `SOC-BOT-<ENV>-QUERY` Athena workgroup in a construct separate from Glue, with the standard project, environment, and management tags. Enforce workgroup settings, write results only to `s3://<data-bucket>/athena-results/`, use SSE-S3 encryption, publish CloudWatch query metrics, and cancel queries exceeding 134217728 scanned bytes (128 MiB). An S3 lifecycle rule permanently expires only that result prefix after seven days; it does not transition storage classes or expire other data. Dev teardown deletes the workgroup and its contents, including named queries; demo retains the workgroup.
+
+The scan cutoff is a cost guardrail, not a row-count, result-size, or model-context limit. The future query Lambda must independently bound returned rows and serialized evidence and receive least-privilege IAM permissions restricted to its exact environment workgroup. That execution role belongs with the Lambda in the AI stack. Lake Formation registration of `normalized/` and database/table grants remain deferred until the query role exists; this workgroup increment grants no data access.
 
 Lake Formation is an authorization boundary, not a replacement for these query controls. A role with `SELECT` can still request all authorized rows, so time predicates, partition predicates, result limits, workgroup restrictions, and bytes-scanned limits remain mandatory.
 

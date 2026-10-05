@@ -52,7 +52,6 @@ describe('DataStack', () => {
     const bucketLogicalId = Object.keys(buckets)[0];
     const bucket = Object.values(buckets)[0] as Record<string, any>;
     expect(bucket.Properties.VersioningConfiguration).toBeUndefined();
-    expect(bucket.Properties.LifecycleConfiguration).toBeUndefined();
     expect(bucket.Properties.LoggingConfiguration).toBeUndefined();
     expect(bucket.DeletionPolicy).toBe(environment === 'dev' ? 'Delete' : 'Retain');
     expect(bucket.UpdateReplacePolicy).toBe(environment === 'dev' ? 'Delete' : 'Retain');
