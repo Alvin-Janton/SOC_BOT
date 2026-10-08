@@ -39,7 +39,7 @@ export function boundedResults(query: CompiledQuery, rows: readonly Row[], hasNe
     const record = Object.fromEntries(query.columns.map((entry, index) => [entry.name, cell(row.Data?.[index]?.VarCharValue, entry.type)]));
     evidence.push(record);
     response.result_count = evidence.length;
-    
+
     // Reserve space for the final truncation metadata before admitting this row.
     if (Buffer.byteLength(JSON.stringify({ ...response, truncated: true, truncation_reason: 'response_size' }), 'utf8') > MAX_RESPONSE_BYTES) {
       evidence.pop();

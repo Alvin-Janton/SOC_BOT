@@ -40,7 +40,7 @@
       }
     }
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    html { scroll-padding-top: 24px; }
     body {
       margin: 0;
       background: var(--background);
@@ -174,7 +174,6 @@
       pre { padding: 14px; }
       section { padding-block: 30px; }
     }
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
     @media print {
       :root { color-scheme: light; --background: white; --surface: white; --text: #182338; --muted: #526079; --line: #d8deea; --code: #f2f4f8; --blue: #244db4; --blue-soft: #edf2ff; --green-soft: #eaf6ef; --amber-soft: #fff5df; }
       .layout { display: block; padding: 0; max-width: none; }
@@ -312,11 +311,11 @@
   +-- object() / onlyKeys()       Validate shape and allowed options
   +-- tableName()                Resolve an approved table
   +-- limit validation           Enforce 1-100 rows; default 25
-  +-- queryWindowDays()
-  |     +-- timeSql()
-  |           +-- utcTime()      Validate UTC timestamps and range
-  |           +-- literal()
-  |                 +-- stringLiteral()
+  +-- queryWindowDays()           Validate the configured cap
+  +-- timeSql()
+  |     +-- utcTime()             Validate UTC timestamps and range
+  |     +-- literal()
+  |           +-- stringLiteral()
   +-- filtersSql()
   |     +-- object() / onlyKeys() Validate each filter
   |     +-- column()
@@ -761,7 +760,7 @@ Execution ID + complete original query request
   -&gt; return named, typed, bounded evidence rows</code></pre>
         <p><strong>The tool handles query execution and safe evidence retrieval. The orchestrator will handle the conversation, query lifecycle, and user ownership around it.</strong></p>
       </section>
-      <footer>Standalone SOC Bot development reference &middot; October 7, 2026 &middot; Offline HTML/CSS only. Recheck the linked source responsibilities after future runtime changes.</footer>
+      <footer>Standalone SOC Bot development reference &middot; October 7, 2026 &middot; Offline HTML/CSS only. Recheck the listed source responsibilities after future runtime changes.</footer>
     </main>
   </div>
 </body>

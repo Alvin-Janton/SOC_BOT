@@ -70,7 +70,7 @@ async function describe(request: Record<string, unknown>, config: Configuration)
   const table = tableName(request.table);
   const result = await glue.send(new GetTableCommand({ DatabaseName: config.database, Name: table }), { abortSignal: AbortSignal.timeout(10_000) });
   const actual = [...(result.Table?.StorageDescriptor?.Columns ?? []), ...(result.Table?.PartitionKeys ?? [])];
-  
+
   const columns = tableColumns(table).map((expected) => {
     const found = actual.find((entry) => entry.Name === expected.name);
     if (!found || found.Type !== expected.type) throw new Error('Catalog schema does not match the approved contract.');
