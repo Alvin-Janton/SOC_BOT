@@ -1,6 +1,6 @@
 # AI Stack Working Specification
 
-**Status:** The Athena query-tool slice is implemented locally; orchestration, persistence, playbook retrieval, authentication, and Lake Formation integration remain planned.
+**Status:** The Athena query tool and Lake Formation integration are implemented locally, subject to operator preflight, deployment, and scoped default-access cleanup. Orchestration, persistence, playbook retrieval, and authentication remain planned.
 
 This document records the AI-stack decisions discussed so far. `Docs/Final_Spec.md` remains the broader project specification. Where this temporary document introduces a more specific choice or a different contract, reconcile the two documents before implementation.
 
@@ -79,9 +79,21 @@ The future orchestrator must poll, enforce the 180-second Athena deadline and in
 
 The role has the environment QUERY boundary plus `Project`, `Environment`, `ManagedBy`, and inventory-only `SOCBOTAccessClass=query` tags. Inline permissions cover named log-stream/event writes; Athena start/get/results/stop on the imported workgroup; read-only exact catalog/database/four-table metadata; `lakeformation:GetDataAccess`; bucket location; results-prefix listing; and GetObject/PutObject/AbortMultipartUpload under `athena-results/`. There are no direct raw/normalized/quarantine/evaluation reads or Bedrock/administrative permissions. Resource-specific wildcard acknowledgments cover log streams, result objects and the required Lake Formation API exception. Structured logs contain correlation ID, operation/table, execution ID, duration, scanned bytes, result count, truncation and outcome, never SQL, sensitive filters or evidence rows. Treat returned catalog text and log values as untrusted.
 
-Data -> AI dependencies use strong CloudFormation exports/imports. Existing dev/main workflows deploy only the matching Data and AI IDs with `--exclusively`, unchanged OIDC roles and environment concurrency. AI bundles use caller credentials and the existing bootstrap file bucket, never the administrator bootstrap role; Data's Glue assets keep their dedicated file bucket. Foundation permissions require no changes. Manual dev destroy accepts `ai` with `DELETE SOC-BOT-DEV-AI`, or `all` with `DELETE ALL SOC-BOT-DEV-STACKS`. All explicitly deletes AI before Data, never the foundation; failed AI deletion prevents Data deletion. Data-only is forbidden and bucket contents are not automatically emptied. There is no demo destroy workflow.
+Data -> AI dependencies use strong CloudFormation exports/imports. Existing dev/main workflows deploy only the matching Data and AI IDs with `--exclusively`, unchanged OIDC roles and environment concurrency. AI bundles use caller credentials and the existing bootstrap file bucket, never the administrator bootstrap role; Data's Glue assets keep their dedicated file bucket. This slice does not change foundation IAM policies; the execution roles' live Lake Formation authority remains an operator prerequisite. Manual dev destroy accepts `ai` with `DELETE SOC-BOT-DEV-AI`, or `all` with `DELETE ALL SOC-BOT-DEV-STACKS`. All explicitly deletes AI before Data, never the foundation; failed AI deletion prevents Data deletion. Data-only is forbidden and bucket contents are not automatically emptied. There is no demo destroy workflow.
 
-Lake Formation location registration, default-access removal and approved database/table SELECT/DESCRIBE grants remain the next slice, required before live query validation. No deployment or live AWS query is part of this implementation.
+Lake Formation registration and named-resource grants are defined as described below. Operator verification and scoped `IAMAllowedPrincipals` cleanup must precede live query validation. No deployment or live AWS query is part of this implementation.
+
+### 4.3 Lake Formation ownership and deployment prerequisites
+
+Within Data, registration explicitly depends on the database and all four tables: initial catalog creation precedes registration, and Data deletion deregisters before deleting those catalog resources. No execution-role `DATA_LOCATION_ACCESS` is added by this ordering fix.
+
+Data's `LakeFormationLocation` registers only the environment bucket's `normalized/` prefix with the existing `AWSServiceRoleForLakeFormationDataAccess` role and hybrid access disabled. Glue database `CreateTableDefaultPermissions` is empty; existing grants are not automatically revoked. Raw, quarantine, evaluation, playbook, and result prefixes remain outside registration.
+
+AI's `LakeFormationGrants` owns one database `DESCRIBE` grant and four combined table `SELECT`/`DESCRIBE` grants for its dedicated query role, without grant options, catalog-wide permissions, or `DATA_LOCATION_ACCESS`. Table resources reference the existing Data database/tables; role references stay in AI. This preserves one-way stack dependencies and revokes grants during AI-only deletion while leaving Data registration intact. Data deletion deregisters the location only after AI teardown. Query IAM, S3 permissions, and the QUERY boundary are unchanged.
+
+Before deployment, the operator must verify the service-linked role, absence of overlapping registrations and pre-existing grants to each query role, and the execution roles' Lake Formation catalog/grant authority. The service-linked role is operator-confirmed; the other live-state checks remain unverified. Existing IAM API permissions in foundation source do not establish Lake Formation grant authority. No `DataLakeSettings` or service-linked-role creation is included.
+
+After explicit query-role grants are installed, the operator removes only existing project database/four-table `IAMAllowedPrincipals` Super grants, if any; administrator grants and unrelated resources/principals remain untouched. CloudFormation grant deletion can revoke manual additions on the same principal/resource pair, so keep these pairs exclusively CDK-managed. See the README's operator rollout procedure for preflight, scoped cleanup, and authorized/ungranted query validation. Local checks neither deploy nor validate live Lake Formation access.
 
 ## 5. Chat Request Contract
 

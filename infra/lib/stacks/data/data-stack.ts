@@ -6,12 +6,13 @@ import { CfnDatabase, CfnTable } from 'aws-cdk-lib/aws-glue';
 import { dataBucketName, DeploymentEnvironment } from '../../shared/environment';
 import { ApplicationAthena } from './application-athena';
 import { ApplicationGlue } from './application-glue';
+import { LakeFormationLocation } from './lake-formation-location';
 
 export interface DataStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
 }
 
-/** Owns the private data bucket, Glue normalization, and Athena workgroup for one environment. */
+/** Owns the private data lake, normalized-prefix governance, Glue normalization, and Athena workgroup. */
 export class DataStack extends Stack {
   public readonly dataBucket: Bucket;
   public readonly database: CfnDatabase;
@@ -43,6 +44,11 @@ export class DataStack extends Stack {
 
     const glue = new ApplicationGlue(this, 'ApplicationGlue', { deploymentEnvironment, dataBucket: bucket });
     const athena = new ApplicationAthena(this, 'ApplicationAthena', { deploymentEnvironment, dataBucket: bucket });
+    const lakeFormation = new LakeFormationLocation(this, 'LakeFormationLocation', { dataBucket: bucket });
+    // Create the catalog before registering its location, without granting extra data-location authority.
+    for (const resource of [glue.database, ...glue.tables]) {
+      lakeFormation.location.addResourceDependency(resource);
+    }
     this.dataBucket = bucket;
     this.database = glue.database;
     this.tables = glue.tables;
