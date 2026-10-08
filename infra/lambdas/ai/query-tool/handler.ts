@@ -103,7 +103,7 @@ async function status(request: Record<string, unknown>, config: Configuration): 
   const expected = compileQuery(request.query, config.database, config.maxDays);
   const query = await execution(id, config);
   if (!query) return { ok: false, error: { code: 'QUERY_NOT_FOUND', message: 'Query is unknown or unavailable.' }, query_execution_id: id };
-  if (query.Query !== expected.sql || query.QueryExecutionContext?.Database !== config.database || query.QueryExecutionContext?.Catalog !== 'AwsDataCatalog') {
+  if (query.Query !== expected.sql || query.QueryExecutionContext?.Database !== config.database || query.QueryExecutionContext?.Catalog?.toLocaleLowerCase() !== 'awsdatacatalog') {
     throw new ContractError('Execution does not match the original approved query request.');
   }
   const metadata = { ...queryMetadata(query), table: expected.table, operation: expected.operation, result_count: 0, truncated: false };
