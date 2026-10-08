@@ -91,7 +91,7 @@ export class AthenaQueryTool extends Construct {
     });
     Validations.of(policy).acknowledge({
       id: 'AwsSolutions-IAM5[Resource::*]',
-      reason: 'Only lakeformation:GetDataAccess uses *. AWS authorizes this API without resource-level IAM scoping; actual table SELECT/DESCRIBE grants are separately deferred.',
+      reason: 'Only lakeformation:GetDataAccess uses *. AWS authorizes this API without resource-level IAM scoping; separate Lake Formation grants restrict this role to the four approved normalized tables.',
     });
     Validations.of(policy).acknowledge({
       id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:${logGroupName}:*]`,

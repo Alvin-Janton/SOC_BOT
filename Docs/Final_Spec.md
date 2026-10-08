@@ -710,6 +710,8 @@ GuardDuty and Route 53 prefixes are reserved but do not require populated MVP da
 
 ### 13.4 Lake Formation Governance
 
+The normalized location registration must explicitly depend on the Glue database and all four tables. On fresh provisioning of an unregistered prefix, create the catalog before registration; reverse that order during Data teardown after AI is removed. Do not broaden execution-role permissions merely to resolve this creation-order dependency.
+
 Register only the `normalized/` S3 prefix as a Lake Formation data location. The mixed-schema `raw/`, `quarantine/`, `evaluation/`, `playbooks/`, and `athena-results/` prefixes remain outside this registration and retain separate IAM and bucket-policy boundaries.
 
 Use named-resource grants for the MVP because the normalized catalog contains a small, known set of tables. Grant the query Lambda execution role:
@@ -720,7 +722,11 @@ Use named-resource grants for the MVP because the normalized catalog contains a 
 
 Do not grant the Bedrock model an AWS identity or data permissions. The model can request an approved tool, the orchestration Lambda can invoke that tool, and only the query Lambda execution role can reach Athena.
 
-Remove the default `IAMAllowedPrincipals` access from the governed database and tables so broad IAM permissions do not bypass the intended Lake Formation grants. Do not introduce row filters, column filters, tag-based access control, or hybrid access mode unless a later requirement justifies their additional complexity.
+Data owns normalized-prefix registration using the existing `AWSServiceRoleForLakeFormationDataAccess` role, with hybrid access disabled. AI owns one database grant and four combined table grants for its dedicated query role; no grant options or query-role `DATA_LOCATION_ACCESS` are added. Strong Data-to-AI references enforce deployment Data before AI and teardown AI before Data. AI-only teardown revokes query grants but preserves Data registration; Data teardown deregisters the location after AI is removed.
+
+Set the project's Glue database `CreateTableDefaultPermissions` to an empty list so future tables do not inherit broad default access. After explicit query grants are installed, the operator removes only existing `IAMAllowedPrincipals` Super grants from this project's database and four tables, if present, preserving administrator and unrelated grants. This scoped cleanup is not a catalog-wide revocation and does not change account-wide `DataLakeSettings`.
+
+Before deployment, verify the existing service-linked role, registration overlap, pre-existing query-role grants, and execution-role Lake Formation authority separately from IAM API permissions. Keep CloudFormation-owned query-role/resource pairs free of manual grants because deleting a `PrincipalPermissions` resource revokes all permissions on its pair. Follow the README operator procedure and verify authorized/ungranted table access after deployment. Do not introduce row filters, column filters, tag-based access control, or hybrid access mode unless a later requirement justifies their additional complexity.
 
 ---
 
@@ -994,7 +1000,7 @@ Tool Lambdas must:
 
 Each Data stack defines an enabled `SOC-BOT-<ENV>-QUERY` Athena workgroup in a construct separate from Glue, with the standard project, environment, and management tags. Enforce workgroup settings, write results only to `s3://<data-bucket>/athena-results/`, use SSE-S3 encryption, publish CloudWatch query metrics, and cancel queries exceeding 134217728 scanned bytes (128 MiB). An S3 lifecycle rule permanently expires only that result prefix after seven days; it does not transition storage classes or expire other data. Dev teardown deletes the workgroup and its contents, including named queries; demo retains the workgroup.
 
-The scan cutoff is a cost guardrail, not a row-count, result-size, or model-context limit. The AI stack's private `SOC-BOT-<ENV>-QUERY-TOOL` Lambda now bounds rows (default 25, maximum 100) and serialized evidence (64 KiB), with least-privilege IAM for its exact workgroup and results prefix. Its `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL` role uses the environment QUERY boundary. `describe_table`, `query_events`, and `aggregate_events` validate the four tables and their columns, require UTC ranges with a configurable 30-day default cap, and include daily partition predicates. Source-specific investigation contracts below can use these controlled operations; no joins are added. Internal asynchronous status/cancel operations are not model tools or public endpoints. The future orchestrator must enforce the 180-second Athena deadline and server-side user/turn ownership before cancellation. Lake Formation registration of `normalized/` and database/table grants remain the next slice, required before live data-query validation. See `AIStack_Spec-Temp.md` for the implemented contract.
+The scan cutoff is a cost guardrail, not a row-count, result-size, or model-context limit. The AI stack's private `SOC-BOT-<ENV>-QUERY-TOOL` Lambda now bounds rows (default 25, maximum 100) and serialized evidence (64 KiB), with least-privilege IAM for its exact workgroup and results prefix. Its `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL` role uses the environment QUERY boundary. `describe_table`, `query_events`, and `aggregate_events` validate the four tables and their columns, require UTC ranges with a configurable 30-day default cap, and include daily partition predicates. Source-specific investigation contracts below can use these controlled operations; no joins are added. Internal asynchronous status/cancel operations are not model tools or public endpoints. The future orchestrator must enforce the 180-second Athena deadline and server-side user/turn ownership before cancellation. Data now defines Lake Formation registration of `normalized/`; AI defines the query role's database/table grants. Operator preflight, deployment, and scoped `IAMAllowedPrincipals` cleanup remain required before live data-query validation. See `AIStack_Spec-Temp.md` for the implemented contract.
 
 Lake Formation is an authorization boundary, not a replacement for these query controls. A role with `SELECT` can still request all authorized rows, so time predicates, partition predicates, result limits, workgroup restrictions, and bytes-scanned limits remain mandatory.
 
@@ -1172,8 +1178,7 @@ Use AWS CDK with TypeScript. Organize resources into constructs inside three dep
 - Glue database
 - Glue normalized tables
 - Lake Formation registration for the normalized S3 prefix
-- Explicit Lake Formation database/table grants for the query Lambda role
-- Removal of default `IAMAllowedPrincipals` access from governed resources
+- Empty Glue database table-default grants, with scoped operator cleanup of existing `IAMAllowedPrincipals` access
 - Glue scripts and job definitions
 - Optional disabled Glue schedule
 - Athena workgroup
@@ -1184,6 +1189,7 @@ Use AWS CDK with TypeScript. Organize resources into constructs inside three dep
 
 - Chat orchestration Lambda
 - Query Lambdas
+- Explicit Lake Formation database/table grants for the query Lambda role
 - Playbook retriever
 - Incident/session-state table or incident-specific records
 - Bedrock invocation permissions and model configuration

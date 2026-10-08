@@ -255,7 +255,11 @@ export class ApplicationGlue extends Construct {
     const databaseName = `soc_bot_${environment}_security`;
     const database = new CfnDatabase(this, 'Database', {
       catalogId: Aws.ACCOUNT_ID,
-      databaseInput: { name: databaseName, description: `${environment} normalized security events` },
+      databaseInput: {
+        name: databaseName,
+        description: `${environment} normalized security events`,
+        createTableDefaultPermissions: [],
+      },
     });
     this.database = database;
     const table = new CfnTable(this, 'ApplicationTable', {

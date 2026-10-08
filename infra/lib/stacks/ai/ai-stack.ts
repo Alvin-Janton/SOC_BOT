@@ -5,6 +5,7 @@ import { IBucket } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { DeploymentEnvironment } from '../../shared/environment';
 import { AthenaQueryTool } from './athena-query-tool';
+import { LakeFormationGrants } from './lake-formation-grants';
 
 export interface AiStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
@@ -22,6 +23,11 @@ export class AiStack extends Stack {
   public constructor(scope: Construct, id: string, props: AiStackProps) {
     super(scope, id, props);
     this.queryTool = new AthenaQueryTool(this, 'AthenaQueryTool', props);
+    new LakeFormationGrants(this, 'LakeFormationGrants', {
+      database: props.database,
+      tables: props.tables,
+      queryRoleArn: this.queryTool.role.roleArn,
+    });
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', props.deploymentEnvironment);
     Tags.of(this).add('ManagedBy', 'CDK');
