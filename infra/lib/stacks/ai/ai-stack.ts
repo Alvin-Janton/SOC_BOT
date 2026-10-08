@@ -1,10 +1,12 @@
 import { Stack, StackProps, Tags } from 'aws-cdk-lib';
 import { CfnWorkGroup } from 'aws-cdk-lib/aws-athena';
+import { Table } from 'aws-cdk-lib/aws-dynamodb';
 import { CfnDatabase, CfnTable } from 'aws-cdk-lib/aws-glue';
 import { IBucket } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { DeploymentEnvironment } from '../../shared/environment';
 import { AthenaQueryTool } from './athena-query-tool';
+import { ChatHistory } from './chat-history';
 import { LakeFormationGrants } from './lake-formation-grants';
 
 export interface AiStackProps extends StackProps {
@@ -16,12 +18,16 @@ export interface AiStackProps extends StackProps {
   readonly maxQueryWindowDays?: number;
 }
 
-/** Starts the environment AI stack with its private query tool; orchestration remains deferred. */
+/** Owns the environment's private query tool and conversation storage; orchestration remains deferred. */
 export class AiStack extends Stack {
   public readonly queryTool: AthenaQueryTool;
+  public readonly chatHistoryTable: Table;
 
   public constructor(scope: Construct, id: string, props: AiStackProps) {
     super(scope, id, props);
+    this.chatHistoryTable = new ChatHistory(this, 'ChatHistory', {
+      deploymentEnvironment: props.deploymentEnvironment,
+    }).table;
     this.queryTool = new AthenaQueryTool(this, 'AthenaQueryTool', props);
     new LakeFormationGrants(this, 'LakeFormationGrants', {
       database: props.database,

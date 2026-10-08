@@ -143,7 +143,8 @@ The exact final field names, event validation rules, and retry semantics should 
 - Persist complete user messages, completed assistant responses, bounded tool activity/results, evidence references, and useful request metadata. Persist the completed assistant response rather than each streamed token fragment.
 - Keep full conversation history separate from the bounded context sent to Bedrock. Include recent turns verbatim and compact older turns into a structured summary that preserves evidence references, known facts, hypotheses, time ranges, and open questions.
 - Bound tool outputs before they enter either model context or persisted records. Do not persist private model reasoning.
-- The precise DynamoDB key design, item schema, TTL policy, summary format, and relationship between a conversation and an incident are not finalized in this document; decide them in the DynamoDB design slice.
+- Treat conversation records as sensitive: CloudWatch logs may contain correlation IDs, operation names, durations, and outcome metadata, but must not contain full conversations, user message bodies, raw tool arguments, or evidence rows.
+- The accepted DynamoDB keys and item variants are defined in Section 10. Retention/TTL and the relationship between a conversation and an incident remain deferred.
 
 ## 8. Delivery Order
 
@@ -159,10 +160,92 @@ Playbook retrieval is part of the MVP and must be integrated through the approve
 
 ## 9. Deferred Decisions
 
-- Exact DynamoDB keys, record shapes, retention, and conversation-to-incident relationship.
+- DynamoDB retention/TTL and the conversation-to-incident relationship.
+- Implementation mechanics for assigning per-conversation event sequences safely under concurrent requests.
 - Exact API route and reconciliation of `conversationId` with the incident-oriented route in `Final_Spec.md`.
 - Final event field names, NDJSON response headers, retry/idempotency behavior, and cancellation propagation.
 - Output and input/context token budgets beyond the provisional 2,048-token final-answer cap.
 - Whether any independent tool calls should run in parallel or through a bounded batch operation.
 - Whether the initial S3 playbook retriever should later migrate to Bedrock Knowledge Bases.
 - Detailed frontend presentation of query activity and SQL.
+
+## 10. DynamoDB Conversation Contract
+
+This is the accepted single-table contract for the MVP. The table is owned by a dedicated persistence construct in the AI stack; the orchestrator receives the table reference and narrowly scoped read/write permissions. The physical table name, billing mode, retention, and encryption configuration are implementation details to finalize during the DynamoDB slice; the keys, access patterns, and record variants below are the contract.
+
+### 10.1 Keys and access patterns
+
+- Base partition key `PK` groups records by conversation: `CONV#<conversationId>`.
+- Base sort key `SK` identifies the record type and orders conversation events: metadata uses `META`; events use `EVT#<UTC-created_at>#<event_sequence>#<eventId>`.
+- Store `created_at` as a normal attribute as well as in the event sort key. The attribute is convenient to consume; the key supports ordered DynamoDB queries. `event_sequence` is a monotonically increasing, zero-padded per-conversation ordinal so events with equal timestamps retain causal order. `event_id` is a stable, unique identifier for one stored event. `turn_id` is a separate attribute shared by the user message, assistant tool call/result, and final assistant response for one turn; it is not part of the key.
+- A GSI named `GSI1` supports listing a user's conversations: `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<updated_at>#<conversationId>`. Only conversation metadata items carry these GSI attributes. The owner identity must come from trusted authentication context, never from an untrusted chat-request field.
+- The conversation partition supports reading its metadata and event history, appending new events, and loading a compaction summary plus events after its checkpoint. Listing conversations uses the GSI. Avoid table scans and do not store the entire growing transcript in one item.
+
+### 10.2 Conversation metadata item
+
+One `CONVERSATION` item is created per conversation. Do not add a `status` field merely to represent recent activity; use `updated_at` for recency. Add an explicit lifecycle field only if an archive/close workflow is implemented. Summary pointer/checkpoint attributes are absent until the first compaction.
+
+```json
+{
+  "PK": "CONV#c4e7173b-3075-47b9-9e7d-260921bbc870",
+  "SK": "META",
+  "entity_type": "CONVERSATION",
+  "schema_version": 1,
+  "conversation_id": "c4e7173b-3075-47b9-9e7d-260921bbc870",
+  "owner_id": "<trusted-user-id>",
+  "created_at": "2026-09-11T12:02:00.000Z",
+  "updated_at": "2026-09-11T12:02:04.100Z",
+  "last_event_id": "5ae41338-c64b-4e6f-bcc1-c7d5369a7f93",
+  "title": "WAF activity on September 11",
+  "GSI1PK": "USER#<trusted-user-id>",
+  "GSI1SK": "CONV#2026-09-11T12:02:04.100Z#c4e7173b-3075-47b9-9e7d-260921bbc870"
+}
+```
+
+### 10.3 Event item variants
+
+Each user message, assistant response, tool call, and tool result is a separate item with common keys and event metadata. Attributes specific to one variant are not required on other variants; omit absent values rather than writing unrelated null fields. Do not persist private model reasoning or every streamed token delta.
+
+Common event attributes are `PK`, `SK`, `entity_type`, `schema_version`, `conversation_id`, `event_id`, `event_sequence`, `turn_id`, and `created_at`. Variants add:
+
+- `USER_MESSAGE`: `role`, `content`.
+- `TOOL_CALL`: `tool_use_id`, `tool_name`, and bounded structured `arguments`.
+- `TOOL_RESULT`: matching `tool_use_id`, `tool_name`, `status`, and bounded structured `output` (including safe query metadata and returned evidence rows where applicable).
+- `ASSISTANT_MESSAGE`: `role`, `model_id`, `stop_reason`, and user-visible `content`.
+
+The `tool_use_id` links an assistant's tool request to its result. Tool results must respect the query tool's response-size limit. Event IDs are immutable; retries of the same logical write should reuse an idempotency identifier rather than create duplicate events.
+
+### 10.4 Compaction summary item
+
+Compaction produces a distinct `CONTEXT_SUMMARY` item with its own schema. It records exactly which prior event it covers. Update the conversation metadata with the latest summary key and covered-through event key. On later turns, context assembly starts with that summary and only subsequent events; earlier event records may remain stored for transcript history but are not replayed to the model. Summary replacement/deletion policy and any TTL remain undecided.
+
+```json
+{
+  "PK": "CONV#c4e7173b-3075-47b9-9e7d-260921bbc870",
+  "SK": "SUMMARY#2026-09-11T12:02:04.100Z#0000000007#f3b42d80-3c22-45c4-8f7e-8d7ef1a1e872",
+  "entity_type": "CONTEXT_SUMMARY",
+  "schema_version": 1,
+  "conversation_id": "c4e7173b-3075-47b9-9e7d-260921bbc870",
+  "summary_id": "f3b42d80-3c22-45c4-8f7e-8d7ef1a1e872",
+  "created_at": "2026-09-11T12:02:04.100Z",
+  "covers_through_sk": "EVT#2026-09-11T12:02:04.100Z#0000000006#5ae41338-c64b-4e6f-bcc1-c7d5369a7f93",
+  "summary_text": "The user investigated WAF activity from 8-9 AM Eastern on September 11. The query found a blocked SQL injection attempt and an allowed XSS attempt; application-side exploit success is unconfirmed."
+}
+```
+
+The key examples use ISO-8601 UTC timestamps and a fixed-width sequence so DynamoDB string ordering matches event order. The sequence must be assigned consistently when concurrent requests target the same conversation; conditional writes or another concurrency-control mechanism must prevent duplicate or conflicting ordinals.
+
+### 10.5 Design lessons incorporated from Bedrock Chat
+
+The Bedrock Chat repository uses a different aggregate model: one DynamoDB item stores a serialized message map, with the message map moved to S3 above a 300 KiB threshold. Its parent/children message graph supports branching, edits, and regenerated responses. These are valid tradeoffs, not a superior DynamoDB contract for every application.
+
+For SOC-BOT, retain the useful ideas without adopting that aggregate storage model:
+
+- Keep a dedicated conversation metadata item for title, creation/update times, and the latest event pointer.
+- Represent tool requests and results as distinct typed records linked by `tool_use_id`; retain safe, bounded arguments/results needed to explain the investigation and reconstruct model context.
+- Keep an append-oriented event history rather than serializing and rewriting the growing conversation for every turn. This avoids a single growing conversation item and better matches SOC-BOT's user, assistant, tool-call, tool-result, and context-summary records.
+- Preserve the explicit event sequence in the sort key; a unique ID provides deterministic tie-breaking but does not itself express causal ordering.
+- Do not add message-tree branching, S3 overflow storage, or a separate full-text search service to the MVP. Revisit only if product requirements or measured item sizes justify them. Each DynamoDB item is limited to 400 KB, so enforce per-record size bounds regardless of the conversation's total length.
+- Do not persist private model reasoning. Tool execution records are auditable application events and must remain separate from hidden model reasoning.
+
+Implementations must preserve these key and item-shape choices. The DynamoDB slice may specify operational details such as conditional sequence allocation and retention, but changes to the accepted contract require an explicit design update.
