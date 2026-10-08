@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspace @soc-bot/infra",
-    "lint": "eslint infra/bin infra/lib infra/test --ext .ts",
+    "lint": "eslint infra/bin infra/lib infra/lambdas infra/test --ext .ts",
     "test": "npm run test --workspace @soc-bot/infra",
     "synth": "npm run build && npm run synth --workspace @soc-bot/infra",
     "infra:build": "npm run build --workspace @soc-bot/infra",

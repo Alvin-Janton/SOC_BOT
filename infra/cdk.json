@@ -1,6 +1,7 @@
 {
   "app": "node dist/bin/soc-bot.js",
   "context": {
+    "@aws-cdk/core:defaultCrossStackReferences": "strong",
     "@aws-cdk/aws-iam:minimizePolicies": true
   }
 }

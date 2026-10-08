@@ -8,52 +8,12 @@ import { Construct } from 'constructs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DeploymentEnvironment } from '../../shared/environment';
+import { COMMON_COLUMNS, APP_COLUMNS, WAF_COLUMNS, VPC_COLUMNS, CLOUDTRAIL_COLUMNS } from '../../shared/catalog-schema';
 
 export interface ApplicationGlueProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
   readonly dataBucket: Bucket;
 }
-
-const COMMON_COLUMNS: Array<[string, string]> = [
-  ['event_uid', 'string'], ['event_time', 'timestamp'], ['source_type', 'string'],
-  ['activity_name', 'string'], ['activity_id', 'string'], ['status', 'string'],
-  ['severity_id', 'int'], ['severity', 'string'], ['severity_source', 'string'],
-  ['src_ip', 'string'], ['dst_ip', 'string'], ['actor', 'string'], ['resource', 'string'],
-  ['request_id', 'string'], ['source_s3_key', 'string'], ['source_record_ref', 'string'],
-  ['raw_event', 'string'], ['schema_version', 'int'],
-];
-const APP_COLUMNS: Array<[string, string]> = [
-  ['method', 'string'], ['path', 'string'], ['raw_url', 'string'],
-  ['query_string', 'string'], ['body', 'string'], ['query_params', 'string'],
-  ['body_params', 'string'], ['headers', 'string'], ['host', 'string'],
-  ['scheme', 'string'], ['http_version', 'string'], ['user_agent', 'string'],
-  ['session_id', 'string'], ['status_code', 'int'], ['latency_ms', 'int'],
-  ['response_bytes', 'bigint'], ['source_dataset', 'string'],
-  ['source_geo', 'string'],
-  ['source_account_id', 'string'], ['source_aws_region', 'string'], ['source_environment', 'string'],
-  ['target_service', 'string'], ['target_instance_id', 'string'], ['alb_name', 'string'],
-];
-const WAF_COLUMNS: Array<[string, string]> = [
-  ['timestamp', 'bigint'], ['format_version', 'int'], ['web_acl_id', 'string'],
-  ['action', 'string'], ['terminating_rule_id', 'string'], ['terminating_rule_type', 'string'],
-  ['response_code_sent', 'int'], ['labels', 'string'], ['terminating_rule_match_details', 'string'],
-  ['non_terminating_matching_rules', 'string'], ['rule_group_list', 'string'], ['rate_based_rule_list', 'string'],
-  ['http_source_name', 'string'], ['http_source_id', 'string'], ['method', 'string'],
-  ['path', 'string'], ['query_string', 'string'], ['country', 'string'], ['headers', 'string'], ['http_version', 'string'],
-];
-const VPC_COLUMNS: Array<[string, string]> = [
-  ['flow_log_version', 'int'], ['account_id', 'string'], ['interface_id', 'string'],
-  ['srcaddr', 'string'], ['dstaddr', 'string'], ['srcport', 'int'], ['dstport', 'int'],
-  ['protocol', 'int'], ['packets', 'bigint'], ['bytes', 'bigint'],
-  ['start', 'bigint'], ['end', 'bigint'], ['action', 'string'], ['log_status', 'string'],
-];
-const CLOUDTRAIL_COLUMNS: Array<[string, string]> = [
-  ['event_version', 'string'], ['event_source', 'string'], ['event_name', 'string'],
-  ['aws_region', 'string'], ['user_agent', 'string'], ['identity_type', 'string'],
-  ['identity_account_id', 'string'], ['identity_user_name', 'string'], ['error_code', 'string'],
-  ['error_message', 'string'], ['s3_bucket_name', 'string'], ['s3_object_key', 'string'],
-  ['s3_prefix', 'string'], ['bytes_transferred_out', 'bigint'],
-];
 
 // Shared meanings are overridden below where a source uses a different mapping.
 const COMMON_COLUMN_COMMENTS: Record<string, string> = {
@@ -227,6 +187,9 @@ const PARTITION_COLUMN_COMMENTS: Record<string, string> = {
 
 /** Defines one shared on-demand job with separate application, WAF, VPC Flow, and CloudTrail tables. */
 export class ApplicationGlue extends Construct {
+  public readonly database: CfnDatabase;
+  public readonly tables: CfnTable[];
+
   public constructor(scope: Construct, id: string, props: ApplicationGlueProps) {
     super(scope, id);
     const { deploymentEnvironment: environment, dataBucket } = props;
@@ -294,6 +257,7 @@ export class ApplicationGlue extends Construct {
       catalogId: Aws.ACCOUNT_ID,
       databaseInput: { name: databaseName, description: `${environment} normalized security events` },
     });
+    this.database = database;
     const table = new CfnTable(this, 'ApplicationTable', {
       catalogId: Aws.ACCOUNT_ID,
       databaseName,
@@ -421,6 +385,7 @@ export class ApplicationGlue extends Construct {
       },
     });
     cloudtrailTable.addResourceDependency(database);
+    this.tables = [table, wafTable, vpcTable, cloudtrailTable];
 
     const job = new CfnJob(this, 'NormalizeApplicationJob', {
       name: jobName,

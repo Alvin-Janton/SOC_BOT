@@ -11,11 +11,13 @@ export interface ApplicationAthenaProps {
 
 /** Defines the environment's Athena workgroup with enforced result and scan controls. */
 export class ApplicationAthena extends Construct {
+  public readonly workgroup: CfnWorkGroup;
+
   public constructor(scope: Construct, id: string, props: ApplicationAthenaProps) {
     super(scope, id);
     const { deploymentEnvironment: environment, dataBucket } = props;
 
-    const workgroup = new CfnWorkGroup(this, 'Workgroup', {
+    this.workgroup = new CfnWorkGroup(this, 'Workgroup', {
       name: `SOC-BOT-${environment.toUpperCase()}-QUERY`,
       description: `SOC Bot ${environment} queries over normalized security evidence`,
       state: 'ENABLED',
@@ -30,6 +32,6 @@ export class ApplicationAthena extends Construct {
         },
       },
     });
-    workgroup.applyRemovalPolicy(environment === 'dev' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN);
+    this.workgroup.applyRemovalPolicy(environment === 'dev' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN);
   }
 }

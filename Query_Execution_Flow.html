@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A function-by-function walkthrough of SOC Bot's asynchronous Athena query tool, with example requests, SQL, result conversion, and future orchestration responsibilities.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <title>Query Execution Flow | SOC Bot</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #f6f7fb;
+      --surface: #ffffff;
+      --text: #182338;
+      --muted: #526079;
+      --line: #d8deea;
+      --blue: #244db4;
+      --blue-soft: #edf2ff;
+      --green: #166044;
+      --green-soft: #eaf6ef;
+      --amber: #805100;
+      --amber-soft: #fff5df;
+      --code: #eef1f7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #111723;
+        --surface: #192231;
+        --text: #e6ecf6;
+        --muted: #b1bfd3;
+        --line: #364459;
+        --blue: #a5beff;
+        --blue-soft: #223251;
+        --green: #9ad8b5;
+        --green-soft: #203c32;
+        --amber: #f0cc82;
+        --amber-soft: #423620;
+        --code: #101925;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font: 16px/1.7 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:focus-visible, summary:focus-visible {
+      outline: 3px solid var(--blue);
+      outline-offset: 4px;
+    }
+    .skip-link {
+      position: absolute;
+      top: -80px;
+      left: 20px;
+      padding: 10px 16px;
+      background: var(--surface);
+      z-index: 10;
+    }
+    .skip-link:focus { top: 10px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 238px minmax(0, 960px);
+      gap: 48px;
+      max-width: 1340px;
+      margin: auto;
+      padding: 40px 32px 64px;
+    }
+    .sidebar {
+      position: sticky;
+      top: 28px;
+      align-self: start;
+      max-height: calc(100vh - 56px);
+      overflow-y: auto;
+    }
+    .brand { font-weight: 750; letter-spacing: .07em; font-size: 18px; }
+    .brand span { color: var(--blue); }
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    nav { margin: 26px 0; }
+    nav a {
+      display: block;
+      padding: 7px 0;
+      text-decoration: none;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    nav a:hover { color: var(--blue); text-decoration: underline; }
+    .sidebar-note { color: var(--muted); font-size: 13px; }
+    main { min-width: 0; }
+    h1 { font-size: clamp(32px, 4vw, 52px); line-height: 1.12; letter-spacing: -.045em; margin: 16px 0 22px; }
+    h2 { font-size: 26px; line-height: 1.3; letter-spacing: -.025em; margin: 0 0 18px; }
+    h3 { font-size: 19px; line-height: 1.4; margin: 26px 0 12px; }
+    p { margin: 12px 0; }
+    .lede { color: var(--muted); font-size: 19px; max-width: 760px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0; }
+    .badge { padding: 4px 10px; border-radius: 5px; background: var(--code); font-size: 12px; font-weight: 650; }
+    .badge.live { color: var(--green); background: var(--green-soft); }
+    .badge.future { color: var(--amber); background: var(--amber-soft); }
+    .callout { padding: 18px 22px; border-left: 4px solid var(--blue); background: var(--blue-soft); border-radius: 0 8px 8px 0; margin: 22px 0; }
+    .callout p { margin: 0; }
+    .callout.warning { border-color: var(--amber); background: var(--amber-soft); }
+    section { padding: 40px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 24px; }
+    .section-label { color: var(--blue); font-size: 12px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 10px; }
+    .phase { padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); margin: 18px 0; }
+    .phase h3 { margin: 0 0 4px; }
+    .phase > p { margin-top: 4px; color: var(--muted); }
+    .flow { display: flex; align-items: stretch; gap: 10px; margin: 22px 0 8px; }
+    .node { flex: 1; min-width: 0; padding: 14px 12px; background: var(--code); border-radius: 8px; }
+    .node.tool { background: var(--blue-soft); }
+    .node.aws { background: var(--green-soft); }
+    .node strong, .node small { display: block; }
+    .node small { color: var(--muted); margin-top: 6px; line-height: 1.5; font-size: 13px; overflow-wrap: anywhere; }
+    .arrow { align-self: center; color: var(--muted); font-size: 22px; }
+    .bridge { text-align: center; color: var(--muted); font-size: 14px; margin: 20px 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: .88em; overflow-wrap: anywhere; }
+    :not(pre) > code { padding: 2px 5px; background: var(--code); border-radius: 4px; }
+    .code-label { display: block; margin: 20px 0 7px; font-size: 12px; font-weight: 750; letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }
+    pre {
+      margin: 8px 0 20px;
+      padding: 20px;
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow-x: auto;
+      line-height: 1.65;
+      tab-size: 2;
+    }
+    pre code { font-size: 13px; overflow-wrap: normal; white-space: pre; }
+    .table-wrap { overflow-x: auto; margin: 20px 0; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    caption { text-align: left; font-weight: 650; margin-bottom: 10px; }
+    th, td { text-align: left; vertical-align: top; padding: 13px 12px; border-bottom: 1px solid var(--line); }
+    th { background: var(--code); font-weight: 650; }
+    th:first-child, td:first-child { padding-left: 12px; }
+    ul, ol { padding-left: 24px; }
+    li { margin: 7px 0; }
+    .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 22px 0; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px; min-width: 0; }
+    .panel h3 { margin-top: 0; }
+    .panel ul { margin-bottom: 0; }
+    .count-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 22px 0; }
+    .count { padding: 18px; border-radius: 8px; background: var(--blue-soft); }
+    .count strong { display: block; font-size: 25px; }
+    .count span { display: block; color: var(--muted); font-size: 13px; }
+    details { margin: 18px 0; }
+    summary { cursor: pointer; color: var(--blue); font-weight: 650; }
+    .fine { color: var(--muted); font-size: 14px; }
+    footer { padding-top: 28px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 180px minmax(0, 1fr); gap: 28px; padding-inline: 24px; }
+    }
+    @media (max-width: 800px) {
+      .layout { display: block; padding: 24px 20px 44px; }
+      .sidebar { position: static; max-height: none; overflow: visible; margin-bottom: 32px; }
+      nav { display: flex; flex-wrap: wrap; column-gap: 18px; margin: 16px 0; }
+      nav a { font-size: 13px; }
+      .sidebar-note { display: none; }
+      .split { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 580px) {
+      .flow { flex-direction: column; }
+      .arrow { transform: rotate(90deg); line-height: 1; }
+      .phase, .panel { padding: 18px; }
+      .count-flow { grid-template-columns: 1fr; }
+      pre { padding: 14px; }
+      section { padding-block: 30px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      :root { color-scheme: light; --background: white; --surface: white; --text: #182338; --muted: #526079; --line: #d8deea; --code: #f2f4f8; --blue: #244db4; --blue-soft: #edf2ff; --green-soft: #eaf6ef; --amber-soft: #fff5df; }
+      .layout { display: block; padding: 0; max-width: none; }
+      .sidebar, .skip-link { display: none; }
+      body { font-size: 11pt; }
+      pre { white-space: pre-wrap; overflow: visible; }
+      pre code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 9pt; }
+      section { padding-block: 20px; }
+      h2, h3, .code-label { break-after: avoid; }
+      .phase, .callout, tr { break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to walkthrough</a>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">SOC <span>BOT</span></div>
+      <p class="eyebrow">Developer reference</p>
+      <nav aria-label="Walkthrough sections">
+        <a href="#overview">The two-call lifecycle</a>
+        <a href="#input">01 / Input &amp; dispatch</a>
+        <a href="#compiler">02 / Compile safe SQL</a>
+        <a href="#submission">03 / Submit &amp; return</a>
+        <a href="#status">04 / Check execution</a>
+        <a href="#fetch">05 / Fetch a bounded page</a>
+        <a href="#conversion">06 / Convert the rows</a>
+        <a href="#output">07 / Final response</a>
+        <a href="#errors">Other outcomes</a>
+        <a href="#responsibilities">Built versus deferred</a>
+        <a href="#sources">Source map &amp; recap</a>
+      </nav>
+      <p class="sidebar-note">An offline explanation of the current code. No AWS calls, external libraries, credentials, or executable examples.</p>
+    </aside>
+    <main id="main">
+      <header>
+        <p class="eyebrow">Athena query tool / query_events</p>
+        <h1>Query execution,<br>from request to evidence.</h1>
+        <p class="lede">Follow one typed WAF query through the Lambda, the SQL compiler, Athena execution, and the conversion back into compact evidence rows.</p>
+        <div class="meta">
+          <span class="badge">Code snapshot: October 7, 2026</span>
+          <span class="badge live">Query tool implemented</span>
+          <span class="badge future">Orchestrator not yet implemented</span>
+        </div>
+        <div class="callout">
+          <p><strong>The essential distinction:</strong> <code>query_events</code> submits a query and returns an execution ID. A separate <code>query_status</code> invocation later checks its state and retrieves results. Athena keeps working after the first Lambda invocation returns.</p>
+        </div>
+        <p class="fine">Examples are illustrative, not recorded AWS results. Event hashes, execution IDs, timings, and byte counts are placeholders. This file documents behavior; opening it does not execute a query.</p>
+      </header>
+
+      <section id="overview" aria-labelledby="overview-title">
+        <p class="section-label">One query / two kinds of invocation</p>
+        <h2 id="overview-title">The complete lifecycle</h2>
+        <div class="phase">
+          <h3>Invocation A &middot; Start the query</h3>
+          <p>Input operation: <code>query_events</code></p>
+          <div class="flow" aria-label="The caller sends a typed request to handler, start compiles it, Athena starts the query, and Lambda returns an execution ID.">
+            <div class="node"><strong>Internal caller</strong><small>Typed query request<br>Future orchestrator integration</small></div>
+            <span class="arrow" aria-hidden="true">&rarr;</span>
+            <div class="node tool"><strong>Query Lambda</strong><small>handler &rarr; start<br>&rarr; compileQuery</small></div>
+            <span class="arrow" aria-hidden="true">&rarr;</span>
+            <div class="node aws"><strong>Athena</strong><small>StartQueryExecution<br>Returns execution ID</small></div>
+          </div>
+          <p><strong>Return to caller:</strong> <code>SUBMITTED</code> + execution ID. No event rows yet.</p>
+        </div>
+        <p class="bridge">Athena continues asynchronously. The caller decides when to check again.</p>
+        <div class="phase">
+          <h3>Invocation B &middot; Check and retrieve</h3>
+          <p>Input operation: <code>query_status</code>, with the ID and complete original query request</p>
+          <div class="flow" aria-label="The caller sends a status request, status verifies the query, Athena supplies execution state and results, and boundedResults formats the response.">
+            <div class="node"><strong>Internal caller</strong><small>Execution ID<br>+ original query request</small></div>
+            <span class="arrow" aria-hidden="true">&rarr;</span>
+            <div class="node tool"><strong>Query Lambda</strong><small>handler &rarr; status<br>&rarr; execution</small></div>
+            <span class="arrow" aria-hidden="true">&rarr;</span>
+            <div class="node aws"><strong>Athena</strong><small>GetQueryExecution<br>GetQueryResults on success</small></div>
+          </div>
+          <p><strong>Return to caller:</strong> current state without rows, or <code>SUCCEEDED</code> + <code>boundedResults</code> output.</p>
+        </div>
+        <p>Invocation B can happen more than once. There is no polling loop inside this Lambda; the future orchestrator will manage repeated calls.</p>
+      </section>
+
+      <section id="input" aria-labelledby="input-title">
+        <p class="section-label">01 / Invocation A</p>
+        <h2 id="input-title">Input enters <code>handler()</code></h2>
+        <p>Imagine the caller asks: <em>&ldquo;Find WAF events on September 11 with severity 3 or higher. Return action, path, and severity ID, with at most two events.&rdquo;</em></p>
+        <span class="code-label">Lambda event &middot; originalQuery</span>
+        <pre><code data-format="json" data-example="original-query">{
+  "operation": "query_events",
+  "table": "waf_events",
+  "start_time": "2026-09-11T00:00:00Z",
+  "end_time": "2026-09-12T00:00:00Z",
+  "fields": ["action", "path", "severity_id"],
+  "filters": [
+    { "field": "severity_id", "operator": "gte", "value": 3 }
+  ],
+  "limit": 2
+}</code></pre>
+        <p>This is the direct Lambda payload, not an API Gateway HTTP envelope. <code>context.awsRequestId</code> comes from Lambda's invocation context, separately from the event.</p>
+        <div class="table-wrap">
+          <table>
+            <caption>Entry-point function calls</caption>
+            <thead><tr><th scope="col">Function or check</th><th scope="col">What happens</th></tr></thead>
+            <tbody>
+              <tr><td><code>handler(event, context)</code></td><td>Starts timing the invocation, validates the request, dispatches the operation, catches errors, and returns the response.</td></tr>
+              <tr><td><code>object(event)</code></td><td>Accepts a non-null plain object. Rejects arrays and class instances. It validates the object without copying or transforming it.</td></tr>
+              <tr><td>20 KiB request check</td><td>Measures the UTF-8 byte length of the serialized event; oversized requests are rejected.</td></tr>
+              <tr><td><code>configuration()</code></td><td>Loads and validates trusted database, workgroup, results bucket, prefix, and maximum query-window settings from environment variables.</td></tr>
+              <tr><td><code>queryWindowDays()</code></td><td>Validates the configured cap as an integer from 1 to 366 days. The deployed default is 30.</td></tr>
+              <tr><td>Operation dispatch</td><td>Confirms the operation is recognized. <code>query_events</code> goes to <code>start(request, config)</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <span class="code-label">Trusted dev configuration &middot; illustrative bucket placeholder</span>
+        <pre><code data-format="json" data-example="configuration">{
+  "database": "soc_bot_dev_security",
+  "workgroup": "SOC-BOT-DEV-QUERY",
+  "bucket": "&lt;configured-dev-data-bucket&gt;",
+  "maxDays": 30
+}</code></pre>
+        <p>The deployment also sets <code>RESULTS_PREFIX=athena-results/</code>, which <code>configuration()</code> requires. The caller cannot override the database, workgroup, or output location.</p>
+      </section>
+
+      <section id="compiler" aria-labelledby="compiler-title">
+        <p class="section-label">02 / Request becomes a compiled contract</p>
+        <h2 id="compiler-title"><code>start()</code> calls <code>compileQuery()</code></h2>
+        <pre><code data-format="typescript">const query = compileQuery(
+  request,
+  config.database,
+  config.maxDays,
+);</code></pre>
+        <p><code>compileQuery()</code> constructs SQL and expected output types. It does not contact Athena or execute anything.</p>
+        <pre><code data-format="text">compileQuery(request, database, maxDays)
+  |
+  +-- object() / onlyKeys()       Validate shape and allowed options
+  +-- tableName()                Resolve an approved table
+  +-- limit validation           Enforce 1-100 rows; default 25
+  +-- queryWindowDays()
+  |     +-- timeSql()
+  |           +-- utcTime()      Validate UTC timestamps and range
+  |           +-- literal()
+  |                 +-- stringLiteral()
+  +-- filtersSql()
+  |     +-- object() / onlyKeys() Validate each filter
+  |     +-- column()
+  |     |     +-- tableColumns()  Resolve approved names and types
+  |     +-- literal()             Format a type-checked value
+  |           +-- stringLiteral()
+  +-- column() / tableColumns()   Resolve output and sort columns
+  +-- add provenance / dedupe     Build the final projection
+  +-- assemble SELECT            SQL + limit + expected columns</code></pre>
+
+        <h3>Validate the contract</h3>
+        <p>The compiler rechecks the plain-object shape, enforces its own 16 KiB request limit, accepts only data-query operations, and rejects unsupported keys. For <code>query_events</code>, the allowed keys are:</p>
+        <pre><code data-format="text">operation, table, start_time, end_time,
+filters, limit, fields, sort</code></pre>
+        <p><code>onlyKeys()</code> checks that no unexpected keys exist. It does <strong>not</strong> require every allowed key to be present. Required values are validated by their consuming functions; optional fields use defaults.</p>
+        <p><code>tableName()</code> accepts only <code>application_events</code>, <code>waf_events</code>, <code>vpc_flow_events</code>, and <code>cloudtrail_events</code>. The database must match the configured dev/demo database convention.</p>
+
+        <h3><code>timeSql()</code>: partitions plus exact timestamps</h3>
+        <p><code>utcTime()</code> validates real UTC ISO-8601 values ending in <code>Z</code>, with up to millisecond precision. The range must be positive, within the configured cap, and within the current 2026-2036 catalog projection.</p>
+        <span class="code-label">Time conditions for our request</span>
+        <pre><code data-format="sql">(
+  ("year" = '2026' AND "month" = '09' AND "day" = '11')
+)
+AND "event_time" &gt;= TIMESTAMP '2026-09-11 00:00:00.000'
+AND "event_time" &lt; TIMESTAMP '2026-09-12 00:00:00.000'</code></pre>
+        <div class="split">
+          <div class="panel"><h3>Partition predicates</h3><p>Narrow which date partitions Athena considers scanning. A multi-day query generates an OR across all covered UTC days.</p></div>
+          <div class="panel"><h3>Timestamp predicates</h3><p>Narrow which events qualify. The start is inclusive and the end is exclusive, so September 12 at midnight is not included.</p></div>
+        </div>
+
+        <h3><code>filtersSql()</code>: typed filters become SQL</h3>
+        <p>Each filter is validated independently. <code>column()</code> consults <code>tableColumns()</code>, which combines the committed source columns with the projected date partition columns.</p>
+        <pre><code data-format="text">{ field: 'severity_id', operator: 'gte', value: 3 }
+    |
+    +-- severity_id is an approved WAF column
+    +-- its type is int
+    +-- gte is an approved numeric comparison
+    +-- literal(3, 'int') validates and formats the integer
+    |
+    v
+"severity_id" &gt;= 3</code></pre>
+        <p><code>literal()</code> formats values according to the column type. <code>stringLiteral()</code> quotes strings and doubles apostrophes so they remain values rather than SQL syntax. Filters are AND-only, with at most eight filters and at most ten values per <code>in</code> filter.</p>
+
+        <h3>Projection, provenance, and sorting</h3>
+        <p>The requested projection permits 1-20 approved fields before adding provenance. The compiler adds the five required provenance columns and removes duplicate names.</p>
+        <div class="table-wrap">
+          <table>
+            <caption>Final column order and declared types</caption>
+            <thead><tr><th scope="col">Column</th><th scope="col">Type</th><th scope="col">Why it is present</th></tr></thead>
+            <tbody>
+              <tr><td><code>action</code></td><td>string</td><td>Requested</td></tr>
+              <tr><td><code>path</code></td><td>string</td><td>Requested</td></tr>
+              <tr><td><code>severity_id</code></td><td>int</td><td>Requested</td></tr>
+              <tr><td><code>event_uid</code></td><td>string</td><td>Required normalized evidence identifier</td></tr>
+              <tr><td><code>event_time</code></td><td>timestamp</td><td>Required event time</td></tr>
+              <tr><td><code>source_type</code></td><td>string</td><td>Required source classification</td></tr>
+              <tr><td><code>source_s3_key</code></td><td>string</td><td>Required raw-object provenance</td></tr>
+              <tr><td><code>source_record_ref</code></td><td>string</td><td>Required source-native record reference</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>With no explicit sort, the compiler uses ascending <code>event_time</code>, followed by <code>event_uid</code>, <code>source_s3_key</code>, and <code>source_record_ref</code> as tie-breakers. These fields are not guaranteed unique for repeated records with the same native ID in the same raw object.</p>
+
+        <span class="code-label">Generated SQL &middot; line-wrapped for readability</span>
+        <pre><code data-format="sql">SELECT
+  "action", "path", "severity_id",
+  "event_uid", "event_time", "source_type",
+  "source_s3_key", "source_record_ref"
+FROM "soc_bot_dev_security"."waf_events"
+WHERE (
+  ("year" = '2026' AND "month" = '09' AND "day" = '11')
+)
+  AND "event_time" &gt;= TIMESTAMP '2026-09-11 00:00:00.000'
+  AND "event_time" &lt; TIMESTAMP '2026-09-12 00:00:00.000'
+  AND "severity_id" &gt;= 3
+ORDER BY
+  "event_time" ASC NULLS LAST,
+  "event_uid" ASC,
+  "source_s3_key" ASC,
+  "source_record_ref" ASC
+LIMIT 3</code></pre>
+        <div class="callout"><p><strong>Why LIMIT 3?</strong> The requested response limit is still 2. The third row is look-ahead evidence that more matching rows exist, not a third row returned to the caller.</p></div>
+        <details>
+          <summary>Show the complete CompiledQuery object</summary>
+          <pre><code data-format="json" data-example="compiled-query">{
+  "operation": "query_events",
+  "table": "waf_events",
+  "columns": [
+    { "name": "action", "type": "string" },
+    { "name": "path", "type": "string" },
+    { "name": "severity_id", "type": "int" },
+    { "name": "event_uid", "type": "string" },
+    { "name": "event_time", "type": "timestamp" },
+    { "name": "source_type", "type": "string" },
+    { "name": "source_s3_key", "type": "string" },
+    { "name": "source_record_ref", "type": "string" }
+  ],
+  "limit": 2,
+  "sql": "SELECT \"action\", \"path\", \"severity_id\", \"event_uid\", \"event_time\", \"source_type\", \"source_s3_key\", \"source_record_ref\" FROM \"soc_bot_dev_security\".\"waf_events\" WHERE ((\"year\" = '2026' AND \"month\" = '09' AND \"day\" = '11')) AND \"event_time\" &gt;= TIMESTAMP '2026-09-11 00:00:00.000' AND \"event_time\" &lt; TIMESTAMP '2026-09-12 00:00:00.000' AND \"severity_id\" &gt;= 3 ORDER BY \"event_time\" ASC NULLS LAST, \"event_uid\" ASC, \"source_s3_key\" ASC, \"source_record_ref\" ASC LIMIT 3"
+}</code></pre>
+        </details>
+      </section>
+
+      <section id="submission" aria-labelledby="submission-title">
+        <p class="section-label">03 / The first invocation ends</p>
+        <h2 id="submission-title"><code>start()</code> submits to Athena</h2>
+        <p>The compiled object returns to <code>start()</code>, which sends <code>StartQueryExecutionCommand</code> through the Athena SDK client.</p>
+        <pre><code data-format="typescript">await athena.send(new StartQueryExecutionCommand({
+  QueryString: query.sql,
+  QueryExecutionContext: {
+    Database: config.database,
+    Catalog: 'AwsDataCatalog',
+  },
+  WorkGroup: config.workgroup,
+  ResultConfiguration: {
+    OutputLocation: `s3://${config.bucket}/athena-results/`,
+    EncryptionConfiguration: { EncryptionOption: 'SSE_S3' },
+  },
+  ResultReuseConfiguration: {
+    ResultReuseByAgeConfiguration: { Enabled: false },
+  },
+}), { abortSignal: AbortSignal.timeout(10_000) });</code></pre>
+        <p>Athena runs the SQL against cataloged normalized data. The Lambda does not directly read the underlying raw or normalized Parquet objects. The dedicated workgroup enforces the result location, SSE-S3 encryption, and a 128 MiB bytes-scanned cutoff.</p>
+        <p>The 10-second abort signal bounds this SDK request; it is <strong>not</strong> the lifetime of the asynchronous Athena query. Stopping a query requires cancellation.</p>
+        <span class="code-label">First Lambda response</span>
+        <pre><code data-format="json" data-example="submitted-response">{
+  "ok": true,
+  "operation": "query_events",
+  "table": "waf_events",
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "state": "SUBMITTED",
+  "query_deadline_seconds": 180,
+  "result_count": 0,
+  "truncated": false
+}</code></pre>
+        <p><code>SUBMITTED</code> is the tool's acknowledgement that Athena returned an execution ID, not Athena's current execution state. There are no result rows in this response.</p>
+        <p><code>handler()</code> records operational metadata, including the Lambda request ID, operation, execution ID, elapsed invocation time, and outcome. It does not log SQL, filters, or evidence rows. It then returns to the caller while Athena continues.</p>
+      </section>
+
+      <section id="status" aria-labelledby="status-title">
+        <p class="section-label">04 / Invocation B</p>
+        <h2 id="status-title">A separate call enters <code>status()</code></h2>
+        <p>The caller must retain the original request and execution ID. They are not automatically carried between Lambda invocations.</p>
+        <span class="code-label">Second Lambda event &middot; full original request included</span>
+        <pre><code data-format="json" data-example="status-request">{
+  "operation": "query_status",
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "query": {
+    "operation": "query_events",
+    "table": "waf_events",
+    "start_time": "2026-09-11T00:00:00Z",
+    "end_time": "2026-09-12T00:00:00Z",
+    "fields": ["action", "path", "severity_id"],
+    "filters": [
+      { "field": "severity_id", "operator": "gte", "value": 3 }
+    ],
+    "limit": 2
+  }
+}</code></pre>
+        <p>The same entry checks run in <code>handler()</code>. This time operation dispatch selects <code>status(request, config)</code>.</p>
+        <div class="table-wrap">
+          <table>
+            <caption>Status validation and function calls</caption>
+            <thead><tr><th scope="col">Function or check</th><th scope="col">What happens</th></tr></thead>
+            <tbody>
+              <tr><td><code>onlyKeys()</code></td><td>Allows only <code>operation</code>, <code>query_execution_id</code>, and <code>query</code> on the status envelope.</td></tr>
+              <tr><td><code>executionId()</code></td><td>Requires an execution ID in the expected UUID format.</td></tr>
+              <tr><td><code>compileQuery(request.query, ...)</code></td><td>Revalidates the original query and recreates its exact SQL, limit, and expected output columns.</td></tr>
+              <tr><td><code>execution()</code></td><td>Sends <code>GetQueryExecutionCommand</code> and independently rejects an execution from any other workgroup.</td></tr>
+              <tr><td><code>unknownExecution()</code></td><td>Recognizes specific unavailable-execution exceptions. Other service errors propagate to the handler.</td></tr>
+              <tr><td>Recorded-query comparison</td><td>Requires exact equality with the recompiled SQL, configured database, and <code>AwsDataCatalog</code>.</td></tr>
+              <tr><td><code>queryMetadata()</code></td><td>Builds safe execution metadata: ID, state, UTC submission/completion timestamps, duration, scanned bytes, and deadline value.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warning"><p><strong>Query matching is not user authorization.</strong> These checks prove the execution matches the request and configured workgroup. Server-side user/turn ownership tracking and authorization belong to the future orchestrator/API slice.</p></div>
+        <span class="code-label">Example response while Athena is still running</span>
+        <pre><code data-format="json" data-example="running-response">{
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "state": "RUNNING",
+  "submitted_at": "2026-10-07T12:00:00.000Z",
+  "completed_at": null,
+  "duration_ms": 500,
+  "bytes_scanned": 0,
+  "query_deadline_seconds": 180,
+  "table": "waf_events",
+  "operation": "query_events",
+  "result_count": 0,
+  "truncated": false,
+  "ok": true
+}</code></pre>
+        <p>Submission and completion timestamps describe <strong>query execution</strong>, not the timestamps of the security events. For <code>QUEUED</code> or <code>RUNNING</code>, no result page is fetched. The caller can invoke status again later.</p>
+      </section>
+
+      <section id="fetch" aria-labelledby="fetch-title">
+        <p class="section-label">05 / Athena reports SUCCEEDED</p>
+        <h2 id="fetch-title"><code>status()</code> fetches one bounded page</h2>
+        <pre><code data-format="typescript">const result = await athena.send(new GetQueryResultsCommand({
+  QueryExecutionId: id,
+  MaxResults: expected.limit + 2,
+  QueryResultType: 'DATA_ROWS',
+}), { abortSignal: AbortSignal.timeout(10_000) });</code></pre>
+        <p>For our requested limit of two, the page can contain four rows: a header, two requested evidence rows, and one extra evidence row for truncation detection.</p>
+        <div class="count-flow" aria-label="Two returned evidence rows, three SQL evidence rows including look-ahead, and four SDK rows including the header.">
+          <div class="count"><strong>2</strong><span>Maximum evidence rows returned<br><code>query.limit</code></span></div>
+          <div class="count"><strong>3</strong><span>Maximum SQL evidence rows<br><code>LIMIT limit + 1</code></span></div>
+          <div class="count"><strong>4</strong><span>Maximum fetched SDK rows<br><code>MaxResults limit + 2</code></span></div>
+        </div>
+        <p>The code fetches at most one page. It does not follow <code>NextToken</code> to collect an unrestricted result set.</p>
+        <details open>
+          <summary>See the Athena header and first evidence row</summary>
+          <pre><code data-format="json" data-example="athena-rows">[
+  {
+    "Data": [
+      { "VarCharValue": "action" },
+      { "VarCharValue": "path" },
+      { "VarCharValue": "severity_id" },
+      { "VarCharValue": "event_uid" },
+      { "VarCharValue": "event_time" },
+      { "VarCharValue": "source_type" },
+      { "VarCharValue": "source_s3_key" },
+      { "VarCharValue": "source_record_ref" }
+    ]
+  },
+  {
+    "Data": [
+      { "VarCharValue": "BLOCK" },
+      { "VarCharValue": "/search" },
+      { "VarCharValue": "3" },
+      { "VarCharValue": "&lt;event-hash-1&gt;" },
+      { "VarCharValue": "2026-09-11 09:00:00.000" },
+      { "VarCharValue": "waf" },
+      { "VarCharValue": "raw/waf/2026-9-11.jsonl" },
+      { "VarCharValue": "req-001" }
+    ]
+  }
+]</code></pre>
+        </details>
+        <p>Athena's SDK representation is positional: each cell corresponds to a selected column. Values initially arrive as text, including integers and timestamps. This example shows only the header and first evidence row; the final example below assumes two further matching rows were also available.</p>
+      </section>
+
+      <section id="conversion" aria-labelledby="conversion-title">
+        <p class="section-label">06 / SDK cells become named evidence</p>
+        <h2 id="conversion-title"><code>boundedResults()</code> calls <code>cell()</code></h2>
+        <pre><code data-format="typescript">return boundedResults(
+  expected,
+  result.ResultSet?.Rows ?? [],
+  Boolean(result.NextToken),
+  { ...metadata, ok: true },
+);</code></pre>
+        <ol>
+          <li>Verify the header's names and order match <code>expected.columns</code>.</li>
+          <li>Remove the header from the evidence rows.</li>
+          <li>Determine whether an extra row or next page indicates truncation.</li>
+          <li>Consider only the first <code>query.limit</code> evidence rows.</li>
+          <li>Check each row's width and map cell positions to column names.</li>
+          <li>Call <code>cell(value, type)</code> for every selected value.</li>
+          <li>Admit only complete rows that fit the serialized 65,536-byte response budget.</li>
+          <li>Return rows, column types, result count, truncation information, and execution metadata.</li>
+        </ol>
+        <div class="table-wrap">
+          <table>
+            <caption>Conversions performed by cell()</caption>
+            <thead><tr><th scope="col">Athena value</th><th scope="col">Declared type</th><th scope="col">Output</th></tr></thead>
+            <tbody>
+              <tr><td><code>"3"</code></td><td>int</td><td><code>3</code>, after integer and safe-number checks</td></tr>
+              <tr><td><code>"2026-09-11 09:00:00.000"</code></td><td>timestamp</td><td><code>"2026-09-11T09:00:00.000Z"</code></td></tr>
+              <tr><td><code>"BLOCK"</code></td><td>string</td><td><code>"BLOCK"</code>, unchanged</td></tr>
+              <tr><td>Missing <code>VarCharValue</code></td><td>Any</td><td><code>null</code>; an empty string remains an empty string</td></tr>
+              <tr><td>Big integer / decimal text</td><td>bigint / decimal</td><td>Unchanged text, preserving precision</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <span class="code-label">First evidence row after conversion</span>
+        <pre><code data-format="json" data-example="converted-row">{
+  "action": "BLOCK",
+  "path": "/search",
+  "severity_id": 3,
+  "event_uid": "&lt;event-hash-1&gt;",
+  "event_time": "2026-09-11T09:00:00.000Z",
+  "source_type": "waf",
+  "source_s3_key": "raw/waf/2026-9-11.jsonl",
+  "source_record_ref": "req-001"
+}</code></pre>
+        <p>The response-size check includes execution metadata, column definitions, and truncation fields, not just the rows. It reserves space for truncation metadata and removes the last candidate row if the complete response would exceed 64 KiB.</p>
+        <div class="callout"><p><strong>This is result formatting, not ETL.</strong> The tool does not recalculate severity, change event IDs, or rewrite source data. It selects stored evidence and converts Athena's wire representation into usable objects.</p></div>
+      </section>
+
+      <section id="output" aria-labelledby="output-title">
+        <p class="section-label">07 / Invocation B returns evidence</p>
+        <h2 id="output-title">The final response</h2>
+        <p>Assume Athena found three matching events. The third proves there is more data, but only two events are returned. Real event IDs retain Glue's stored values; the hashes below are illustrative placeholders.</p>
+        <pre><code data-format="json" data-example="final-response">{
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "state": "SUCCEEDED",
+  "submitted_at": "2026-10-07T12:00:00.000Z",
+  "completed_at": "2026-10-07T12:00:02.000Z",
+  "duration_ms": 2000,
+  "bytes_scanned": 2048,
+  "query_deadline_seconds": 180,
+  "table": "waf_events",
+  "operation": "query_events",
+  "result_count": 2,
+  "truncated": true,
+  "ok": true,
+  "columns": [
+    { "name": "action", "type": "string" },
+    { "name": "path", "type": "string" },
+    { "name": "severity_id", "type": "int" },
+    { "name": "event_uid", "type": "string" },
+    { "name": "event_time", "type": "timestamp" },
+    { "name": "source_type", "type": "string" },
+    { "name": "source_s3_key", "type": "string" },
+    { "name": "source_record_ref", "type": "string" }
+  ],
+  "rows": [
+    {
+      "action": "BLOCK",
+      "path": "/search",
+      "severity_id": 3,
+      "event_uid": "&lt;event-hash-1&gt;",
+      "event_time": "2026-09-11T09:00:00.000Z",
+      "source_type": "waf",
+      "source_s3_key": "raw/waf/2026-9-11.jsonl",
+      "source_record_ref": "req-001"
+    },
+    {
+      "action": "ALLOW",
+      "path": "/login",
+      "severity_id": 4,
+      "event_uid": "&lt;event-hash-2&gt;",
+      "event_time": "2026-09-11T09:05:00.000Z",
+      "source_type": "waf",
+      "source_s3_key": "raw/waf/2026-9-11.jsonl",
+      "source_record_ref": "req-002"
+    }
+  ],
+  "truncation_reason": "row_limit"
+}</code></pre>
+        <p>The outer response still identifies the original operation as <code>query_events</code>, even though the invocation used <code>query_status</code>. <code>handler()</code> logs that invocation's operational metadata and returns this object to the caller.</p>
+        <p>The future orchestrator will consume the compact evidence, return it to Bedrock for synthesis, and persist investigation state. None of those orchestration steps occur in the current query Lambda.</p>
+      </section>
+
+      <section id="errors" aria-labelledby="errors-title">
+        <p class="section-label">Branches outside the successful example</p>
+        <h2 id="errors-title">Other outcomes and cancellation</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>How the current code reports alternative outcomes</caption>
+            <thead><tr><th scope="col">Situation</th><th scope="col">Response behavior</th></tr></thead>
+            <tbody>
+              <tr><td>Invalid input or execution mismatch</td><td><code>handler()</code> catches <code>ContractError</code> and returns <code>ok: false</code> with <code>INVALID_INPUT</code> and a safe explanatory message.</td></tr>
+              <tr><td>Unexpected service/result error</td><td>The handler returns <code>SERVICE_ERROR</code> with a generic message, without raw service error text.</td></tr>
+              <tr><td>Unknown/unavailable execution</td><td><code>status()</code> returns <code>QUERY_NOT_FOUND</code>.</td></tr>
+              <tr><td>Athena state <code>FAILED</code></td><td>Safe execution metadata plus <code>ok: false</code> and <code>QUERY_FAILED</code>; no evidence page is fetched.</td></tr>
+              <tr><td><code>QUEUED</code> / <code>RUNNING</code></td><td>Current metadata with <code>ok: true</code> and no rows. The caller can check later.</td></tr>
+              <tr><td><code>CANCELLED</code></td><td>Current metadata with <code>ok: true</code> and no rows. Here, <code>ok</code> means the status check succeeded, not that the query succeeded; inspect <code>state</code>.</td></tr>
+              <tr><td>Additional evidence or next page</td><td><code>truncated: true</code> and <code>truncation_reason: "row_limit"</code>.</td></tr>
+              <tr><td>Response would exceed 64 KiB</td><td>Only fitting complete rows are retained, with <code>truncation_reason: "response_size"</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3><code>cancel()</code> is already implemented, but separate</h3>
+        <p>Cancellation is not part of the ordinary <code>query_events</code> path. An internal <code>cancel_query</code> request validates its keys and execution ID, uses <code>execution()</code> to check the workgroup, and calls <code>StopQueryExecution</code> only for <code>QUEUED</code> or <code>RUNNING</code> executions. Unknown or finished queries are safe no-ops; a completion race triggers another state/workgroup check.</p>
+        <p>Cancellation is not a Bedrock-selectable tool or public browser endpoint. The future authenticated Stop API must verify server-side user/turn ownership before invoking it.</p>
+      </section>
+
+      <section id="responsibilities" aria-labelledby="responsibilities-title">
+        <p class="section-label">What the current slice does and does not do</p>
+        <h2 id="responsibilities-title">Built versus deferred</h2>
+        <div class="split">
+          <div class="panel">
+            <span class="badge live">Implemented in the current code</span>
+            <h3>The private query tool</h3>
+            <ul>
+              <li>Typed request validation and allowlisted SQL compilation.</li>
+              <li>UTC window bounds and date partition predicates.</li>
+              <li>Asynchronous query submission.</li>
+              <li>Execution/workgroup checks and original-query matching.</li>
+              <li>One-page, row-limited, 64 KiB result conversion.</li>
+              <li>Internal cancellation and safe error handling.</li>
+              <li>Catalog description operation, separate from this flow.</li>
+              <li>Least-privilege CDK role and workgroup configuration.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <span class="badge future">Future application integration</span>
+            <h3>The orchestrator and API</h3>
+            <ul>
+              <li>Bedrock ConverseStream tool selection and invocation.</li>
+              <li>Retaining original requests and execution IDs.</li>
+              <li>Polling Athena status across Lambda calls.</li>
+              <li>Enforcing the 180-second query deadline.</li>
+              <li>Server-side user/turn-to-query ownership in DynamoDB.</li>
+              <li>Authenticated Stop API and cancellation authorization.</li>
+              <li>Returning evidence to the model and streaming answers.</li>
+              <li>Persisting conversations and investigation state.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout warning"><p><strong>Separate data-governance prerequisite:</strong> Lake Formation registration and database/table grants remain deferred and must be implemented before live data-query validation. Having the Lambda code and IAM role is not proof that authorized end-to-end querying is ready.</p></div>
+        <p>The Bedrock model has no AWS identity. The future orchestrator invokes this tool but does not receive Athena or direct security-log S3 access. The query role is limited to its environment's workgroup and results prefix; registered normalized data is intended to be authorized through Lake Formation.</p>
+        <p>Current guardrails are distinct: the 30-day default caps the requested time range; the 128 MiB cutoff limits bytes scanned; row limits and the 64 KiB response budget limit returned evidence. <code>query_deadline_seconds: 180</code> is a lifecycle contract for the future caller, not a timeout enforced inside this Lambda.</p>
+      </section>
+
+      <section id="sources" aria-labelledby="sources-title">
+        <p class="section-label">Keep this reference aligned with the code</p>
+        <h2 id="sources-title">Source map and final recap</h2>
+        <div class="table-wrap">
+          <table>
+            <caption>Repository-relative source locations</caption>
+            <thead><tr><th scope="col">File</th><th scope="col">Responsibility</th></tr></thead>
+            <tbody>
+              <tr><td><code>infra/lambdas/ai/query-tool/handler.ts</code></td><td>Configuration, dispatch, submit/status/cancel operations, Athena calls, execution metadata, and safe responses.</td></tr>
+              <tr><td><code>infra/lib/stacks/ai/query-contract.ts</code></td><td>Typed contracts, allowlists, literals, time/filter SQL, projection, sorting, and query compilation. This is runtime logic shared with infrastructure configuration despite its current folder placement.</td></tr>
+              <tr><td><code>infra/lambdas/ai/query-tool/results.ts</code></td><td>Cell conversion, header/width verification, and bounded evidence responses.</td></tr>
+              <tr><td><code>infra/lib/shared/catalog-schema.ts</code></td><td>Shared table column names and types used by the compiler and CDK catalog.</td></tr>
+              <tr><td><code>infra/lib/stacks/ai/athena-query-tool.ts</code></td><td>Lambda, runtime environment configuration, logging resources, and scoped IAM permissions.</td></tr>
+              <tr><td><code>infra/lib/stacks/data/application-athena.ts</code></td><td>Dedicated Athena workgroup and enforced scan/result settings.</td></tr>
+              <tr><td><code>Docs/AIStack_Spec-Temp.md</code> and <code>Docs/Final_Spec.md</code></td><td>Implemented query-tool contract and authoritative MVP architecture.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <pre><code data-format="text">INVOCATION A
+Typed query request
+  -&gt; handler()
+  -&gt; start()
+  -&gt; compileQuery(): safe SQL + expected columns
+  -&gt; Athena StartQueryExecution
+  -&gt; return SUBMITTED + execution ID
+
+ATHENA CONTINUES ASYNCHRONOUSLY
+
+INVOCATION B (repeat later if still running)
+Execution ID + complete original query request
+  -&gt; handler()
+  -&gt; status()
+  -&gt; compileQuery() + execution(): verify the same query
+  -&gt; queryMetadata()
+  -&gt; Athena GetQueryResults, only on SUCCEEDED
+  -&gt; boundedResults() / cell()
+  -&gt; return named, typed, bounded evidence rows</code></pre>
+        <p><strong>The tool handles query execution and safe evidence retrieval. The orchestrator will handle the conversation, query lifecycle, and user ownership around it.</strong></p>
+      </section>
+      <footer>Standalone SOC Bot development reference &middot; October 7, 2026 &middot; Offline HTML/CSS only. Recheck the linked source responsibilities after future runtime changes.</footer>
+    </main>
+  </div>
+</body>
+</html>
