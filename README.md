@@ -161,6 +161,8 @@ Each Data stack registers only `s3://<data-bucket>/normalized/` through `LakeFor
 
 Each AI stack owns five `PrincipalPermissions` resources for `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL`: database `DESCRIBE`, and combined `SELECT`/`DESCRIBE` on each of `application_events`, `waf_events`, `vpc_flow_events`, and `cloudtrail_events`. There are no grant options, wildcard table grants, or query-role `DATA_LOCATION_ACCESS` grants. Query IAM, its permission boundary, and results-only S3 access are unchanged. Strong Data imports keep deployment ordered Data before AI and teardown AI before Data. AI-only deletion revokes its grants without deregistering the Data location; Data deletion deregisters the location after AI is removed.
 
+The foundation's dev/demo data-and-analytics execution policies allow `iam:GetRole` only on the account's exact `AWSServiceRoleForLakeFormationDataAccess` service-linked role ARN. This read-only lookup does not authorize creating, changing, passing, or assuming that role. Apply the reviewed foundation policy update as an administrator before retrying application deployment; workflows do not deploy the foundation.
+
 Before allowing an automatic dev/main deployment, use the Lake Formation/IAM consoles with administrator access to verify these prerequisites separately for dev and demo:
 
 1. Confirm the service-linked role exists. The operator confirmed it for this implementation; the application does not create it. If absent later, stop for an administrator prerequisite rather than expanding runtime permissions.
