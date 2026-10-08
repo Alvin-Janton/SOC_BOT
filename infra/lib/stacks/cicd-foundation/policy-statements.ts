@@ -204,7 +204,7 @@ export function dataAndAnalyticsStatements(resources: EnvironmentResources): Pol
     }),
     new PolicyStatement({
       sid: `Read${capitalize(resources.environment)}LakeFormationServiceLinkedRole`,
-      actions: ['iam:GetRole', 'iam:GetRolePolicy'],
+      actions: ['iam:GetRole', 'iam:GetRolePolicy', 'iam:PutRolePolicy'],
       resources: [
         `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/aws-service-role/lakeformation.amazonaws.com/AWSServiceRoleForLakeFormationDataAccess`,
       ],
