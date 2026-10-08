@@ -555,21 +555,26 @@ The completed assistant response, evidence references, tool metadata, token usag
 
 Use DynamoDB with separate logical records rather than storing an entire conversation in one growing item.
 
-Suggested keys:
+The accepted conversation key contract is defined in section 10 of `AIStack_Spec-Temp.md`:
 
 ```text
-PK = USER#{userId}
-SK = INCIDENT#{incidentId}
-
-PK = INCIDENT#{incidentId}
+PK = CONV#<conversationId>
 SK = META
 
-PK = INCIDENT#{incidentId}
-SK = MSG#{timestamp}#{messageId}
+PK = CONV#<conversationId>
+SK = EVT#<UTC-created_at>#<zero-padded-event_sequence>#<eventId>
 
-PK = INCIDENT#{incidentId}
-SK = EVIDENCE#{evidenceId}
+PK = CONV#<conversationId>
+SK = SUMMARY#<UTC-created_at>#<zero-padded-event_sequence>#<summaryId>
+
+Metadata only:
+GSI1PK = USER#<trusted-owner-id>
+GSI1SK = CONV#<updated_at>#<conversationId>
 ```
+
+Each AI stack provisions `SOC-BOT-<ENV>-CHAT-HISTORY` with string base/index keys, on-demand billing, and DynamoDB-owned encryption. `GSI1` includes only `conversation_id`, `title`, `created_at`, and `updated_at` in addition to automatically projected keys. Dev destroys the table on teardown; demo retains it. No stream, TTL, runtime grants, or point-in-time recovery is configured in this increment. The approved PITR exception acknowledges only `AwsSolutions-DDB3` on each chat-history table; backup configuration remains a separate reviewed change, and demo retention does not protect against item-level data loss.
+
+Application writers enforce encoded key values, sparse metadata indexing, and event-specific attributes; DynamoDB only enforces key names and types. Concurrent sequence allocation and the conversation-to-incident relationship remain application-level planning decisions. Message bodies, tool arguments, and evidence rows must not be included in runtime logs.
 
 ### 11.2 Context Strategy
 
