@@ -203,6 +203,13 @@ export function dataAndAnalyticsStatements(resources: EnvironmentResources): Pol
       ],
     }),
     new PolicyStatement({
+      sid: `Read${capitalize(resources.environment)}LakeFormationServiceLinkedRole`,
+      actions: ['iam:GetRole'],
+      resources: [
+        `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/aws-service-role/lakeformation.amazonaws.com/AWSServiceRoleForLakeFormationDataAccess`,
+      ],
+    }),
+    new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}LakeFormationConfiguration`,
       actions: [
         'lakeformation:DeregisterResource', 'lakeformation:GrantPermissions',
