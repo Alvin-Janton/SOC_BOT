@@ -1,10 +1,18 @@
-name: Destroy Dev Data
+name: Destroy Dev Infrastructure
 
 on:
   workflow_dispatch:
     inputs:
+      scope:
+        description: Destroy AI only, or AI followed by Data (never the foundation)
+        required: true
+        default: ai
+        type: choice
+        options:
+          - ai
+          - all
       confirmation:
-        description: Type DELETE SOC-BOT-DEV-DATA to confirm destruction
+        description: Type DELETE SOC-BOT-DEV-AI for ai, or DELETE ALL SOC-BOT-DEV-STACKS for all
         required: true
         type: string
 
@@ -29,13 +37,20 @@ jobs:
       AWS_REGION: us-east-1
       AWS_PAGER: ""
     steps:
-      - name: Confirm exact dev Data stack
+      - name: Confirm approved dev teardown scope
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
+          DESTROY_SCOPE: ${{ inputs.scope }}
         shell: bash
         run: |
-          if [[ "${CONFIRMATION}" != 'DELETE SOC-BOT-DEV-DATA' ]]; then
-            echo '::error::Confirmation must be exactly DELETE SOC-BOT-DEV-DATA.'
+          set -euo pipefail
+          case "${DESTROY_SCOPE}" in
+            ai) expected='DELETE SOC-BOT-DEV-AI' ;;
+            all) expected='DELETE ALL SOC-BOT-DEV-STACKS' ;;
+            *) echo '::error::Only ai or all is allowed; Data-only teardown is forbidden.'; exit 1 ;;
+          esac
+          if [[ "${CONFIRMATION}" != "${expected}" ]]; then
+            echo "::error::Confirmation must be exactly ${expected}."
             exit 1
           fi
 
@@ -84,16 +99,30 @@ jobs:
           unset-current-credentials: true
           retry-max-attempts: 2
 
-      - name: Destroy only the dev Data stack
+      - name: Destroy dev AI first, then Data only if requested
         env:
           EXEC_ROLE_ARN: arn:aws:iam::${{ steps.expected.outputs.account }}:role/SOC_BOT_DEV_CFN_EXEC
+          DESTROY_SCOPE: ${{ inputs.scope }}
+        shell: bash
         run: |
-          if ! ./node_modules/.bin/cdk destroy devDataStack \
+          set -euo pipefail
+          if ! ./node_modules/.bin/cdk destroy devAiStack \
             --app infra/cdk.out \
             --role-arn "${EXEC_ROLE_ARN}" \
             --exclusively \
             --force \
             --ci; then
-            echo '::error::Dev Data stack deletion failed. If its bucket is non-empty, deliberately empty it with administrator access before retrying.'
+            echo '::error::Dev AI deletion failed; Data will not be destroyed while AI may still import it.'
             exit 1
+          fi
+          if [[ "${DESTROY_SCOPE}" == 'all' ]]; then
+            if ! ./node_modules/.bin/cdk destroy devDataStack \
+              --app infra/cdk.out \
+              --role-arn "${EXEC_ROLE_ARN}" \
+              --exclusively \
+              --force \
+              --ci; then
+              echo '::error::Dev Data deletion failed. If its bucket is non-empty, deliberately empty it with administrator access before retrying.'
+              exit 1
+            fi
           fi

@@ -1,6 +1,8 @@
 import { Duration, RemovalPolicy, Stack, StackProps, Tags, Validations } from 'aws-cdk-lib';
 import { BlockPublicAccess, Bucket, BucketEncryption, CfnBucket } from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
+import { CfnWorkGroup } from 'aws-cdk-lib/aws-athena';
+import { CfnDatabase, CfnTable } from 'aws-cdk-lib/aws-glue';
 import { dataBucketName, DeploymentEnvironment } from '../../shared/environment';
 import { ApplicationAthena } from './application-athena';
 import { ApplicationGlue } from './application-glue';
@@ -11,6 +13,11 @@ export interface DataStackProps extends StackProps {
 
 /** Owns the private data bucket, Glue normalization, and Athena workgroup for one environment. */
 export class DataStack extends Stack {
+  public readonly dataBucket: Bucket;
+  public readonly database: CfnDatabase;
+  public readonly tables: CfnTable[];
+  public readonly workgroup: CfnWorkGroup;
+
   public constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
@@ -34,8 +41,12 @@ export class DataStack extends Stack {
       reason: 'This protected data bucket stores raw and normalized security evidence. Access-log storage and retention will be reviewed with the data lifecycle design.',
     });
 
-    new ApplicationGlue(this, 'ApplicationGlue', { deploymentEnvironment, dataBucket: bucket });
-    new ApplicationAthena(this, 'ApplicationAthena', { deploymentEnvironment, dataBucket: bucket });
+    const glue = new ApplicationGlue(this, 'ApplicationGlue', { deploymentEnvironment, dataBucket: bucket });
+    const athena = new ApplicationAthena(this, 'ApplicationAthena', { deploymentEnvironment, dataBucket: bucket });
+    this.dataBucket = bucket;
+    this.database = glue.database;
+    this.tables = glue.tables;
+    this.workgroup = athena.workgroup;
 
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', deploymentEnvironment);

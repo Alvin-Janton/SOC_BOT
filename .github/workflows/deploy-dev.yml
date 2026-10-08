@@ -1,4 +1,4 @@
-name: Deploy Dev Data
+name: Deploy Dev Infrastructure
 
 on:
   push:
@@ -74,11 +74,11 @@ jobs:
           unset-current-credentials: true
           retry-max-attempts: 2
 
-      - name: Deploy only the dev Data stack
+      - name: Deploy only the dev Data and AI stacks
         env:
           EXEC_ROLE_ARN: arn:aws:iam::${{ steps.expected.outputs.account }}:role/SOC_BOT_DEV_CFN_EXEC
         run: |
-          ./node_modules/.bin/cdk deploy devDataStack \
+          ./node_modules/.bin/cdk deploy devDataStack devAiStack \
             --app infra/cdk.out \
             --role-arn "${EXEC_ROLE_ARN}" \
             --require-approval never \
