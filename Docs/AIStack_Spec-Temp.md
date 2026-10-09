@@ -1,12 +1,12 @@
 # AI Stack Working Specification
 
-**Status:** The Athena query tool and Lake Formation integration are implemented locally, subject to operator preflight, deployment, and scoped default-access cleanup. Orchestration, persistence, playbook retrieval, and authentication remain planned.
+**Status:** The Athena query tool and Lake Formation integration are deployed in dev, and basic `DESCRIBE` and `SELECT` queries have been verified. The DynamoDB conversation table and schema are established; orchestrator persistence is not yet implemented. The orchestrator, playbook retrieval, and Cognito BFF integration remain planned. The dev chat API must remain protected by the temporary WAF IP allowlist until Cognito is wired in.
 
 This document records the AI-stack decisions discussed so far. `Docs/Final_Spec.md` remains the broader project specification. Where this temporary document introduces a more specific choice or a different contract, reconcile the two documents before implementation.
 
 ## 1. Scope
 
-The AI stack provides the server-side chat, model orchestration, read-only investigation tools, playbook retrieval, and conversation persistence. The React frontend and Cognito authentication implementation are separate work. The AI stack must nevertheless receive a trusted authenticated identity before it is exposed to users; it must not trust identity supplied in a request body.
+The AI stack provides the server-side chat, model orchestration, read-only investigation tools, playbook retrieval, and conversation persistence. Cognito authentication integration with the chat route is a separate work item. Cognito BFF code may be developed as an isolated module, but it is not wired to the chat route until that integration is implemented. The BFF module will authenticate through Cognito, validate the resulting token, derive the Cognito `sub`, and store a server-side DynamoDB session mapping from an opaque session ID to that identity. The browser sends the HttpOnly session cookie on eligible requests; the backend resolves the user from the session record without calling Cognito on every chat request. Until then, the dev chat route uses a configured server-side `DEV_USER_ID`; this path must fail closed outside dev. The AI stack must never trust identity supplied in a request body.
 
 The system is an investigation copilot. It may query and explain evidence, but must not modify the investigated AWS environment.
 
@@ -15,13 +15,19 @@ The system is an investigation copilot. It may query and explain evidence, but m
 - Implement AI-stack Lambda code in TypeScript on Node.js, consistent with the TypeScript/CDK project and reusable ConverseStream code.
 - Use Amazon Bedrock `ConverseStream` with an application-owned tool loop. Do not use classic Bedrock Agents or AgentCore for the MVP.
 - The model has no AWS credentials or direct access to Athena, security data, or S3. Application code validates each requested tool and its typed inputs, then invokes an approved tool.
-- Bound the number of tool iterations, execution time, tool-result size, returned rows, and model output.
+- Define tool input contracts with TypeScript Zod schemas, derive the JSON Schema sent to Bedrock, and validate every model-proposed tool input again in the Lambda. Keep Bedrock-facing schemas to JSON-representable constraints; enforce authorization and other business rules separately in application code.
+- Use a versioned base system prompt describing the assistant's read-only SOC investigation role, evidence-grounded responses, tool-use boundaries, and treatment of log contents as untrusted data. Keep changing dataset/table metadata separate from the stable prompt. Never expose private model reasoning.
+- Limit each logical user turn to at most four model-requested tool calls total. Count every individual tool-use block, including repeated calls to the same tool and calls returned together in one Bedrock response; execute calls sequentially. Do not dispatch calls beyond the cap; return bounded tool errors for rejected requests and proceed to finalization.
+- Enforce a 10-minute end-to-end application deadline for each logical user turn, from request acceptance through final persistence or terminal outcome. Configure the chat Lambda with a 15-minute timeout as an outer cleanup limit. Before dispatching a tool, ensure its allowed execution time plus the reserved finalization budget fits before the 10-minute deadline.
+- When there is insufficient time for another tool and final synthesis, stop offering tools and make a final Bedrock request with tool use disabled, using the completed evidence already gathered. If finalization cannot complete by the hard deadline, cancel any active Athena query and record a timed-out outcome; do not claim the turn completed.
+- Bound tool-result size, returned rows, model input/context, and model output. The provisional user-facing final-answer output cap remains 2,048 tokens; this is not the input/context budget.
 - Run tool calls sequentially initially. Parallel or batch execution is deferred until concrete investigation workflows justify it.
-- Set a provisional maximum of 2,048 output tokens for a user-facing final answer. This is not the input/context budget; tune context limits separately after prompts and tool outputs are available.
 
 ## 3. Lambda Responsibilities
 
 Start with three focused functions:
+
+The three functions below are the chat/tool runtime. Cognito BFF handlers and session-resolution code may be authored in an isolated auth module, but must not be exposed or wired into the chat API until the authentication integration slice.
 
 | Function | Responsibility | Access boundary |
 | --- | --- | --- |
@@ -102,19 +108,25 @@ The frontend submits the latest user message, not the full transcript:
 ```json
 {
   "conversationId": "optional-existing-conversation-id",
+  "turnId": "client-generated-uuid",
   "message": "Investigate the unusual outbound traffic yesterday."
 }
 ```
 
 - `conversationId` is optional when starting a conversation. The server creates an ID when omitted and returns it in the stream.
+- `turnId` is a required client-generated UUID for one logical user submission and serves as its idempotency key. A retry reuses the same `turnId` and message; a new user submission gets a new ID.
 - `message` is required, non-empty, and subject to a configured length limit.
-- Do not add a client-supplied `userId`. Once Cognito is implemented, derive identity from the verified authentication context. Never treat a request-body identity as authorization.
+- Reusing a `turnId` with the same conversation and message must not append a second `USER_MESSAGE`. Reusing it with different message content is a conflict. A retry of a failed turn creates a new execution attempt, not a new logical turn.
+- Do not add a client-supplied `userId`. In dev, resolve a configured `DEV_USER_ID` only on the dev stack. Outside dev, reject requests until the Cognito session resolver is wired. Never treat a request-body identity as authorization.
 - The backend loads the authorized conversation and constructs bounded model context; the client does not send prior turns as authoritative history.
+- Until Cognito is wired, protect the dev API stage with an AWS WAF IP set that allows only the developer's current IP and blocks other source IPs. Update the set if the address changes, and remove or replace this temporary gate when Cognito authentication is integrated. An API key may supplement usage tracking/throttling but is not authentication or authorization.
 - The final API route and how conversation IDs relate to the existing incident/session terminology in `Final_Spec.md` remain to be reconciled before implementation.
 
 ## 6. Streaming Contract
 
 Use a streamed API response from API Gateway through the TypeScript chat Lambda to the React `fetch`/`ReadableStream` client. Newline-delimited JSON (NDJSON) is the working framing choice: each complete line is one JSON event. The exact deployed API Gateway configuration must support response streaming; verify this during implementation.
+
+The chat Lambda must emit a lightweight NDJSON heartbeat/progress event while a response is open but no user-visible model or tool activity has arrived, at an interval shorter than API Gateway's streaming idle timeout. For the planned Regional REST API, keep heartbeats comfortably under five minutes because its idle timeout is five minutes. API Gateway response streaming can run for up to 15 minutes, but the application enforces its shorter 10-minute turn deadline; the Lambda's 15-minute timeout is only an outer cleanup limit. Heartbeats may report only a generic stage such as `processing`; they must not reveal private model reasoning. See [API Gateway response streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode.html).
 
 The stream exposes user-visible activity and answer content only. It must never expose private model reasoning, hidden prompts, credentials, or unrestricted raw tool output. Query activity is distinct from assistant prose so multiple tool calls do not overwrite or corrupt the answer.
 
@@ -124,6 +136,7 @@ Proposed event shapes:
 {"type":"conversation","conversationId":"conv_...","turnId":"turn_..."}
 {"type":"activity","stage":"query_started","queryName":"Outbound traffic by source","filters":{"date":"2026-09-25"},"sql":"SELECT ..."}
 {"type":"activity","stage":"query_completed","queryName":"Outbound traffic by source","rowsReturned":12}
+{"type":"heartbeat","turnId":"turn_...","stage":"processing"}
 {"type":"text_delta","text":"I found 12 records showing unusual outbound traffic..."}
 {"type":"complete","turnId":"turn_..."}
 ```
@@ -135,12 +148,14 @@ The visible SQL, when included, must be the final SQL produced from an approved 
 - A Stop control is part of the intended chat experience. It should cancel the client request and the backend should attempt to stop in-flight work, including an Athena query when one is active. The precise cancellation propagation and race behavior remain implementation details to verify.
 - Handling an unexpected browser or network disappearance is deferred. Do not claim that closing a tab or losing connectivity automatically cancels backend work.
 
-The exact final field names, event validation rules, and retry semantics should be finalized with the API implementation plan. Do not persist every token delta as a separate conversation record.
+Finalize remaining stream field names, event validation rules, and cancellation propagation with the API implementation plan. Retry semantics use the request's `turnId` as described above. Do not persist every token delta as a separate conversation record.
 
 ## 7. Conversation Persistence and Context
 
 - Store conversations durably in DynamoDB and load context server-side for each user message.
 - Persist complete user messages, completed assistant responses, bounded tool activity/results, evidence references, and useful request metadata. Persist the completed assistant response rather than each streamed token fragment.
+- Record failed, timed-out, or cancelled attempts as `TURN_OUTCOME` events; do not store a failure as a completed `ASSISTANT_MESSAGE`. Keep the original user event for retry.
+- If the user abandons a failed turn and sends a different message, retain the old events in DynamoDB but exclude that abandoned turn from subsequent model context and compaction summaries. Retryable or active turns are not eligible for compaction.
 - Keep full conversation history separate from the bounded context sent to Bedrock. Include recent turns verbatim and compact older turns into a structured summary that preserves evidence references, known facts, hypotheses, time ranges, and open questions.
 - Bound tool outputs before they enter either model context or persisted records. Do not persist private model reasoning.
 - Treat conversation records as sensitive: CloudWatch logs may contain correlation IDs, operation names, durations, and outcome metadata, but must not contain full conversations, user message bodies, raw tool arguments, or evidence rows.
@@ -148,22 +163,23 @@ The exact final field names, event validation rules, and retry semantics should 
 
 ## 8. Delivery Order
 
-The agreed implementation sequence is:
+The agreed implementation sequence, reflecting completed infrastructure, is:
 
-1. Finalize request, stream, tool input/result, and error contracts.
-2. Implement one Athena query tool with its least-privilege role and controlled query operations.
-3. Define and create the DynamoDB conversation schema/table.
-4. Implement the orchestrator and streamed API integration using Bedrock tool use.
-5. Perform an end-to-end check through the authenticated API, Bedrock, the tool, Athena, DynamoDB, and the streamed response.
+1. Finalize remaining request, stream, tool input/result, error, and cancellation details. The Athena query tool, Lake Formation integration, DynamoDB table, and conversation data contract are already established.
+2. Implement the orchestrator and minimal streamed API route using Bedrock tool use, the existing Athena query tool, and DynamoDB persistence. For dev testing, use the WAF IP allowlist and server-configured dev identity; do not accept a client-supplied user ID.
+3. Implement and integrate the playbook retrieval function through the approved tool boundary.
+4. Develop the Cognito BFF/session module alongside the orchestrator in an isolated module. Wire it into the API and replace the temporary dev identity/WAF gate only when the authentication integration is ready.
+5. Perform an end-to-end check through the restricted dev API, Bedrock, the query and retrieval tools, Athena, DynamoDB, and the streamed response. Repeat with Cognito authentication after it is wired.
 
 Playbook retrieval is part of the MVP and must be integrated through the approved tool boundary. It can be implemented as a separate vertical slice alongside the query tool; it does not grant the orchestrator direct S3 access.
 
 ## 9. Deferred Decisions
 
 - DynamoDB retention/TTL and the conversation-to-incident relationship.
-- Implementation mechanics for assigning per-conversation event sequences safely under concurrent requests.
+- Exact DynamoDB transaction details for sequence allocation and event appends under an active lease.
 - Exact API route and reconciliation of `conversationId` with the incident-oriented route in `Final_Spec.md`.
-- Final event field names, NDJSON response headers, retry/idempotency behavior, and cancellation propagation.
+- Remaining NDJSON response headers and cancellation propagation details.
+- Exact heartbeat cadence and finalization reserve within the fixed 10-minute turn deadline.
 - Output and input/context token budgets beyond the provisional 2,048-token final-answer cap.
 - Whether any independent tool calls should run in parallel or through a bounded batch operation.
 - Whether the initial S3 playbook retriever should later migrate to Bedrock Knowledge Bases.
@@ -177,13 +193,13 @@ This is the accepted single-table contract for the MVP. The table is owned by a 
 
 - Base partition key `PK` groups records by conversation: `CONV#<conversationId>`.
 - Base sort key `SK` identifies the record type and orders conversation events: metadata uses `META`; events use `EVT#<UTC-created_at>#<event_sequence>#<eventId>`.
-- Store `created_at` as a normal attribute as well as in the event sort key. The attribute is convenient to consume; the key supports ordered DynamoDB queries. `event_sequence` is a monotonically increasing, zero-padded per-conversation ordinal so events with equal timestamps retain causal order. `event_id` is a stable, unique identifier for one stored event. `turn_id` is a separate attribute shared by the user message, assistant tool call/result, and final assistant response for one turn; it is not part of the key.
+- Store `created_at` as a normal attribute as well as in the event sort key. The attribute is convenient to consume; the key supports ordered DynamoDB queries. `event_sequence` is a monotonically increasing, zero-padded per-conversation ordinal so events with equal timestamps retain causal order. `event_id` is a stable, unique identifier for one stored event. `turn_id` is a client-generated UUID shared by the user message and all events for that logical turn; it is the idempotency key and is not part of the sort key. Each execution attempt has a separate `attempt_id`.
 - A GSI named `GSI1` supports listing a user's conversations: `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<updated_at>#<conversationId>`. Only conversation metadata items carry these GSI attributes. The owner identity must come from trusted authentication context, never from an untrusted chat-request field.
 - The conversation partition supports reading its metadata and event history, appending new events, and loading a compaction summary plus events after its checkpoint. Listing conversations uses the GSI. Avoid table scans and do not store the entire growing transcript in one item.
 
 ### 10.2 Conversation metadata item
 
-One `CONVERSATION` item is created per conversation. Do not add a `status` field merely to represent recent activity; use `updated_at` for recency. Add an explicit lifecycle field only if an archive/close workflow is implemented. Summary pointer/checkpoint attributes are absent until the first compaction.
+One `CONVERSATION` item is created per conversation. Do not add a conversation-level error status for an individual failed turn; use `updated_at` for recency and `TURN_OUTCOME` events for turn/attempt outcomes. Add an explicit lifecycle field only if an archive/close workflow is implemented. Summary pointer/checkpoint attributes are absent until the first compaction. While a turn lease is active, this item also carries the lease fields described in Section 10.4; active lease fields are removed on release or takeover, while the fencing version and sequence counter remain.
 
 ```json
 {
@@ -196,26 +212,45 @@ One `CONVERSATION` item is created per conversation. Do not add a `status` field
   "created_at": "2026-09-11T12:02:00.000Z",
   "updated_at": "2026-09-11T12:02:04.100Z",
   "last_event_id": "5ae41338-c64b-4e6f-bcc1-c7d5369a7f93",
+  "last_event_sequence": 6,
+  "lease_version": 8,
+  "active_turn_id": "<turn-uuid-while-active>",
+  "active_attempt_id": "<attempt-uuid-while-active>",
+  "lease_expires_at": 1791576240,
   "title": "WAF activity on September 11",
   "GSI1PK": "USER#<trusted-user-id>",
   "GSI1SK": "CONV#2026-09-11T12:02:04.100Z#c4e7173b-3075-47b9-9e7d-260921bbc870"
 }
 ```
 
+The metadata example below represents a conversation with an active turn lease. The lease-specific attributes are absent when no turn is active; `last_event_sequence` and `lease_version` remain as monotonic counters/fencing state.
+
 ### 10.3 Event item variants
 
 Each user message, assistant response, tool call, and tool result is a separate item with common keys and event metadata. Attributes specific to one variant are not required on other variants; omit absent values rather than writing unrelated null fields. Do not persist private model reasoning or every streamed token delta.
 
-Common event attributes are `PK`, `SK`, `entity_type`, `schema_version`, `conversation_id`, `event_id`, `event_sequence`, `turn_id`, and `created_at`. Variants add:
+Common event attributes are `PK`, `SK`, `entity_type`, `schema_version`, `conversation_id`, `event_id`, `event_sequence`, `turn_id`, and `created_at`. Attempt-generated events also carry `attempt_id`; the original `USER_MESSAGE` is stored once per logical turn and is not duplicated on retries. Variants add:
 
 - `USER_MESSAGE`: `role`, `content`.
-- `TOOL_CALL`: `tool_use_id`, `tool_name`, and bounded structured `arguments`.
+- `TOOL_CALL`: app-generated `assistant_message_id` grouping calls returned in one Bedrock assistant message, the original `content_block_index`, `tool_use_id`, `tool_name`, and bounded structured `arguments`.
 - `TOOL_RESULT`: matching `tool_use_id`, `tool_name`, `status`, and bounded structured `output` (including safe query metadata and returned evidence rows where applicable).
 - `ASSISTANT_MESSAGE`: `role`, `model_id`, `stop_reason`, and user-visible `content`.
+- `TURN_OUTCOME`: `attempt_id`, an outcome such as `failed`, `timed_out`, or `cancelled`, a `retryable` flag, and bounded `failure_phase`/`error_code` values. An explicit user decision to abandon a failed logical turn is also recorded as a terminal `TURN_OUTCOME` with `outcome: "abandoned"`. Do not persist raw provider errors or stack traces.
 
-The `tool_use_id` links an assistant's tool request to its result. Tool results must respect the query tool's response-size limit. Event IDs are immutable; retries of the same logical write should reuse an idempotency identifier rather than create duplicate events.
+The `assistant_message_id` and `content_block_index` let the context builder group separate `TOOL_CALL` events back into the original assistant message and preserve the order of its tool-use blocks. Matching `TOOL_RESULT` events are linked by the exact `tool_use_id` and assembled in the corresponding user-role result message, in call order, before the next `ConverseStream` request. Tool calls may execute sequentially without changing this message grouping. Keep `created_at` as the actual event time; use `event_sequence` for persisted-event order. Tool results must respect the query tool's response-size limit. Event IDs are immutable; retries of the same logical write should reuse an idempotency identifier rather than create duplicate events.
 
-### 10.4 Compaction summary item
+### 10.4 Turn idempotency, leases, and outcomes
+
+- The client generates one UUID `turnId` per submitted message and sends it in the chat request. The persisted `turn_id` is the same logical identifier and serves as the idempotency key, scoped to the conversation. A retry reuses the exact `turnId` and message content; a new user message gets a new `turnId`.
+- If a matching turn is complete, return its stored result/state instead of running it again. If it is active, report that it is in progress rather than starting another attempt. If it failed retryably, reuse its existing `USER_MESSAGE` and start a new attempt with a new UUID `attempt_id`. Reject a reused `turnId` if its conversation or message content does not match the original request.
+- The lease is owned by `active_attempt_id`, not by a Boolean and not by the authenticated user. `active_turn_id` identifies the logical turn. `lease_expires_at` is a numeric Unix timestamp in seconds. `lease_version` is a monotonically increasing fencing value, incremented on each successful acquisition; it is distinct from `event_sequence`. Do not store a redundant `locked` Boolean.
+- Acquire the lease with one conditional DynamoDB update that succeeds only when no unexpired lease exists. A read followed by an unconditional write is unsafe because two invocations can both observe an expired/unlocked record. Renewal and release must condition on the current `active_attempt_id` and `lease_version`. Event writes must also verify the current lease version so an expired invocation cannot append after another attempt takes ownership.
+- Allocate each event's `event_sequence` conditionally using `last_event_sequence` on the metadata item. The sequence orders events; it is not a `turn_id`, `attempt_id`, or lease version. Sequence gaps after a failed write are acceptable, but duplicate or out-of-order sequence assignment is not.
+- Set the lease to expire slightly after the Lambda's hard timeout, while enforcing the shorter internal 10-minute turn deadline. Release it normally on completion/error; expiry is recovery when an invocation is terminated before cleanup. Do not rely on DynamoDB TTL for lease enforcement. The exact lease duration and transaction shape remain implementation details.
+- A Bedrock or tool failure is represented by a `TURN_OUTCOME`, not a fabricated assistant answer. The stream may show a safe failure message associated with the failed user turn. Automatic retries are bounded and must not replay a tool execution blindly; on user retry, reuse persisted tool calls/results when possible. If the user abandons the failed turn and sends a new message, retain its events for audit but omit that turn from model context and compaction summaries. A retryable or active turn must not be compacted.
+- Unexpected browser/network disappearance remains deferred. An explicit Stop action may produce a `cancelled` outcome only when the orchestrator records the cancellation; it must not be inferred merely because the client connection vanished.
+
+### 10.5 Compaction summary item
 
 Compaction produces a distinct `CONTEXT_SUMMARY` item with its own schema. It records exactly which prior event it covers. Update the conversation metadata with the latest summary key and covered-through event key. On later turns, context assembly starts with that summary and only subsequent events; earlier event records may remain stored for transcript history but are not replayed to the model. Summary replacement/deletion policy and any TTL remain undecided.
 
@@ -235,7 +270,7 @@ Compaction produces a distinct `CONTEXT_SUMMARY` item with its own schema. It re
 
 The key examples use ISO-8601 UTC timestamps and a fixed-width sequence so DynamoDB string ordering matches event order. The sequence must be assigned consistently when concurrent requests target the same conversation; conditional writes or another concurrency-control mechanism must prevent duplicate or conflicting ordinals.
 
-### 10.5 Design lessons incorporated from Bedrock Chat
+### 10.6 Design lessons incorporated from Bedrock Chat
 
 The Bedrock Chat repository uses a different aggregate model: one DynamoDB item stores a serialized message map, with the message map moved to S3 above a 300 KiB threshold. Its parent/children message graph supports branching, edits, and regenerated responses. These are valid tradeoffs, not a superior DynamoDB contract for every application.
 
