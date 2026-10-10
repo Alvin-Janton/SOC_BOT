@@ -5,7 +5,15 @@ import { Orchestrator } from './orchestrator';
 import { ConversationStore, Lease, StoreError } from './store';
 import { httpError, LambdaContext, NdjsonStream } from './stream';
 
-/** Maps failures to safe public contracts, never exposing SDK errors, prompts, or record contents. */
+/**
+ * Maps failures to safe public contracts, never exposing SDK errors, prompts, or record contents.
+ *
+ * Example Input:
+ * { error: StoreError { code: 'NOT_FOUND' }, budget: { remaining: 500_000, signal: { aborted: false } } }
+ * Example Output (selected Error properties):
+ * { name: 'ChatError', code: 'NOT_FOUND', message: 'Conversation is unavailable.', status: 404, retryable: false }
+ * The budget shown is illustrative instance state, not the TurnBudget argument's literal shape.
+ */
 function publicError(error: unknown, budget: TurnBudget): ChatError {
 
   if (error instanceof ChatError && !error.retryable) return error;
@@ -27,7 +35,21 @@ function publicError(error: unknown, budget: TurnBudget): ChatError {
   return new ChatError('SERVICE_ERROR', 'The investigation could not complete. Retry using the same turn identifier.', 503);
 }
 
-/** Accepts the trusted dev identity, persists outcomes before completion, and leaves auth/API integration inactive. */
+/**
+ * Accepts the trusted dev identity, persists outcomes before completion, and leaves auth/API integration inactive.
+ *
+ * Example Input (Lambda supplies the Writable and context; trusted dev configuration is required):
+ * {
+ *   event: { body: '{"turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9","message":"Describe waf_events."}' },
+ *   raw: Writable <Lambda response stream>,
+ *   context: { awsRequestId: '<invocation-id>', getRemainingTimeInMillis: () => 890_000 },
+ * }
+ * Example Output: resolves to undefined; selected illustrative NDJSON writes are:
+ * {"type":"conversation","conversationId":"<generated-conversation-id>","turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}
+ * {"type":"text_delta","text":"The WAF table contains request and rule evidence."}
+ * {"type":"complete","conversationId":"<generated-conversation-id>","replayed":false,"truncated":false,"turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}
+ * Actual model text/activity varies. Completion follows durable assistant persistence; errors use the safe error path.
+ */
 async function respond(event: unknown, raw: Writable, context: LambdaContext): Promise<void> {
   const acceptedAt = Date.now();
   const budget = new TurnBudget(acceptedAt);
