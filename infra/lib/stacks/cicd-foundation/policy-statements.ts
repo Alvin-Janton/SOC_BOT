@@ -527,6 +527,11 @@ export function runtimeBoundaryStatements(
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
       resources: [inferenceProfileArn],
     }),
+    ...(resources.environment === 'dev' ? [new PolicyStatement({
+      sid: 'AllowDevApprovedBedrockInferenceProfileRead',
+      actions: ['bedrock:GetInferenceProfile'],
+      resources: [inferenceProfileArn],
+    })] : []),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApprovedBedrockProfileModels`,
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],

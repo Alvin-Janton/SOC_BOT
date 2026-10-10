@@ -63,6 +63,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 temp.md
+diff.txt
 
 # Editors and operating systems
 .idea/

@@ -7,6 +7,7 @@ import { Construct } from 'constructs';
 import { DeploymentEnvironment } from '../../shared/environment';
 import { AthenaQueryTool } from './athena-query-tool';
 import { ChatHistory } from './chat-history';
+import { ChatOrchestrator } from './chat-orchestrator';
 import { LakeFormationGrants } from './lake-formation-grants';
 
 export interface AiStackProps extends StackProps {
@@ -18,10 +19,11 @@ export interface AiStackProps extends StackProps {
   readonly maxQueryWindowDays?: number;
 }
 
-/** Owns the environment's private query tool and conversation storage; orchestration remains deferred. */
+/** Owns private investigation tools, conversation storage, and the dev-only orchestrator. */
 export class AiStack extends Stack {
   public readonly queryTool: AthenaQueryTool;
   public readonly chatHistoryTable: Table;
+  public readonly chatOrchestrator?: ChatOrchestrator;
 
   public constructor(scope: Construct, id: string, props: AiStackProps) {
     super(scope, id, props);
@@ -34,6 +36,15 @@ export class AiStack extends Stack {
       tables: props.tables,
       queryRoleArn: this.queryTool.role.roleArn,
     });
+    if (props.deploymentEnvironment === 'dev') {
+      this.chatOrchestrator = new ChatOrchestrator(this, 'ChatOrchestrator', {
+        deploymentEnvironment: props.deploymentEnvironment,
+        chatHistoryTable: this.chatHistoryTable,
+        queryToolFunction: this.queryTool.function,
+        databaseName: props.database.ref,
+        maxQueryWindowDays: props.maxQueryWindowDays,
+      });
+    }
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', props.deploymentEnvironment);
     Tags.of(this).add('ManagedBy', 'CDK');
