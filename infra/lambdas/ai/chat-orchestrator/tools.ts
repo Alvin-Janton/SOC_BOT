@@ -2,6 +2,7 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_RESPONSE_BYTES, QUERY_DEADLINE_SECONDS } from '../../../lib/stacks/ai/query-contract';
 import { ChatError, Configuration, TurnBudget } from './config';
+import { isTerminalToolResult, selectToolResult } from './context';
 import { LogicalQuery, validateTool } from './contracts';
 import { ChatEvent, ConversationStore, JsonObject, Lease } from './store';
 import { StreamEvent } from './stream';
@@ -9,7 +10,15 @@ import { StreamEvent } from './stream';
 const PENDING = ['SUBMITTED', 'QUEUED', 'RUNNING', 'UNKNOWN'];
 const EXECUTION_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
-type ToolResult = Extract<ChatEvent, { entity_type: 'TOOL_RESULT' }>;
+
+/** Recognizes bounded, confirmed query failures; unavailable executions are not terminal evidence. */
+export function isConfirmedQueryFailure(output: JsonObject): boolean {
+  const error = output.error;
+  return output.ok === false && typeof output.query_execution_id === 'string' && EXECUTION_ID.test(output.query_execution_id)
+    && error !== null && typeof error === 'object' && !Array.isArray(error)
+    && ((output.state === 'FAILED' && error.code === 'QUERY_FAILED')
+      || (output.state === 'CANCELLED' && error.code === 'QUERY_CANCELLED'));
+}
 
 /** Accepts bounded JSON objects from the private tool, without exposing provider error text. */
 function responseObject(value: unknown): JsonObject {
@@ -38,7 +47,7 @@ export class ToolExecutor {
   private readonly client = new LambdaClient({ maxAttempts: 1 });
 
   private active?: { id: string; submittedAt: number; request: LogicalQuery; call: ToolCall;
-    cancellationRequested?: boolean; cancellationConfirmed?: boolean };
+    cancellationRequested?: boolean; cancellationConfirmed?: boolean; failure?: JsonObject };
 
   public constructor(private readonly config: Configuration, private readonly budget: TurnBudget,
     private readonly store: ConversationStore, private readonly lease: Lease,
@@ -69,16 +78,21 @@ export class ToolExecutor {
 
   /** Appends one terminal result using the existing tool-result variant and bounded output contract. */
   private async terminal(call: ToolCall, output: JsonObject, status: 'success' | 'error' = 'success'): Promise<JsonObject> {
-    await this.store.append(this.lease, { entity_type: 'TOOL_RESULT', tool_use_id: call.tool_use_id,
-      tool_name: call.tool_name, status, output });
+    try {
+      await this.store.append(this.lease, { entity_type: 'TOOL_RESULT', tool_use_id: call.tool_use_id,
+        tool_name: call.tool_name, status, output });
+    } finally {
+      // Its final state is already verified. A failed write stays fatal, without a second cleanup result write.
+      if (this.active?.call.tool_use_id === call.tool_use_id) this.active = undefined;
+    }
     return output;
   }
 
-  /** Reuses compact failure evidence without exposing the query provider's diagnostics. */
-  private async failed(call: ToolCall, id: string, state: string): Promise<JsonObject> {
-    const code = state === 'NOT_FOUND' ? 'QUERY_NOT_FOUND' : state === 'CANCELLED' ? 'QUERY_CANCELLED' : 'QUERY_FAILED';
+  /** Saves a verified final failure and durable group-halt evidence before allowing final synthesis. */
+  private async failed(call: ToolCall, id: string, state: 'FAILED' | 'CANCELLED'): Promise<JsonObject> {
+    const code = state === 'CANCELLED' ? 'QUERY_CANCELLED' : 'QUERY_FAILED';
 
-    return this.terminal(call, { ok: false, query_execution_id: id, state,
+    return this.terminal(call, { ok: false, query_execution_id: id, state, halted_tool_group: true,
       error: { code, message: 'The approved query did not complete successfully.' } }, 'error');
   }
 
@@ -90,36 +104,23 @@ export class ToolExecutor {
     if (output.query_execution_id !== id) throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'The query status could not be confirmed.');
     const error = output.error;
 
-    if (output.ok === false && error && typeof error === 'object' && !Array.isArray(error)
-      && error.code === 'QUERY_NOT_FOUND') return { ok: false, query_execution_id: id, state: 'NOT_FOUND' };
-
-    if (typeof output.state !== 'string' || ![...PENDING, 'SUCCEEDED', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(output.state)
-      || (output.ok !== true && output.state !== 'FAILED')) {
+    if (typeof output.state !== 'string' || !['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].includes(output.state)
+      || output.operation !== request.operation || output.table !== request.table
+      || (output.state === 'FAILED'
+        ? output.ok !== false || !error || typeof error !== 'object' || Array.isArray(error) || error.code !== 'QUERY_FAILED'
+        : output.ok !== true)) {
       throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'The query status could not be confirmed.');
     }
 
     return output;
   }
 
-  /** Records expiry and attempts cleanup without allowing cleanup failures to replace the timeout. */
-  private async timedOut(call: ToolCall, id: string, recovering: boolean): Promise<JsonObject> {
-
+  /** Reuses a durably confirmed cleanup failure; an unconfirmed stop or storage error remains fatal. */
+  private async timedOut(): Promise<JsonObject> {
     const active = this.active;
-
-    try { await this.cancelActive(); } catch { /* Final outcome reporting still identifies the original timeout. */ }
-    if (this.active) {
-      // Keep the latest pending checkpoint; another call must not replace an execution whose stop is unconfirmed.
-      throw new ChatError('QUERY_TIMED_OUT', 'The query reached its time limit.');
-    }
-
-    const output: JsonObject = { ok: false, query_execution_id: id, state: 'TIMED_OUT',
-      cancellation_requested: active?.cancellationRequested ?? false,
-      cancellation_confirmed: active?.cancellationConfirmed ?? false,
-      error: { code: 'QUERY_TIMED_OUT', message: 'The query reached its time limit.' } };
-      
-    try { await this.terminal(call, output, 'error'); }
-    catch { throw new ChatError('QUERY_TIMED_OUT', 'The query reached its time limit.'); }
-    if (recovering) return output;
+    await this.cancelActive();
+    if (active?.failure) return active.failure;
+    // A requested stop, unavailable state, or late success is not a saved terminal query failure.
     throw new ChatError('QUERY_TIMED_OUT', 'The query reached its time limit.');
   }
 
@@ -162,34 +163,35 @@ export class ToolExecutor {
   }
 
   /** Polls within the saved execution deadline and durably records every known terminal failure. */
-  private async poll(call: ToolCall, request: LogicalQuery, id: string, submittedAt: number, recovering = false): Promise<JsonObject> {
+  private async poll(call: ToolCall, request: LogicalQuery, id: string, submittedAt: number): Promise<JsonObject> {
     this.active = { id, request, submittedAt, call };
     while (true) {
       this.budget.check();
       if (Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000) {
-        return this.timedOut(call, id, recovering);
+        return this.timedOut();
       }
       let output: JsonObject;
       try {
         output = await this.status(request, id, Math.min(20_000, QUERY_DEADLINE_SECONDS * 1_000 - (Date.now() - submittedAt)));
       } catch (error) {
         if (Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000) {
-          return this.timedOut(call, id, recovering);
+          // An unavailable status must not be converted into confirmed terminal evidence.
+          if (error instanceof ChatError) throw error;
+          return this.timedOut();
         }
         throw error;
       }
-      if (Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000) {
-        return this.timedOut(call, id, recovering);
+      if (output.state === 'FAILED' || output.state === 'CANCELLED') {
+        const failure = await this.failed(call, id, output.state);
+        this.active = undefined;
+        return failure;
       }
-      if (output.state === 'SUCCEEDED') {
+      if (output.state === 'SUCCEEDED'
+        && (Date.now() - submittedAt < QUERY_DEADLINE_SECONDS * 1_000 || completedInTime(output, submittedAt))) {
         return this.succeeded(call, request, output);
       }
-      if (['FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(output.state))) {
-        const failure = await this.failed(call, id, String(output.state));
-        this.active = undefined;
-        if (recovering) return failure;
-        throw new ChatError(output.state === 'NOT_FOUND' ? 'QUERY_NOT_FOUND' : output.state === 'CANCELLED' ? 'QUERY_CANCELLED' : 'QUERY_FAILED',
-          'The approved query did not complete successfully.');
+      if (Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000) {
+        return this.timedOut();
       }
       const wait = Math.min(1_000, QUERY_DEADLINE_SECONDS * 1_000 - (Date.now() - submittedAt));
       await delay(Math.max(1, wait), undefined, { signal: this.budget.signal });
@@ -197,50 +199,98 @@ export class ToolExecutor {
   }
 
   /** Fetches one authenticated status after expiry, reusing success only with timely service completion evidence. */
-  private async recoverExpired(call: ToolCall, request: LogicalQuery, id: string, submittedAt: number): Promise<void> {
+  private async recoverExpired(call: ToolCall, request: LogicalQuery, id: string, submittedAt: number): Promise<JsonObject> {
     this.active = { id, request, submittedAt, call };
     this.budget.check();
     const output = await this.status(request, id, 20_000);
     if (output.state === 'SUCCEEDED' && completedInTime(output, submittedAt)) {
-      await this.succeeded(call, request, output);
-    } else if (['FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(output.state))) {
-      await this.failed(call, id, String(output.state));
+      return this.succeeded(call, request, output);
+    } else if (output.state === 'FAILED' || output.state === 'CANCELLED') {
+      const failure = await this.failed(call, id, output.state);
       this.active = undefined;
+      return failure;
     } else {
-      await this.timedOut(call, id, true);
+      return this.timedOut();
     }
   }
 
-  /** Reuses terminal evidence or a known submission ID; an unknown prior dispatch never gets resubmitted. */
-  public async recover(events: readonly ChatEvent[]): Promise<void> {
-    const calls = events.filter((event): event is ToolCall => event.turn_id === this.lease.turnId && event.entity_type === 'TOOL_CALL');
+  /** Validates a saved submission against its original call before polling or fatal-path cleanup. */
+  private checkpoint(call: ToolCall, output: JsonObject): NonNullable<ToolExecutor['active']> {
+    const id = output.query_execution_id;
+    const submittedAt = output.submitted_at_ms;
+    if (typeof id !== 'string' || !EXECUTION_ID.test(id) || typeof submittedAt !== 'number'
+      || !Number.isSafeInteger(submittedAt) || submittedAt <= 0 || submittedAt > Date.now()) {
+      throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
+    }
+    const original = responseObject(output.query);
+    const request = validateTool(String(call.tool_name), call.arguments, this.config);
+    if (request.operation === 'describe_table' || canonicalJson(request as unknown as JsonObject) !== canonicalJson(original)) {
+      throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
+    }
+    return { id, request, submittedAt, call };
+  }
+
+  /** Reuses original results without copying them, and halts queued work after a durable confirmed failure. */
+  public async recover(events: readonly ChatEvent[]): Promise<boolean> {
+    const calls = events.filter((event): event is ToolCall => event.turn_id === this.lease.turnId && event.entity_type === 'TOOL_CALL')
+      .sort((left, right) => left.event_sequence - right.event_sequence);
+    const haltedGroups = new Map<string, ToolCall>();
+    let finalizationOnly = false;
     for (const call of calls) {
-      const results = events.filter((event): event is ToolResult => event.turn_id === this.lease.turnId && event.entity_type === 'TOOL_RESULT'
-        && event.tool_use_id === call.tool_use_id).sort((a, b) => a.event_sequence - b.event_sequence);
-      const latest = results.at(-1);
+      const latest = selectToolResult(events, call);
+      const halt = haltedGroups.get(call.assistant_message_id);
+      const queuedAfterHalt = halt && call.attempt_id === halt.attempt_id && call.event_sequence > halt.event_sequence
+        && call.content_block_index > halt.content_block_index;
+      const results = events.filter((event): event is Extract<ChatEvent, { entity_type: 'TOOL_RESULT' }> =>
+        event.turn_id === call.turn_id && event.entity_type === 'TOOL_RESULT' && event.tool_use_id === call.tool_use_id);
+      if (queuedAfterHalt && results.some(result => {
+        const error = result.output.error;
+        return result.status !== 'error' || result.output.query_execution_id !== undefined || !error
+          || typeof error !== 'object' || Array.isArray(error) || error.code !== 'NOT_EXECUTED';
+      })) {
+        // Even a hidden pending checkpoint contradicts nonexecution; retain its ID for fatal-path cleanup.
+        const pending = [...results].sort((left, right) => right.event_sequence - left.event_sequence)
+          .find((result): boolean => !isTerminalToolResult(result));
+        if (pending) this.active = this.checkpoint(call, pending.output);
+        throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A halted tool group contains inconsistent dispatch evidence.', 409, false);
+      }
+      if (!latest && queuedAfterHalt) {
+        await this.terminal(call, { ok: false, error: { code: 'NOT_EXECUTED',
+          message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+        continue;
+      }
       if (!latest?.output || typeof latest.output !== 'object' || Array.isArray(latest.output)) {
         throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A previous query dispatch could not be safely recovered.', 409, false);
       }
-      const output = latest.output as JsonObject;
-      if (latest.status !== 'error' && typeof output.state === 'string' && PENDING.includes(output.state)) {
-        const id = output.query_execution_id;
-        const submittedAt = output.submitted_at_ms;
-        if (typeof id !== 'string' || !EXECUTION_ID.test(id) || typeof submittedAt !== 'number'
-          || !Number.isSafeInteger(submittedAt) || submittedAt <= 0 || submittedAt > Date.now()) {
-          throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
+      let output = latest.output as JsonObject;
+      if (isTerminalToolResult(latest) && output.query_execution_id !== undefined && !isConfirmedQueryFailure(output)
+        && !(latest.status === 'success' && output.ok === true && output.state === 'SUCCEEDED')) {
+        const pending = [...results].sort((left, right) => right.event_sequence - left.event_sequence)
+          .find((result): boolean => !isTerminalToolResult(result));
+        if (pending) this.active = this.checkpoint(call, pending.output);
+        throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'A previous query final state could not be confirmed.');
+      }
+      const error = output.error;
+      if (queuedAfterHalt && (latest.status !== 'error' || !error || typeof error !== 'object'
+        || Array.isArray(error) || error.code !== 'NOT_EXECUTED')) {
+        throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A halted tool group contains inconsistent dispatch evidence.', 409, false);
+      }
+      if (!isTerminalToolResult(latest)) {
+        this.active = this.checkpoint(call, output);
+        const { id, request, submittedAt } = this.active;
+        if (finalizationOnly) throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'Later query work cannot continue after a confirmed failure.');
+        output = Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000
+          ? await this.recoverExpired(call, request, id, submittedAt) : await this.poll(call, request, id, submittedAt);
+      }
+      if (isConfirmedQueryFailure(output)) {
+        if (isTerminalToolResult(latest) && latest.status !== 'error') {
+          throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query failure record is invalid.', 409, false);
         }
-        const original = responseObject(output.query);
-        const request = validateTool(String(call.tool_name), call.arguments, this.config);
-        if (request.operation === 'describe_table' || canonicalJson(request as unknown as JsonObject) !== canonicalJson(original)) {
-          throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
-        }
-        if (Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000) await this.recoverExpired(call, request, id, submittedAt);
-        else await this.poll(call, request, id, submittedAt, true);
-      } else {
-        await this.store.append(this.lease, { entity_type: 'TOOL_RESULT', tool_use_id: call.tool_use_id,
-          tool_name: call.tool_name, status: latest.status ?? 'success', output });
+        finalizationOnly = true;
+        if (output.halted_tool_group === true) haltedGroups.set(call.assistant_message_id, call);
       }
     }
+    return finalizationOnly;
   }
 
   /** Records observed cancellation state; only an observed CANCELLED execution confirms a stopped query. */
@@ -249,14 +299,14 @@ export class ToolExecutor {
     if (!active) return false;
     const output = await this.invoke({ operation: 'cancel_query', query_execution_id: active.id }, true);
     if (output.ok !== true || output.query_execution_id !== active.id || typeof output.state !== 'string'
-      || ![...PENDING, 'SUCCEEDED', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(output.state)
+      || !['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].includes(output.state)
       || typeof output.cancellation_requested !== 'boolean') {
       throw new ChatError('QUERY_CANCELLATION_UNAVAILABLE', 'Query cancellation could not be confirmed.');
     }
     active.cancellationRequested = output.cancellation_requested;
     active.cancellationConfirmed = output.state === 'CANCELLED';
-    if (['FAILED', 'CANCELLED', 'NOT_FOUND'].includes(output.state)) {
-      await this.failed(active.call, active.id, output.state);
+    if (output.state === 'FAILED' || output.state === 'CANCELLED') {
+      active.failure = await this.failed(active.call, active.id, output.state);
       this.active = undefined;
     } else {
       // Even a succeeded execution needs an authenticated status fetch before its rows become evidence.

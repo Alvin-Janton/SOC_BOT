@@ -1,7 +1,7 @@
-export const TURN_DEADLINE_MS = 600_000;
-export const FINALIZATION_RESERVE_MS = 90_000;
-export const OUTCOME_RESERVE_MS = 45_000;
-export const HEARTBEAT_MS = 15_000;
+export const TURN_DEADLINE_MS = 600_000; // 10 minutes
+export const FINALIZATION_RESERVE_MS = 90_000; // 90 seconds
+export const OUTCOME_RESERVE_MS = 45_000; // 45 seconds
+export const HEARTBEAT_MS = 15_000; // 15 seconds
 export const MAX_TOOL_CALLS = 4;
 export const MAX_CONTEXT_BYTES = 262_144;
 export const MAX_OUTPUT_BYTES = 32_768;

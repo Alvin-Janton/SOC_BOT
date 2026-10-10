@@ -180,8 +180,10 @@ export class ConversationStore {
 
   /** Resolves turn idempotency, atomically takes a lease, and stores the original user event once. */
   public async begin(conversationId: string | undefined, turnId: string, message: string, leaseExpiresAtSeconds: number): Promise<BeginResult> {
+
     if (!UUID.test(turnId) || (conversationId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(conversationId))) throw new StoreError('INVALID_INPUT', 'Conversation or turn identifier is invalid.');
     validatePayload({ entity_type: 'USER_MESSAGE', role: 'user', content: message });
+
     if (!Number.isInteger(leaseExpiresAtSeconds) || leaseExpiresAtSeconds <= Math.floor(Date.now() / 1000)) throw new StoreError('INVALID_INPUT', 'Turn lease expiry is invalid.');
     const id = conversationId ?? this.initialConversationId(turnId);
     if (conversationId === undefined) await this.createConversation(id);
@@ -191,6 +193,7 @@ export class ConversationStore {
     if (completed) return { state: 'completed', conversationId: id, assistant: completed };
     const attemptId = randomUUID();
     let previous: ConversationMetadata;
+
     try {
       const acquired = await this.client.send(new UpdateCommand({
         TableName: this.tableName, Key: { PK: `CONV#${id}`, SK: 'META' },
@@ -199,13 +202,16 @@ export class ConversationStore {
         ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':now': Math.floor(Date.now() / 1000), ':turn': turnId, ':attempt': attemptId, ':expiry': leaseExpiresAtSeconds, ':one': 1 },
         ReturnValues: 'ALL_OLD',
       }), { abortSignal: this.requestSignal() });
+
       if (!acquired.Attributes) throw new StoreError('INVALID_RECORD', 'Conversation lease could not be established.');
       previous = acquired.Attributes as ConversationMetadata;
+
     } catch (error) {
       if (conditionalFailure(error)) throw new StoreError(before.active_turn_id === turnId ? 'TURN_IN_PROGRESS' : 'CONVERSATION_BUSY', 'A conversation turn is already in progress.');
       throw error;
     }
     const lease: Lease = { conversationId: id, turnId, attemptId, version: previous.lease_version + 1, expiresAt: leaseExpiresAtSeconds };
+
     try {
       const events = await this.events(id);
       const replay = this.checkTurn(events, turnId, message);
@@ -214,6 +220,7 @@ export class ConversationStore {
         && event.attempt_id === previous.active_attempt_id && (event.entity_type === 'ASSISTANT_MESSAGE' || event.entity_type === 'TURN_OUTCOME'))) {
         events.push(await this.appendFor(lease, { entity_type: 'TURN_OUTCOME', outcome: 'timed_out', retryable: true, failure_phase: 'lease_recovery', error_code: 'LEASE_EXPIRED' }, previous.active_turn_id, previous.active_attempt_id));
       }
+      
       let userEvent = events.find((event) => event.turn_id === turnId && event.entity_type === 'USER_MESSAGE');
       if (!userEvent) { userEvent = await this.appendFor(lease, { entity_type: 'USER_MESSAGE', role: 'user', content: message }, turnId, attemptId); events.push(userEvent); }
       return { state: 'acquired', lease, events: events.sort((left, right) => left.event_sequence - right.event_sequence), userEvent };
@@ -345,12 +352,15 @@ export class ConversationStore {
     const events: ChatEvent[] = [];
     let cursor: Record<string, unknown> | undefined;
     let bytes = 0;
+
     for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+
       const result = await this.client.send(new QueryCommand({
         TableName: this.tableName, KeyConditionExpression: 'PK = :pk AND begins_with(SK, :events)',
         ExpressionAttributeValues: { ':pk': `CONV#${conversationId}`, ':events': 'EVT#' },
         ConsistentRead: true, Limit: 100, ExclusiveStartKey: cursor,
       }), { abortSignal: this.requestSignal() });
+
       for (const item of result.Items ?? []) {
         bytes += Buffer.byteLength(JSON.stringify(item), 'utf8');
         events.push(storedEvent(item, conversationId));

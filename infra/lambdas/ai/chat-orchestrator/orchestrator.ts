@@ -6,7 +6,7 @@ import { LogicalQuery, validateTool } from './contracts';
 import { ModelResponse, ModelRunner } from './model';
 import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError } from './store';
 import { StreamEvent } from './stream';
-import { ToolExecutor } from './tools';
+import { isConfirmedQueryFailure, ToolExecutor } from './tools';
 
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
 interface PreparedCall { call: ToolCall; request?: LogicalQuery; rejection?: string }
@@ -31,7 +31,7 @@ export class Orchestrator {
   /** Reuses durable evidence, runs calls sequentially, and reserves a no-tools final answer request. */
   public async run(initialEvents: readonly ChatEvent[]): Promise<ModelResponse> {
     this.toolCalls = initialEvents.filter(event => event.turn_id === this.lease.turnId && event.entity_type === 'TOOL_CALL').length;
-    await this.tools.recover(initialEvents);
+    this.finalizationOnly = await this.tools.recover(initialEvents);
     while (true) {
       this.budget.check();
       const messages = await this.context();
@@ -52,6 +52,7 @@ export class Orchestrator {
       const prepared = await this.prepare(response);
       for (let index = 0; index < prepared.length; index++) {
         const item = prepared[index];
+        let confirmedFailure = false;
         try {
           if (item.rejection) {
             if (item.rejection === 'INVALID_TOOL') this.finalizationOnly = true;
@@ -59,11 +60,20 @@ export class Orchestrator {
           } else if (!this.budget.canDispatch(200_000)) {
             this.finalizationOnly = true;
             await this.rejected(item.call, 'FINALIZATION_REQUIRED');
-          } else await this.tools.execute(item.call, item.request!);
+          } else {
+            const output = await this.tools.execute(item.call, item.request!);
+            confirmedFailure = isConfirmedQueryFailure(output);
+          }
         } catch (error) {
           // These remaining calls are known not to have been dispatched. Keep their original grouping.
           for (const remaining of prepared.slice(index + 1)) await this.rejected(remaining.call, 'NOT_EXECUTED');
           throw error;
+        }
+        if (confirmedFailure) {
+          this.finalizationOnly = true;
+          // Keep this outside the catch: an uncertain rejection write must not be attempted twice.
+          for (const remaining of prepared.slice(index + 1)) await this.rejected(remaining.call, 'NOT_EXECUTED');
+          break;
         }
       }
     }

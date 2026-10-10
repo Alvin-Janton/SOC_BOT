@@ -38,9 +38,11 @@ export type LogicalQuery = Exclude<QueryToolRequest, { operation: 'query_status'
 export function parseRequest(event: unknown): ChatRequest {
   if (!event || typeof event !== 'object' || Array.isArray(event)) throw new ChatError('INVALID_INPUT', 'Expected a chat request.', 400, false);
   const proxy = event as Record<string, unknown>;
+
   if (typeof proxy.body !== 'string' || proxy.isBase64Encoded === true || Buffer.byteLength(proxy.body, 'utf8') > 32_768) {
     throw new ChatError('INVALID_INPUT', 'Expected a bounded JSON request body.', 400, false);
   }
+  
   try { return chatRequestSchema.parse(JSON.parse(proxy.body)); }
   catch { throw new ChatError('INVALID_INPUT', 'Invalid chat request fields.', 400, false); }
 }

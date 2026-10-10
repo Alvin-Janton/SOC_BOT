@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="An offline, function-by-function walkthrough of SOC Bot's chat orchestrator, DynamoDB persistence, Bedrock tool loop, Athena evidence, streaming, and failure recovery.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <meta name="color-scheme" content="light dark">
+  <title>Orchestrator Execution Flow | SOC Bot</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #f6f7fb; --surface: #ffffff; --text: #182338;
+      --muted: #526079; --line: #d8deea; --blue: #244db4;
+      --blue-soft: #edf2ff; --green: #166044; --green-soft: #eaf6ef;
+      --amber: #805100; --amber-soft: #fff5df; --code: #eef1f7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #111723; --surface: #192231; --text: #e6ecf6;
+        --muted: #b1bfd3; --line: #364459; --blue: #a5beff;
+        --blue-soft: #223251; --green: #9ad8b5; --green-soft: #203c32;
+        --amber: #f0cc82; --amber-soft: #423620; --code: #101925;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-padding-top: 24px; }
+    body { margin: 0; color: var(--text); background: var(--background); font: 16px/1.7 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    a { color: var(--blue); text-underline-offset: 3px; overflow-wrap: anywhere; }
+    a:focus-visible, summary:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
+    .skip-link { position: absolute; top: -80px; left: 20px; padding: 10px 16px; background: var(--surface); z-index: 10; }
+    .skip-link:focus { top: 10px; }
+    .layout { display: grid; grid-template-columns: 230px minmax(0, 960px); gap: 44px; max-width: 1320px; margin: auto; padding: 40px 30px 64px; }
+    .sidebar { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
+    .brand { font-weight: 750; letter-spacing: .07em; font-size: 18px; }
+    .brand span { color: var(--blue); }
+    .eyebrow, .section-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    .section-label { color: var(--blue); margin: 0 0 10px; }
+    nav { margin: 24px 0; }
+    nav a { display: block; padding: 6px 0; color: var(--muted); font-size: 14px; text-decoration: none; }
+    nav a:hover { color: var(--blue); text-decoration: underline; }
+    .sidebar-note, .fine { color: var(--muted); font-size: 14px; }
+    main { min-width: 0; }
+    h1 { font-size: clamp(32px, 4vw, 52px); line-height: 1.15; letter-spacing: -.045em; margin: 16px 0 22px; }
+    h2 { font-size: 26px; line-height: 1.35; letter-spacing: -.025em; margin: 0 0 18px; }
+    h3 { font-size: 19px; line-height: 1.4; margin: 24px 0 12px; }
+    p { margin: 12px 0; }
+    .lede { font-size: 19px; color: var(--muted); max-width: 750px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin: 22px 0; }
+    .badge { padding: 4px 10px; border-radius: 5px; background: var(--code); font-size: 12px; font-weight: 650; }
+    .badge.live { color: var(--green); background: var(--green-soft); }
+    .badge.future { color: var(--amber); background: var(--amber-soft); }
+    .callout { margin: 22px 0; padding: 18px 22px; border-left: 4px solid var(--blue); border-radius: 0 8px 8px 0; background: var(--blue-soft); }
+    .callout p { margin: 0; }
+    .callout.warning { border-color: var(--amber); background: var(--amber-soft); }
+    section { padding: 38px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 24px; }
+    .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 22px 0; }
+    .panel { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .panel h3 { margin-top: 0; }
+    .route { list-style: none; padding: 0; margin: 22px 0; counter-reset: stage; }
+    .route li { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; padding: 16px 18px; margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); counter-increment: stage; }
+    .route li::before { content: counter(stage, decimal-leading-zero); align-self: start; color: var(--blue); font-weight: 700; }
+    .route strong, .route small { display: block; }
+    .route small { color: var(--muted); font-size: 14px; }
+    code { font: .88em ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+    :not(pre) > code { padding: 2px 5px; background: var(--code); border-radius: 4px; }
+    .code-label { display: block; margin: 20px 0 7px; color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+    pre { margin: 8px 0 20px; padding: 20px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--code); line-height: 1.65; tab-size: 2; }
+    pre code { font-size: 13px; overflow-wrap: normal; white-space: pre; }
+    .table-wrap { margin: 20px 0; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    caption { text-align: left; font-weight: 650; margin-bottom: 10px; }
+    th, td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { font-weight: 650; background: var(--code); }
+    ul, ol { padding-left: 24px; }
+    li { margin: 7px 0; }
+    details { margin: 18px 0; }
+    summary { padding-block: 7px; cursor: pointer; color: var(--blue); font-weight: 650; }
+    footer { padding-top: 28px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 1000px) { .layout { grid-template-columns: 180px minmax(0, 1fr); gap: 26px; padding-inline: 24px; } }
+    @media (max-width: 800px) {
+      .layout { display: block; padding: 24px 20px 44px; }
+      .sidebar { position: static; max-height: none; overflow: visible; margin-bottom: 30px; }
+      nav { display: flex; flex-wrap: wrap; column-gap: 18px; margin: 14px 0; }
+      nav a { font-size: 13px; }
+      .sidebar-note { display: none; }
+      .split { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 480px) { pre { padding: 14px; } .panel, .callout { padding: 16px; } .route li { padding: 14px; gap: 10px; } section { padding-block: 30px; } }
+    @media print {
+      :root { color-scheme: light; --background: white; --surface: white; --text: #182338; --muted: #526079; --line: #d8deea; --code: #f2f4f8; --blue: #244db4; --blue-soft: #edf2ff; --green: #166044; --green-soft: #eaf6ef; --amber: #805100; --amber-soft: #fff5df; }
+      .layout { display: block; padding: 0; max-width: none; }
+      .sidebar, .skip-link { display: none; }
+      body { font-size: 11pt; }
+      pre, pre code { white-space: pre-wrap; overflow: visible; overflow-wrap: anywhere; }
+      pre code { font-size: 9pt; }
+      section { padding-block: 20px; }
+      h2, h3, .code-label { break-after: avoid; }
+      .panel, .callout, tr, .route li { break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to walkthrough</a>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">SOC <span>BOT</span></div>
+      <p class="eyebrow">Developer reference</p>
+      <nav aria-label="Walkthrough sections">
+        <a href="#overview">The end-to-end route</a>
+        <a href="#entry">01 / Input &amp; entry point</a>
+        <a href="#history">02 / Ownership &amp; history</a>
+        <a href="#context">03 / Recovery &amp; context</a>
+        <a href="#model">04 / Ask Bedrock</a>
+        <a href="#prepare">05 / Validate &amp; save calls</a>
+        <a href="#start">06 / Start Athena</a>
+        <a href="#poll">07 / Poll &amp; retrieve</a>
+        <a href="#evidence">08 / Give evidence to model</a>
+        <a href="#answer">09 / Stream &amp; complete</a>
+        <a href="#failure">Confirmed failure branch</a>
+        <a href="#retry">Retry &amp; fatal branches</a>
+        <a href="#limits">Limits &amp; access boundaries</a>
+        <a href="#sources">Source map &amp; deferred work</a>
+      </nav>
+      <p class="sidebar-note">Standalone HTML/CSS. No scripts, external libraries, network requests, credentials, or live AWS operations.</p>
+    </aside>
+    <main id="main">
+      <header>
+        <p class="eyebrow">Private dev chat Lambda / query_events example</p>
+        <h1>From a chat message<br>to an evidence-backed answer.</h1>
+        <p class="lede">Follow the data through the handler, conversation store, Bedrock tool loop, private query Lambda, Athena, and the final streamed response.</p>
+        <div class="meta">
+          <span class="badge">Code snapshot: October 10, 2026</span>
+          <span class="badge live">Orchestrator implemented in dev source</span>
+          <span class="badge future">API &amp; Cognito integration deferred</span>
+        </div>
+        <div class="callout"><p><strong>Two different functions:</strong> the chat orchestrator manages the conversation and model loop. The query-tool Lambda executes the approved Athena operations. Bedrock proposes a tool call; application code decides whether to execute it.</p></div>
+        <p class="fine">All example IDs, rows, times, answers, and counts are illustrative, not captured production output. Reduced examples show selected fields and are labeled. This document explains current source behavior; it neither deploys nor invokes anything.</p>
+        <p class="fine">Companion: <a href="Query_Execution_Flow.html">Query Execution Flow</a> covers the query internals in more detail. That earlier document is an October 7 snapshot; its statements that orchestration and Lake Formation are deferred are historical, not the current implementation status.</p>
+      </header>
+
+      <section id="overview" aria-labelledby="overview-title">
+        <p class="section-label">One turn / several service calls</p>
+        <h2 id="overview-title">The end-to-end route</h2>
+        <ol class="route" aria-label="Ordered data flow for a successful investigation">
+          <li><div><strong>Chat input &rarr; trusted request</strong><small><code>handler &rarr; respond &rarr; configuration + parseRequest</code></small></div></li>
+          <li><div><strong>Trusted request &rarr; durable conversation</strong><small><code>ConversationStore.begin</code> checks ownership, takes a lease, and saves one user event.</small></div></li>
+          <li><div><strong>History &rarr; bounded model context</strong><small><code>ToolExecutor.recover + Orchestrator.context + buildContext</code></small></div></li>
+          <li><div><strong>Bedrock context &rarr; proposed tool block</strong><small><code>ModelRunner.respond &rarr; request &rarr; ConverseStream</code></small></div></li>
+          <li><div><strong>Tool block &rarr; validated, saved call</strong><small><code>Orchestrator.prepare &rarr; validateTool &rarr; store.append</code></small></div></li>
+          <li><div><strong>Typed request &rarr; running Athena query</strong><small><code>ToolExecutor.execute &rarr; invoke &rarr; query handler &rarr; start &rarr; compileQuery</code></small></div></li>
+          <li><div><strong>Execution ID &rarr; bounded evidence</strong><small><code>poll &rarr; query_status &rarr; execution + boundedResults &rarr; terminal</code></small></div></li>
+          <li><div><strong>Saved evidence &rarr; model answer</strong><small>The loop rebuilds context and calls Bedrock again; only approved calls may repeat within the cap.</small></div></li>
+          <li><div><strong>Answer &rarr; durable completion</strong><small><code>text_delta &rarr; ASSISTANT_MESSAGE &rarr; release &rarr; complete</code></small></div></li>
+        </ol>
+        <h3>Where the security data comes from</h3>
+        <pre><code data-format="text">Prepared raw logs in S3
+  -&gt; separate on-demand Glue ETL run
+  -&gt; source-specific normalized Parquet + Glue Catalog tables
+  -&gt; Lake Formation table grants / normalized-prefix governance
+  -&gt; Athena reads the approved table when the query tool requests it
+
+This preparation is NOT performed inside a chat invocation.</code></pre>
+        <p>The example uses <code>waf_events</code>, but the same conversation loop can request <code>application_events</code>, <code>vpc_flow_events</code>, or <code>cloudtrail_events</code>. Schemas remain source-specific.</p>
+      </section>
+
+      <section id="entry" aria-labelledby="entry-title">
+        <p class="section-label">01 / handler.ts + config.ts + contracts.ts</p>
+        <h2 id="entry-title">A function value named <code>handler</code></h2>
+        <pre><code data-format="typescript">export const handler = awslambda.streamifyResponse(respond);
+
+async function respond(
+  event: unknown,
+  raw: Writable,
+  context: LambdaContext,
+): Promise&lt;void&gt;</code></pre>
+        <p>CDK bundles the entry file to <code>index.js</code> and selects <code>index.handler</code>. The exported function wraps <code>respond()</code> for Lambda response streaming. The function does not return an answer object: it writes events to <code>raw</code> through <code>NdjsonStream</code>.</p>
+        <span class="code-label">Direct private invocation event &middot; body is JSON text</span>
+        <pre><code data-format="json">{
+  "body": "{\"turnId\":\"296a0470-b7b7-4a21-a9d7-72fb7be90ac9\",\"message\":\"Show up to two WAF events on September 11, 2026 UTC with severity 3 or higher. Include action, path, and severity ID.\"}"
+}</code></pre>
+        <span class="code-label">parseRequest(event) returns a structured ChatRequest</span>
+        <pre><code data-format="json">{
+  "turnId": "296a0470-b7b7-4a21-a9d7-72fb7be90ac9",
+  "message": "Show up to two WAF events on September 11, 2026 UTC with severity 3 or higher. Include action, path, and severity ID."
+}</code></pre>
+        <div class="table-wrap"><table>
+          <caption>Checks before orchestration begins</caption>
+          <thead><tr><th scope="col">Function</th><th scope="col">Transformation or check</th></tr></thead>
+          <tbody>
+            <tr><td><code>new TurnBudget(acceptedAt)</code></td><td>Starts this invocation's ten-minute application budget. Normal work reserves the last 45 seconds for cleanup/outcomes.</td></tr>
+            <tr><td><code>configuration()</code></td><td>Reads trusted environment settings; accepts only the configured dev table, query function, database, model/profile, Region, and server-owned identity.</td></tr>
+            <tr><td><code>parseRequest()</code></td><td>Requires JSON text in <code>event.body</code>, rejects base64 bodies and bodies over 32 KiB, then validates the strict request schema.</td></tr>
+            <tr><td><code>chatRequestSchema</code></td><td>Requires a UUID turn ID and nonblank message of at most 8,192 characters. Only optional <code>conversationId</code> is additionally accepted; no client identity or transcript.</td></tr>
+            <tr><td>Runtime check</td><td>Requires at least ten minutes of remaining Lambda lifetime; the configured hard timeout is 15 minutes.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="callout warning"><p><strong>Not yet a browser route:</strong> this API-proxy-shaped body is currently sent to a private Lambda. There is no deployed chat API, Function URL, WAF route, or Cognito hookup here. Ownership uses the trusted configured dev identity; that is not individual user authentication.</p></div>
+      </section>
+
+      <section id="history" aria-labelledby="history-title">
+        <p class="section-label">02 / store.ts + handler.ts</p>
+        <h2 id="history-title"><code>begin()</code> establishes the durable turn</h2>
+        <p><code>respond()</code> creates the normal conversation store and a cleanup store with the same table/owner but different operation deadlines. It then calls:</p>
+        <pre><code data-format="typescript">store.begin(
+  request.conversationId,
+  request.turnId,
+  request.message,
+  leaseExpiresAtSeconds,
+)</code></pre>
+        <ol>
+          <li>If this is a new conversation, <code>initialConversationId()</code> derives a stable UUID from the table, trusted owner, and first turn ID; <code>createConversation()</code> writes its metadata conditionally.</li>
+          <li><code>metadata()</code> checks the stored owner using a strongly consistent read. <code>events()</code> loads bounded event history and orders it by numeric <code>event_sequence</code>.</li>
+          <li><code>checkTurn()</code> checks idempotency: same ID with different message is a conflict; completed work replays; nonretryable outcomes cannot be restarted.</li>
+          <li>A conditional metadata update acquires the attempt-owned lease and increments its fencing version. A still-active lease prevents a competing invocation.</li>
+          <li>The original <code>USER_MESSAGE</code> is appended only if absent. Expired prior attempts can receive a lease-recovery outcome.</li>
+        </ol>
+        <span class="code-label">Acquired result &middot; selected fields, example IDs</span>
+        <pre><code data-format="json">{
+  "state": "acquired",
+  "lease": {
+    "conversationId": "c4e7173b-3075-47b9-9e7d-260921bbc870",
+    "turnId": "296a0470-b7b7-4a21-a9d7-72fb7be90ac9",
+    "attemptId": "b7777777-7777-4777-8777-777777777777",
+    "version": 1,
+    "expiresAt": 1791634530
+  }
+}</code></pre>
+        <p>The real acquired result also contains <code>events</code> and <code>userEvent</code>. The example conversation UUID illustrates a format; it is not a computed hash result for the sample request.</p>
+        <div class="split">
+          <div class="panel"><h3>Conversation identity</h3><p><code>conversationId</code> groups history. <code>turnId</code> identifies one logical user submission. <code>attemptId</code> identifies a particular execution/retry.</p></div>
+          <div class="panel"><h3>Write ordering and ownership</h3><p><code>append() &rarr; appendFor()</code> condition-checks owner, active attempt, fence, expiry, and sequence in the event-write transaction. This prevents a stale writer from appending to a newer attempt.</p></div>
+        </div>
+        <pre><code data-format="text">Conversation metadata: PK = CONV#&lt;conversationId&gt;   SK = META
+Event:                 PK = CONV#&lt;conversationId&gt;
+                       SK = EVT#&lt;UTC-created_at&gt;#&lt;10-digit-sequence&gt;#&lt;eventId&gt;
+
+Numeric event_sequence is causal order, even if clock timestamps regress.</code></pre>
+        <p>After acquisition, <code>respond()</code> opens the NDJSON response and emits the conversation and turn IDs. Completed turns take the shorter replay branch described below.</p>
+      </section>
+
+      <section id="context" aria-labelledby="context-title">
+        <p class="section-label">03 / orchestrator.ts + tools.ts + context.ts</p>
+        <h2 id="context-title">History becomes model context, not a database dump</h2>
+        <p><code>Orchestrator.run(initialEvents)</code> counts all previously stored tool blocks for this turn, then calls <code>tools.recover(initialEvents)</code>. A new turn has no prior calls, so recovery does nothing. A retry follows the <a href="#retry">saved-state recovery rules</a>.</p>
+        <p><code>Orchestrator.context()</code> reloads fenced history and any saved summary. <code>buildContext()</code> reconstructs user messages, original assistant tool groups, exactly one selected terminal result per call, and completed assistant answers.</p>
+        <span class="code-label">Initial messages array &middot; first conversation, no tools yet</span>
+        <pre><code data-format="json">[
+  {
+    "role": "user",
+    "content": [
+      {
+        "text": "Show up to two WAF events on September 11, 2026 UTC with severity 3 or higher. Include action, path, and severity ID."
+      }
+    ]
+  }
+]</code></pre>
+        <p>This is a <code>Message[]</code>, not DynamoDB item JSON. Internal owner IDs, lease fields, turn outcomes, and event-storage keys are not copied into this conversational history. Tool arguments and bounded results are included as investigation data.</p>
+        <details>
+          <summary>What happens when history grows?</summary>
+          <p>Context construction permits at most 192 KiB and 128 messages. Around 96 KiB, <code>planCompaction()</code> finds eligible older complete prefixes; <code>ModelRunner.summarize()</code> summarizes up to twelve completed turns at a time while retaining six recent completed turns.</p>
+          <p><code>saveSummary()</code> persists the bounded summary and covered-through event pointer. Full audit events remain stored. Unresolved retryable/active turns block compaction; abandoned turns and failed prose/outcomes are excluded. Context and compaction reuse the same original call/result selection.</p>
+          <p>Historical completed tool evidence is bounded by that turn's saved assistant-message sequence, so later audit records cannot silently rewrite the evidence behind a past answer.</p>
+        </details>
+      </section>
+
+      <section id="model" aria-labelledby="model-title">
+        <p class="section-label">04 / model.ts + contracts.ts + prompt.ts</p>
+        <h2 id="model-title">Bedrock proposes a tool; it does not execute one</h2>
+        <p><code>run()</code> computes whether tools are allowed, emits <code>investigating</code> or <code>finalizing</code> activity, and calls <code>ModelRunner.respond(messages, allowTools, budget, emitText)</code>. Its private <code>request()</code> calls Bedrock <code>ConverseStream</code>.</p>
+        <ul>
+          <li>The stable versioned system prompt declares the read-only role and treats log values, catalog text, and summaries as untrusted data.</li>
+          <li><code>tableFacts()</code> supplies column/type facts and the query-window cap separately from the stable prompt.</li>
+          <li><code>bedrockTools()</code> derives schemas from the strict Zod definitions for <code>describe_table</code>, <code>query_events</code>, and <code>aggregate_events</code>.</li>
+          <li>The stream parser collects text and tool blocks, validates block order/IDs/stop reasons, parses each tool's JSON input, and excludes private reasoning.</li>
+        </ul>
+        <span class="code-label">A proposed Bedrock content block &middot; assembled from stream events</span>
+        <pre><code data-format="json">{
+  "toolUse": {
+    "toolUseId": "tool-waf-1",
+    "name": "query_events",
+    "input": {
+      "table": "waf_events",
+      "start_time": "2026-09-11T00:00:00Z",
+      "end_time": "2026-09-12T00:00:00Z",
+      "fields": ["action", "path", "severity_id"],
+      "filters": [{"field": "severity_id", "operator": "gte", "value": 3}],
+      "limit": 2
+    }
+  }
+}</code></pre>
+        <p>The model's input has <strong>no <code>operation</code> field</strong>. The tool name selects the operation; trusted application code adds it later. The model also cannot choose the function ARN, database, workgroup, results bucket, or AWS role.</p>
+        <span class="code-label">respond() returns a ModelResponse &middot; token counts illustrative</span>
+        <pre><code data-format="json">{
+  "text": "",
+  "toolUses": [
+    {
+      "id": "tool-waf-1",
+      "name": "query_events",
+      "index": 0,
+      "input": {
+        "table": "waf_events",
+        "start_time": "2026-09-11T00:00:00Z",
+        "end_time": "2026-09-12T00:00:00Z",
+        "fields": ["action", "path", "severity_id"],
+        "filters": [{"field": "severity_id", "operator": "gte", "value": 3}],
+        "limit": 2
+      }
+    }
+  ],
+  "stopReason": "tool_use",
+  "inputTokens": 1200,
+  "outputTokens": 80
+}</code></pre>
+        <p>Tool-capable prose is buffered. If this response requests tools, that intermediate text is not sent as an answer or saved as a completed assistant message.</p>
+      </section>
+
+      <section id="prepare" aria-labelledby="prepare-title">
+        <p class="section-label">05 / Orchestrator.prepare + validateTool + store.append</p>
+        <h2 id="prepare-title">The proposed call becomes an approved request</h2>
+        <p><code>prepare(response)</code> processes every tool-use block before dispatching any of them. Each block counts toward the four-call logical-turn cap, including invalid or excess blocks.</p>
+        <ol>
+          <li>Assign one <code>assistant_message_id</code> to preserve the original response's tool group and each block's index.</li>
+          <li>Check the call count and whether dispatch plus finalization fits the remaining budget.</li>
+          <li><code>validateTool(name, input, config)</code> checks the strict tool schema and creates <code>{ operation: name, ...parsedInput }</code>.</li>
+          <li>For data queries, <code>compileQuery()</code> independently rechecks business allowlists, typed filters, times, projections, and limits. This validation pass does not execute SQL.</li>
+          <li>Append a <code>TOOL_CALL</code>. Validated arguments are structured DynamoDB attributes, not a flattened string. Invalid input is not copied into audit history.</li>
+        </ol>
+        <span class="code-label">Validated request sent to the private query Lambda</span>
+        <pre><code data-format="json">{
+  "operation": "query_events",
+  "table": "waf_events",
+  "start_time": "2026-09-11T00:00:00Z",
+  "end_time": "2026-09-12T00:00:00Z",
+  "fields": ["action", "path", "severity_id"],
+  "filters": [{"field": "severity_id", "operator": "gte", "value": 3}],
+  "limit": 2
+}</code></pre>
+        <span class="code-label">TOOL_CALL payload &middot; storage envelope added by append()</span>
+        <pre><code data-format="json">{
+  "entity_type": "TOOL_CALL",
+  "assistant_message_id": "a8888888-8888-4888-8888-888888888888",
+  "content_block_index": 0,
+  "tool_use_id": "tool-waf-1",
+  "tool_name": "query_events",
+  "arguments": {
+    "table": "waf_events",
+    "start_time": "2026-09-11T00:00:00Z",
+    "end_time": "2026-09-12T00:00:00Z",
+    "fields": ["action", "path", "severity_id"],
+    "filters": [{"field": "severity_id", "operator": "gte", "value": 3}],
+    "limit": 2
+  }
+}</code></pre>
+        <p><code>append()</code> adds the conversation/event keys, sequence, event ID, turn ID, attempt ID, schema version, and actual UTC creation time. <code>run()</code> executes prepared calls sequentially; rejected calls receive bounded error results without an AWS tool dispatch.</p>
+      </section>
+
+      <section id="start" aria-labelledby="start-title">
+        <p class="section-label">06 / tools.ts &rarr; query-tool/handler.ts</p>
+        <h2 id="start-title">Start the query, then save its execution ID</h2>
+        <p><code>ToolExecutor.execute()</code> emits safe <code>query_started</code> activity. <code>invoke()</code> serializes the validated request into the Lambda SDK payload and invokes only the configured private query function. It parses the returned payload back into a bounded JSON object.</p>
+        <p>Inside the query Lambda, <code>handler()</code> dispatches to <code>start()</code>. <code>compileQuery()</code> generates controlled SQL with approved columns, daily partition predicates, exact UTC time bounds, typed escaped filters, deterministic sorting, and <code>LIMIT 3</code> for our two-row request. The extra row detects truncation; it is not an extra row promised to the caller.</p>
+        <p><code>StartQueryExecution</code> submits this SQL to the environment's dedicated workgroup. Athena continues after that query-tool invocation returns.</p>
+        <span class="code-label">Start response &middot; selected fields</span>
+        <pre><code data-format="json">{
+  "ok": true,
+  "operation": "query_events",
+  "table": "waf_events",
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "state": "SUBMITTED",
+  "result_count": 0,
+  "truncated": false
+}</code></pre>
+        <span class="code-label">Submission checkpoint &middot; output.query retains the exact validated request</span>
+        <pre><code data-format="json">{
+  "entity_type": "TOOL_RESULT",
+  "tool_use_id": "tool-waf-1",
+  "tool_name": "query_events",
+  "status": "success",
+  "output": {
+    "state": "SUBMITTED",
+    "query_execution_id": "11111111-1111-4111-8111-111111111111",
+    "query": {
+      "operation": "query_events",
+      "table": "waf_events",
+      "start_time": "2026-09-11T00:00:00Z",
+      "end_time": "2026-09-12T00:00:00Z",
+      "fields": ["action", "path", "severity_id"],
+      "filters": [{"field": "severity_id", "operator": "gte", "value": 3}],
+      "limit": 2
+    },
+    "submitted_at_ms": 1791633600000
+  }
+}</code></pre>
+        <div class="callout"><p><strong>Checkpoint, not completed evidence:</strong> <code>status: "success"</code> here means submission was saved successfully. <code>state: "SUBMITTED"</code> still identifies pending work. The context builder does not present this checkpoint to Bedrock as query results.</p></div>
+        <p>If the start invocation is ambiguous and no execution ID is durably known, the orchestrator fails closed. It does not blindly submit the query again.</p>
+      </section>
+
+      <section id="poll" aria-labelledby="poll-title">
+        <p class="section-label">07 / ToolExecutor.poll + status + query-tool results</p>
+        <h2 id="poll-title">Polling uses the original request, not just an ID</h2>
+        <p><code>poll()</code> repeatedly invokes internal <code>query_status</code> within the original 180-second query budget. Calls are followed by bounded waits of up to one second while the query remains pending.</p>
+        <span class="code-label">Internal status invocation</span>
+        <pre><code data-format="json">{
+  "operation": "query_status",
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "query": {
+    "operation": "query_events",
+    "table": "waf_events",
+    "start_time": "2026-09-11T00:00:00Z",
+    "end_time": "2026-09-12T00:00:00Z",
+    "fields": ["action", "path", "severity_id"],
+    "filters": [{"field": "severity_id", "operator": "gte", "value": 3}],
+    "limit": 2
+  }
+}</code></pre>
+        <ol>
+          <li>Query <code>status()</code> recompiles the supplied original request.</li>
+          <li><code>execution()</code> retrieves the execution and verifies the exact environment workgroup.</li>
+          <li>The query Lambda compares recorded SQL, database, and catalog against the approved compiled request. A mismatched request cannot fetch evidence.</li>
+          <li><code>QUEUED</code>/<code>RUNNING</code> returns metadata only. <code>SUCCEEDED</code> permits one bounded <code>GetQueryResults</code> page.</li>
+          <li><code>boundedResults()</code> verifies the header/row width and calls <code>cell()</code> to convert Athena strings into named, typed fields.</li>
+          <li>The orchestrator checks the returned execution ID, operation, table, state, and failure contract before treating a status as confirmed.</li>
+        </ol>
+        <div class="table-wrap"><table>
+          <caption>How Athena cells become evidence fields</caption>
+          <thead><tr><th scope="col">Athena value / declared type</th><th scope="col">Returned value</th></tr></thead>
+          <tbody>
+            <tr><td><code>"3"</code> / int</td><td>Number <code>3</code>, such as severity ID.</td></tr>
+            <tr><td><code>"9007199254740993"</code> / bigint</td><td>String, preserving precision beyond safe JavaScript integers.</td></tr>
+            <tr><td>Missing cell</td><td><code>null</code>, not an empty string or zero.</td></tr>
+            <tr><td>Timestamp</td><td>UTC timestamp text, such as <code>2026-09-11T09:00:00.000Z</code>.</td></tr>
+          </tbody>
+        </table></div>
+        <p>The query compiler automatically includes <code>event_uid</code>, <code>event_time</code>, <code>source_type</code>, <code>source_s3_key</code>, and <code>source_record_ref</code>, even when only a few display fields were requested.</p>
+      </section>
+
+      <section id="evidence" aria-labelledby="evidence-title">
+        <p class="section-label">08 / succeeded + terminal + context + model</p>
+        <h2 id="evidence-title">Persist evidence before the model consumes it</h2>
+        <p>On success, <code>succeeded()</code> awaits <code>terminal()</code>, which appends the complete bounded <code>TOOL_RESULT</code>. Only then does it emit <code>query_completed</code> and return to the orchestrator loop.</p>
+        <span class="code-label">Successful tool output &middot; selected response fields</span>
+        <pre><code data-format="json">{
+  "ok": true,
+  "state": "SUCCEEDED",
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "operation": "query_events",
+  "table": "waf_events",
+  "result_count": 2,
+  "truncated": false,
+  "rows": [
+    {
+      "action": "BLOCK",
+      "path": "/search",
+      "severity_id": 3,
+      "event_uid": "&lt;event-hash-1&gt;",
+      "event_time": "2026-09-11T09:00:00.000Z",
+      "source_type": "waf",
+      "source_s3_key": "raw/waf/2026-9-11.jsonl",
+      "source_record_ref": "req-demo-001"
+    },
+    {
+      "action": "ALLOW",
+      "path": "/login",
+      "severity_id": 4,
+      "event_uid": "&lt;event-hash-2&gt;",
+      "event_time": "2026-09-11T09:05:00.000Z",
+      "source_type": "waf",
+      "source_s3_key": "raw/waf/2026-9-11.jsonl",
+      "source_record_ref": "req-demo-002"
+    }
+  ]
+}</code></pre>
+        <p>The full successful output also carries expected column types and safe execution metadata. The example assumes exactly two qualifying records, so it is not truncated. More rows or an oversized response would set truncation metadata.</p>
+        <span class="code-label">Reconstructed context order &middot; native tool-enabled history</span>
+        <pre><code data-format="text">USER       Original question
+ASSISTANT  toolUse: tool-waf-1 / query_events / validated arguments
+USER       toolResult: tool-waf-1 / success / bounded output
+           ^ not another human message: Bedrock places tool results
+             in a user-role message
+
+Then the next ConverseStream request runs.</code></pre>
+        <details>
+          <summary>What does an actual Bedrock tool-result block look like?</summary>
+          <p>This reduced example shows the native wrapper and selected output fields. Real <code>json</code> contains the saved bounded output, including rows.</p>
+          <pre><code data-format="json">{
+  "role": "user",
+  "content": [
+    {
+      "toolResult": {
+        "toolUseId": "tool-waf-1",
+        "status": "success",
+        "content": [
+          {"json": {"ok": true, "state": "SUCCEEDED", "result_count": 2}}
+        ]
+      }
+    }
+  ]
+}</code></pre>
+        </details>
+        <p><code>selectToolResult()</code> chooses existing terminal evidence ahead of pending checkpoints; original tool groups and call order remain intact. No result is copied into a new attempt just to make it visible.</p>
+        <div class="callout"><p><strong>Success does not automatically disable tools.</strong> If call/time budgets permit, Bedrock can request another approved tool or answer immediately. The loop ends when a valid model response contains no tool-use blocks. A call cap, insufficient time, or a confirmed terminal query failure forces a tools-disabled request.</p></div>
+        <p>For a no-tools request, <code>modelMessages()</code> projects prior tool calls/results into labeled untrusted JSON text and omits tool definitions. This provider-input conversion leaves the original stored audit events unchanged.</p>
+      </section>
+
+      <section id="answer" aria-labelledby="answer-title">
+        <p class="section-label">09 / ModelRunner + respond + NdjsonStream</p>
+        <h2 id="answer-title">The answer streams, then completion becomes durable</h2>
+        <p>Assume the next model response answers rather than requesting another tool. <code>ModelRunner</code> returns a response with empty <code>toolUses</code> and an accepted stop reason. <code>run()</code> returns that response to <code>respond()</code>.</p>
+        <p>During tools-disabled synthesis, public text deltas stream as they arrive. During a tool-capable request, text is buffered until the stop reason confirms it is an answer rather than another tool request. Tool-capable final text is then emitted in chunks.</p>
+        <span class="code-label">Illustrative final answer text, not a recorded model response</span>
+        <pre><code data-format="text">Two matching WAF events were found. /search was blocked at 09:00 UTC
+(severity 3); /login was allowed at 09:05 UTC (severity 4).
+The allowed event warrants application-log correlation, but severity
+alone does not prove exploitation.
+
+Evidence: &lt;event-hash-1&gt; / raw/waf/2026-9-11.jsonl / req-demo-001;
+          &lt;event-hash-2&gt; / raw/waf/2026-9-11.jsonl / req-demo-002.</code></pre>
+        <span class="code-label">ASSISTANT_MESSAGE payload &middot; selected answer text</span>
+        <pre><code data-format="json">{
+  "entity_type": "ASSISTANT_MESSAGE",
+  "role": "assistant",
+  "model_id": "us.anthropic.claude-sonnet-4-6",
+  "stop_reason": "end_turn",
+  "content": "Two matching WAF events were found: blocked /search at 09:00 UTC and allowed /login at 09:05 UTC. Severity alone does not prove exploitation. Evidence: &lt;event-hash-1&gt; / raw/waf/2026-9-11.jsonl / req-demo-001; &lt;event-hash-2&gt; / raw/waf/2026-9-11.jsonl / req-demo-002."
+}</code></pre>
+        <p>The handler checks the remaining budget, persists the complete assistant text, attempts fenced lease release, then sends <code>complete</code>. It does not persist every token delta. A <code>max_tokens</code> stop may complete with <code>truncated: true</code>.</p>
+        <span class="code-label">Selected NDJSON lines &middot; each line is its own JSON object</span>
+        <pre><code data-format="ndjson">{"type":"conversation","conversationId":"c4e7173b-3075-47b9-9e7d-260921bbc870","turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}
+{"type":"activity","stage":"investigating"}
+{"type":"activity","stage":"query_started","operation":"query_events","table":"waf_events"}
+{"type":"activity","stage":"query_completed","operation":"query_events","table":"waf_events","rowsReturned":2}
+{"type":"text_delta","text":"Two matching WAF events were found..."}
+{"type":"complete","conversationId":"c4e7173b-3075-47b9-9e7d-260921bbc870","replayed":false,"truncated":false,"turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}</code></pre>
+        <p><code>NdjsonStream.emit()</code> serializes and queues safe events. While idle it may emit generic 15-second heartbeats. <code>finish()</code> attempts at most one terminal event and closes the response. Additional activity/chunks may occur; the lines above are a selected sequence, not an exact event-count contract.</p>
+        <div class="callout warning"><p><strong>Text is not proof of completion.</strong> Deltas can arrive before the final database write. Only durable assistant persistence allows <code>complete</code>. A broken connection does not cancel backend work; an undelivered stream does not undo a saved answer.</p></div>
+      </section>
+
+      <section id="failure" aria-labelledby="failure-title">
+        <p class="section-label">Handled query failure / not fabricated evidence</p>
+        <h2 id="failure-title">A confirmed query failure still permits an explanation</h2>
+        <p>If the checked query reaches <code>FAILED</code> or <code>CANCELLED</code>, <code>failed()</code> saves a bounded error result. It does not expose provider diagnostics or invent rows.</p>
+        <span class="code-label">Durably saved failure output &middot; FAILED example</span>
+        <pre><code data-format="json">{
+  "ok": false,
+  "query_execution_id": "11111111-1111-4111-8111-111111111111",
+  "state": "FAILED",
+  "halted_tool_group": true,
+  "error": {
+    "code": "QUERY_FAILED",
+    "message": "The approved query did not complete successfully."
+  }
+}</code></pre>
+        <pre><code data-format="text">Verified final state
+  -&gt; await bounded error TOOL_RESULT persistence
+  -&gt; return failure output to Orchestrator.run()
+  -&gt; set finalizationOnly = true
+  -&gt; save NOT_EXECUTED for later queued tool blocks
+  -&gt; rebuild context with earlier evidence + this failure
+  -&gt; ConverseStream with NO tool definitions
+  -&gt; explain the limitation / available evidence
+  -&gt; persist real assistant answer, then complete</code></pre>
+        <p>For example, if one model response queued three calls and the first query failed, calls two and three are not invoked. Their original <code>TOOL_CALL</code> records remain, each paired with a bounded <code>NOT_EXECUTED</code> result.</p>
+        <span class="code-label">Output saved for each later queued call</span>
+        <pre><code data-format="json">{
+  "ok": false,
+  "error": {
+    "code": "NOT_EXECUTED",
+    "message": "This tool block was not executed. Use existing evidence or correct the approved input."
+  }
+}</code></pre>
+        <p><code>isConfirmedQueryFailure()</code> recognizes the verified failure contract after persistence. Saving the failure or any queued rejection must succeed before the final model request can happen. A storage failure remains fatal.</p>
+        <p>At a query deadline, <code>timedOut() &rarr; cancelActive()</code> attempts internal cancellation. If an actual <code>FAILED</code>/<code>CANCELLED</code> state is observed and saved, the same result is reused; no second synthetic timeout result is appended. A requested but unconfirmed stop remains fatal.</p>
+        <div class="callout"><p><strong>A completed explanation is not a successful query.</strong> The model must say that evidence was unavailable and use only earlier verified evidence. If final synthesis or final answer persistence fails, the turn follows the fatal-outcome path.</p></div>
+      </section>
+
+      <section id="retry" aria-labelledby="retry-title">
+        <p class="section-label">Same turn ID / new attempt only when allowed</p>
+        <h2 id="retry-title">Recovery uses what is known; it does not guess</h2>
+        <div class="table-wrap"><table>
+          <caption>Retry and failure branches</caption>
+          <thead><tr><th scope="col">Saved situation</th><th scope="col">Behavior</th></tr></thead>
+          <tbody>
+            <tr><td>Completed matching turn</td><td><code>begin()</code> returns <code>completed</code>. The handler streams the stored answer and <code>complete</code> with <code>replayed: true</code>; no Bedrock or query invocation.</td></tr>
+            <tr><td>Still-active lease</td><td>Report in-progress/busy rather than running a second attempt.</td></tr>
+            <tr><td>Same turn ID, different message</td><td>Reject the conflict; do not append another user message.</td></tr>
+            <tr><td>Existing terminal result</td><td><code>selectToolResult()</code> selects the original result across attempts. Recovery neither redispatches the call nor appends a replay copy.</td></tr>
+            <tr><td>Known pending checkpoint</td><td>Validate the saved request/ID/time against the original call and poll that execution, not a new one. The original 180-second query deadline is not reset.</td></tr>
+            <tr><td>Expired known query</td><td><code>recoverExpired()</code> checks authenticated status once. Success is reusable only when service completion time proves it completed within the original query budget; otherwise use confirmed failure or bounded cleanup.</td></tr>
+            <tr><td>Saved confirmed failure</td><td>Recover into tools-disabled finalization. Fill missing queued <code>NOT_EXECUTED</code> results only with durable halt evidence, the same original group/attempt, later block ordering, and no contradictory dispatch evidence.</td></tr>
+            <tr><td>Unknown dispatch or unavailable final state</td><td>Fail closed; never infer that a missing result means a query was not sent. <code>NOT_FOUND</code> does not prove a final Athena state.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>What the fatal handler path does</h3>
+        <p><code>respond()</code> catches fatal failures and <code>publicError()</code> maps them to safe codes/messages. It attempts cleanup for a tracked active query and writes a bounded <code>TURN_OUTCOME</code> when persistence permits. No placeholder is saved as a completed assistant answer.</p>
+        <p>Before streaming starts, <code>httpError()</code> sends an ordinary HTTP JSON error. After streaming starts, the handler attempts one NDJSON <code>error</code> event. Raw SDK error text, stack traces, SQL, arguments, and evidence rows are not streamed or logged.</p>
+        <p>An ambiguous final assistant write might already have committed. The handler does not append a contradictory failed outcome: it reports <code>OUTCOME_NOT_CONFIRMED</code> and keeps the lease for expiry recovery. Failure to confirm any other outcome is also reported honestly.</p>
+        <p>Internal <code>cancel_query</code> is not exposed to Bedrock or as a browser endpoint. A future authenticated Stop path must resolve server-side user/turn ownership before invoking cancellation. A disconnect alone is never treated as Stop.</p>
+      </section>
+
+      <section id="limits" aria-labelledby="limits-title">
+        <p class="section-label">Separate limits / separate identities</p>
+        <h2 id="limits-title">The guards are not interchangeable</h2>
+        <div class="table-wrap"><table>
+          <caption>Current bounded configurations</caption>
+          <thead><tr><th scope="col">Control</th><th scope="col">Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>4 tool blocks per logical turn</td><td>Includes invalid/excess blocks and prior attempts, not just successful executions.</td></tr>
+            <tr><td>10-minute application / 15-minute Lambda limits</td><td>The application limit starts at this invocation's acceptance; retry recovery does not reset saved query deadlines or the logical-turn call cap. The hard Lambda limit leaves cleanup room.</td></tr>
+            <tr><td>90-second finalization / 45-second cleanup reserves</td><td>Dispatch only when execution plus finalization fits. Normal work stops before the cleanup reserve.</td></tr>
+            <tr><td>180-second query lifecycle</td><td>Orchestrator-owned submission-to-completion budget; the query Lambda does not block for the whole lifecycle.</td></tr>
+            <tr><td>30-day configured query window</td><td>Bounds requested event time, independently of execution time and partition/scan limits.</td></tr>
+            <tr><td>128 MiB Athena scan cutoff</td><td>Workgroup cost guardrail, not a model-context or returned-row limit.</td></tr>
+            <tr><td>Default 25 / maximum 100 rows; 64 KiB evidence</td><td>Query result contract. This example explicitly requests two rows.</td></tr>
+            <tr><td>192 KiB / 128 context messages; 256 KiB full model request</td><td>Bounds conversation history and the complete provider input separately.</td></tr>
+            <tr><td>2,048 tokens / 32 KiB answer; 90-second model-call cap</td><td>Bounds public output and individual provider-call duration, subject to remaining turn time.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="split">
+          <div class="panel"><h3>Orchestrator identity</h3><p>Exact chat-table item access, invocation of the configured query function, and approved Bedrock resources. No direct Athena, Glue, Lake Formation, or security-log S3 permissions.</p></div>
+          <div class="panel"><h3>Query identity</h3><p>Dedicated workgroup, approved catalog/table metadata, Lake Formation access, and Athena results. No direct raw/normalized/quarantine/evaluation S3 reads; registered normalized data is governed through Lake Formation.</p></div>
+        </div>
+        <p>The model has no AWS identity. Runtime roles cannot access hidden evaluation data. Tool output is evidence, not instructions, and severity alone is not proof of maliciousness or exploitation.</p>
+        <p>CloudWatch logs contain operational identifiers, phases, outcomes, timings, counts, and token totals only. Conversation bodies, tool arguments/results, summaries, credentials, and private reasoning stay out of logs.</p>
+      </section>
+
+      <section id="sources" aria-labelledby="sources-title">
+        <p class="section-label">Source map / current implementation boundary</p>
+        <h2 id="sources-title">Where each responsibility lives</h2>
+        <div class="table-wrap"><table>
+          <caption>Relative repository links; function names reflect this snapshot</caption>
+          <thead><tr><th scope="col">File</th><th scope="col">Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/handler.ts">handler.ts</a></td><td><code>handler</code>, <code>respond</code>, <code>publicError</code>: entry, trusted request, replay, final persistence, cleanup, safe logs.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/config.ts">config.ts</a></td><td><code>configuration</code>, <code>TurnBudget</code>, <code>ChatError</code>: trusted settings, limits, deadlines, safe errors.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/contracts.ts">contracts.ts</a></td><td><code>parseRequest</code>, <code>validateTool</code>, <code>bedrockTools</code>, <code>tableFacts</code>: request/tool schemas and provider contracts.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/store.ts">store.ts</a></td><td><code>ConversationStore</code>: ownership, keys, idempotency, fenced leases/appends, history, summaries.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/context.ts">context.ts</a></td><td><code>selectToolResult</code>, <code>buildContext</code>, <code>planCompaction</code>: original result reuse, grouped history, safe compaction.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/orchestrator.ts">orchestrator.ts</a></td><td><code>run</code>, <code>prepare</code>, <code>rejected</code>, <code>context</code>: sequential model/tool loop and finalization policy.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/model.ts">model.ts</a> / <a href="infra/lambdas/ai/chat-orchestrator/prompt.ts">prompt.ts</a></td><td>Bedrock request/stream parsing, no-tools history projection, bounded summaries, versioned read-only instructions.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/tools.ts">tools.ts</a></td><td><code>execute</code>, <code>invoke</code>, <code>poll</code>, <code>recover</code>, <code>cancelActive</code>: private query lifecycle and durable results.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/chat-orchestrator/stream.ts">stream.ts</a></td><td><code>NdjsonStream</code>, <code>httpError</code>: safe events, heartbeat, queued writes, response closure.</td></tr>
+            <tr><td><a href="infra/lambdas/ai/query-tool/handler.ts">query-tool/handler.ts</a> / <a href="infra/lambdas/ai/query-tool/results.ts">results.ts</a></td><td>Approved query execution, authenticated execution checks, cancellation, cell conversion and bounded evidence.</td></tr>
+            <tr><td><a href="infra/lib/stacks/ai/query-contract.ts">query-contract.ts</a></td><td>Controlled SQL compilation and independent business allowlists.</td></tr>
+            <tr><td><a href="infra/lib/stacks/ai/chat-orchestrator.ts">CDK chat-orchestrator.ts</a></td><td>Private dev function, entry/export selection, runtime, configuration, logs, scoped execution role.</td></tr>
+            <tr><td><a href="Docs/AIStack_Spec-Temp.md">AI-stack spec</a> / <a href="Docs/Final_Spec.md">Final specification</a></td><td>Accepted contracts and authoritative architecture.</td></tr>
+          </tbody>
+        </table></div>
+        <div class="split">
+          <div class="panel"><span class="badge live">Implemented in source</span><h3>Private dev investigation loop</h3><ul><li>Validated chat and trusted dev ownership.</li><li>Bedrock streaming and controlled query dispatch.</li><li>Durable turn history, evidence, replay, and compaction.</li><li>Known-query polling, internal cancellation, and failure finalization.</li></ul></div>
+          <div class="panel"><span class="badge future">Separate future slices</span><h3>Public application integration</h3><ul><li>Chat API/response-streaming transport and restricted dev WAF route.</li><li>Cognito BFF/session integration and real user identity.</li><li>Authenticated Stop and explicit abandonment workflows.</li><li>Playbook retrieval and browser presentation.</li></ul></div>
+        </div>
+        <p>Isolated Cognito helper source exists but is inactive. The current orchestrator construct is dev-only. Neither source existence nor this walkthrough claims that an orchestrator deployment or live end-to-end validation has occurred.</p>
+        <p><strong>The orchestrator turns a trusted chat request into a bounded sequence of saved tool evidence and model responses. The query Lambda handles Athena; the handler makes completion durable before reporting it.</strong></p>
+      </section>
+      <footer>Standalone SOC Bot reference &middot; October 10, 2026 &middot; Offline HTML/CSS only. Recheck against the linked source after behavior changes.</footer>
+    </main>
+  </div>
+</body>
+</html>
