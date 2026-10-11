@@ -828,4 +828,3 @@ No SQL, raw tool arguments/results, prompt, or private-reasoning event is stream
 | NDJSON event | `type` plus that event's public fields | A transcript of tool data or a separate token-level database write. |
 
 This is the successful path, not an example of retries, compaction, cancellation, or failed persistence. Those transitions are covered in [persistence/context](Persistence-and-Context.md) and [agent/tools](Agent-Loop-and-Tools.md). Playbook retrieval, public frontend/API transport, and authenticated ownership/Stop remain unimplemented integrations.
-
