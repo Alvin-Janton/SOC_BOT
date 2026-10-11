@@ -54,7 +54,7 @@ export function parseRequest(event: unknown): ChatRequest {
   if (typeof proxy.body !== 'string' || proxy.isBase64Encoded === true || Buffer.byteLength(proxy.body, 'utf8') > 32_768) {
     throw new ChatError('INVALID_INPUT', 'Expected a bounded JSON request body.', 400, false);
   }
-  
+
   try { return chatRequestSchema.parse(JSON.parse(proxy.body)); }
   catch { throw new ChatError('INVALID_INPUT', 'Invalid chat request fields.', 400, false); }
 }

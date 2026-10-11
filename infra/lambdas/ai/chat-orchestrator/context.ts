@@ -332,7 +332,7 @@ export function planCompaction(events: readonly ChatEvent[], currentTurnId: stri
   let best: CompactionPlan = { eligibleEvents: [], remainingEvents: remaining };
   // Each summary request is bounded; the caller may compact another chunk under the same lease.
   const candidates = completed.slice(0, Math.min(12, completed.length - retainCompletedTurns));
-  
+
   for (const candidate of candidates) {
     let coverageSequence = candidate.lastSequence;
     let changed = true;

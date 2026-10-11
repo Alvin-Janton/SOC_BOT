@@ -319,7 +319,7 @@ export class ConversationStore {
         && event.attempt_id === previous.active_attempt_id && (event.entity_type === 'ASSISTANT_MESSAGE' || event.entity_type === 'TURN_OUTCOME'))) {
         events.push(await this.appendFor(lease, { entity_type: 'TURN_OUTCOME', outcome: 'timed_out', retryable: true, failure_phase: 'lease_recovery', error_code: 'LEASE_EXPIRED' }, previous.active_turn_id, previous.active_attempt_id));
       }
-      
+
       let userEvent = events.find((event) => event.turn_id === turnId && event.entity_type === 'USER_MESSAGE');
       if (!userEvent) { userEvent = await this.appendFor(lease, { entity_type: 'USER_MESSAGE', role: 'user', content: message }, turnId, attemptId); events.push(userEvent); }
       return { state: 'acquired', lease, events: events.sort((left, right) => left.event_sequence - right.event_sequence), userEvent };

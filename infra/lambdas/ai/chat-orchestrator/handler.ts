@@ -111,7 +111,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
 
     outcome = 'completed';
     outcomePersisted = true;
-    
+
     try { await cleanupStore.release(begun.lease); leaseReleased = true; } catch { /* Durable completion is replayable even if release needs expiry recovery. */ }
     await stream.finish({ type: 'complete', conversationId, replayed: false, truncated: response.stopReason === 'max_tokens' });
   } catch (error) {
@@ -126,7 +126,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
       // A timed-out write may already have committed. Never append a contradictory failed outcome.
       outcome = 'completion_unknown';
       safe = new ChatError('OUTCOME_NOT_CONFIRMED', 'The final outcome could not be confirmed. Retry the same turn after its active lease expires.', 503);
-    } 
+    }
 
     else if (cleanupStore && lease && !outcomePersisted) {
       outcome = safe.code === 'TURN_TIMED_OUT' || safe.code === 'QUERY_TIMED_OUT' || safe.code === 'MODEL_TIMED_OUT' ? 'timed_out' : 'failed';
@@ -134,7 +134,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
         await cleanupStore.append(lease, { entity_type: 'TURN_OUTCOME', outcome: outcome === 'timed_out' ? 'timed_out' : 'failed',
           retryable: safe.retryable, failure_phase: orchestrator?.phase ?? 'acceptance', error_code: safe.code });
         outcomePersisted = true;
-      } 
+      }
 
       catch {
         safe = new ChatError('OUTCOME_NOT_CONFIRMED', 'The outcome could not be confirmed. Retry the same turn after its active lease expires.', 503);
@@ -149,8 +149,8 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
       retryable: safe.retryable, correlationId: context.awsRequestId });
 
     else await httpError(raw, safe.status, safe.code, safe.message, context.awsRequestId);
-  } 
-  
+  }
+
   finally {
     // Intentionally exclude user text, tool arguments/results, summaries, SDK diagnostics and reasoning.
     console.info(JSON.stringify({ event: 'chat_turn', requestId: context.awsRequestId, conversationId, turnId,
