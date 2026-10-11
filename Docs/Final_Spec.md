@@ -534,18 +534,22 @@ React fetch/ReadableStream client
 
 The chat handler parses Bedrock stream events, executes validated tool requests, returns tool results to the model, and streams the final synthesis to the frontend. Tool-use turns may require multiple `ConverseStream` calls before final answer text is available.
 
-The application stream should expose only user-facing events:
+The application uses NDJSON with only user-facing events:
 
-- `message_start`
-- `tool_start`
-- `tool_complete`
-- `content_delta`
-- `message_complete`
-- `error`
+- `conversation`: server conversation ID and client turn ID
+- `activity`: safe operation/table/stage and completed row counts
+- `heartbeat`: generic processing stage, every 15 seconds while idle
+- `text_delta`: bounded public answer text
+- `complete`: durable completion/replay and truncation flags
+- `error`: safe terminal code/message/retryability and correlation ID
 
-Tool events may identify an operation such as querying CloudTrail or retrieving a playbook, but the application must not expose private model reasoning. The frontend incrementally renders `content_delta` events and finalizes the assistant message after `message_complete`.
+Tool events must not expose private reasoning, prompts, SQL, raw arguments, or unrestricted tool output. The frontend will incrementally render `text_delta` and finalize after `complete`. Errors before streaming starts use an ordinary HTTP JSON error; after streaming starts, attempt exactly one terminal event.
 
-The completed assistant response, evidence references, tool metadata, token usage, and latency are persisted after the stream finishes. Client disconnects and partial-stream failures must be logged and must not produce a falsely completed assistant message.
+Only a confirmed terminal Athena `FAILED` or `CANCELLED` result, after durable bounded `TOOL_RESULT` persistence, is handled by stopping tool dispatch and persisting `NOT_EXECUTED` results for every later queued call. The final model request has tools disabled and explains available evidence and query limitations; successful final synthesis and assistant-response persistence complete the turn. A retry reusing this saved terminal failure follows the same tools-disabled finalization. `NOT_FOUND` or unavailable status, unknown dispatch, unconfirmed stop, and storage, fencing, model, or other backend errors remain fatal attempt errors on the `TURN_OUTCOME` path, subject to persistence-confirmation rules; they must not produce fabricated completed answers.
+
+The completed assistant response is persisted before emitting `complete`; token fragments are not separate database events. A failed backend attempt records `TURN_OUTCOME` instead of fabricated assistant prose. An ambiguous final database write must not create a contradictory failed outcome; report it as unconfirmed and recover via the original turn ID. Client disappearance is not a Stop signal: backend work may finish durably even when its stream cannot be delivered.
+
+The current dev-only private orchestrator implements this framing without an API route, WAF, Function URL, or active Cognito integration. It trusts only the CDK-configured dev identity. API transport and authenticated Stop/session ownership require later integration. Enforce a ten-minute acceptance-to-outcome budget inside a 15-minute Lambda, four tool blocks across attempts, sequential queries with a 180-second deadline, 90-second finalization reserve, and 45-second outcome/cleanup reserve. Provider history is limited to 192 KiB/128 messages, complete model requests to 256 KiB, and answers to 2,048 tokens/32 KiB. Only the three approved query tools are implemented; playbook retrieval remains planned.
 
 ---
 
@@ -572,9 +576,9 @@ GSI1PK = USER#<trusted-owner-id>
 GSI1SK = CONV#<updated_at>#<conversationId>
 ```
 
-Each AI stack provisions `SOC-BOT-<ENV>-CHAT-HISTORY` with string base/index keys, on-demand billing, and DynamoDB-owned encryption. `GSI1` includes only `conversation_id`, `title`, `created_at`, and `updated_at` in addition to automatically projected keys. Dev destroys the table on teardown; demo retains it. No stream, TTL, runtime grants, or point-in-time recovery is configured in this increment. The approved PITR exception acknowledges only `AwsSolutions-DDB3` on each chat-history table; backup configuration remains a separate reviewed change, and demo retention does not protect against item-level data loss.
+Each AI stack provisions `SOC-BOT-<ENV>-CHAT-HISTORY` with string base/index keys, on-demand billing, and DynamoDB-owned encryption. `GSI1` includes only `conversation_id`, `title`, `created_at`, and `updated_at` in addition to automatically projected keys. Dev destroys the table on teardown; demo retains it. No stream, TTL, or point-in-time recovery is configured. Only the dev orchestrator receives exact-table Get/Put/Query/Update permissions; no scan/index permission is added. The approved PITR exception acknowledges only `AwsSolutions-DDB3` on each chat-history table; backup configuration remains a separate reviewed change, and demo retention does not protect against item-level data loss.
 
-Application writers enforce encoded key values, sparse metadata indexing, and event-specific attributes; DynamoDB only enforces key names and types. Concurrent sequence allocation and the conversation-to-incident relationship remain application-level planning decisions. Message bodies, tool arguments, and evidence rows must not be included in runtime logs.
+Application writers enforce encoded key values, sparse metadata indexing, and event-specific attributes; DynamoDB only enforces key names and types. The dev writer conditionally acquires attempt-owned leases and transactionally allocates `event_sequence` with the fenced append. Actual timestamps remain in sort keys; numeric sequence is authoritative even if clocks regress. The original `USER_MESSAGE` is stored once per logical UUID turn, retries use fresh attempt IDs, completed turns replay, and failed backend attempts do not become assistant answers. Retry context reuses original saved tool calls/results across attempts, preserving their IDs without redispatching completed calls or copy-writing their records into the new attempt. A durably persisted, confirmed Athena `FAILED` or `CANCELLED` result can lead to a completed tools-disabled model explanation under Section 10.5. Compaction stores bounded summaries of complete prefixes without deleting audit history or crossing unresolved retry barriers. The conversation-to-incident relationship, explicit abandonment API, and retention remain separate decisions. Message bodies, tool arguments, summaries, and evidence rows must not be included in runtime logs.
 
 ### 11.2 Context Strategy
 

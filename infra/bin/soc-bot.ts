@@ -39,7 +39,9 @@ for (const environment of ['dev', 'demo'] as const) {
     tables: dataStack.tables,
     workgroup: dataStack.workgroup,
     maxQueryWindowDays: queryWindowDays(Number(app.node.tryGetContext('queryMaxTimeSpanDays') ?? DEFAULT_QUERY_WINDOW_DAYS)),
-    description: `SOC Bot ${environment} private read-only investigation query tool`,
+    description: environment === 'dev'
+      ? 'SOC Bot dev private investigation query tool and streaming chat orchestrator'
+      : 'SOC Bot demo private read-only investigation query tool',
   });
 }
 
