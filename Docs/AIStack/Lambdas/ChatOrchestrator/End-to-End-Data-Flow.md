@@ -1,6 +1,6 @@
 # End-to-End Chat Data Flow
 
-This walkthrough follows one successful `query_events` turn through the current private dev Lambda. The **calling client is an authorized private invoker**, not an implemented React/API integration. The model proposes an investigation; application code validates and executes it.
+This walkthrough follows one illustrative successful `query_events` turn through the dev Lambda. A calling client can use the streaming POST `/chat` API after operator deployment; React integration remains unimplemented. Dev API access uses a temporary WAF source-IP gate and fixed shared owner, not user authentication. The API-proxy snapshots below remain valid; see [AI infrastructure](../../Infra/README.md) for prerequisites and the undeployed-demo security exception. The model proposes an investigation; application code validates and executes it.
 
 ```mermaid
 sequenceDiagram
@@ -9,7 +9,7 @@ sequenceDiagram
     participant D as DynamoDB
     participant B as Bedrock
     participant Q as Query Lambda
-    Note over C,H: Frontend and API integration are not implemented
+    Note over C,H: API Gateway streams /chat; frontend/Cognito integration is not implemented
     C->>H: API-proxy-shaped event
     H->>D: Acquire lease and save USER_MESSAGE
     H-->>C: conversation event

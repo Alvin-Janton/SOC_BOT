@@ -8,7 +8,7 @@ export const MAX_OUTPUT_BYTES = 32_768;
 export const MAX_OUTPUT_TOKENS = 2_048;
 
 export interface Configuration {
-  readonly environment: 'dev';
+  readonly environment: 'dev' | 'demo';
   readonly ownerId: string;
   readonly tableName: string;
   readonly queryFunction: string;
@@ -19,11 +19,11 @@ export interface Configuration {
 }
 
 /**
- * Fails closed before any service access unless trusted configuration selects the dev-only identity.
+ * Fails closed unless trusted configuration selects one environment's fixed identity and resources.
  *
  * Example Input (no arguments; trusted environment variables):
  * {
- *   DEPLOYMENT_ENVIRONMENT: 'dev', DEV_USER_ID: 'soc-bot-dev-analyst',
+ *   DEPLOYMENT_ENVIRONMENT: 'dev', TEMPORARY_OWNER_ID: 'soc-bot-dev-analyst',
  *   CHAT_HISTORY_TABLE_NAME: 'SOC-BOT-DEV-CHAT-HISTORY',
  *   QUERY_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-QUERY-TOOL',
  *   DATABASE_NAME: 'soc_bot_dev_security', MAX_QUERY_WINDOW_DAYS: '30',
@@ -39,18 +39,20 @@ export interface Configuration {
  * Invalid configuration throws ChatError rather than returning partial configuration.
  */
 export function configuration(): Configuration {
-  const ownerId = process.env.DEV_USER_ID ?? '';
+  const environment = process.env.DEPLOYMENT_ENVIRONMENT;
+  const ownerId = process.env.TEMPORARY_OWNER_ID ?? '';
   const tableName = process.env.CHAT_HISTORY_TABLE_NAME ?? '';
   const queryFunction = process.env.QUERY_TOOL_FUNCTION_NAME ?? '';
   const database = process.env.DATABASE_NAME ?? '';
   const maxQueryDays = Number(process.env.MAX_QUERY_WINDOW_DAYS);
-  if (process.env.DEPLOYMENT_ENVIRONMENT !== 'dev' || !/^[A-Za-z0-9_-]{1,128}$/.test(ownerId)
-    || tableName !== 'SOC-BOT-DEV-CHAT-HISTORY' || queryFunction !== 'SOC-BOT-DEV-QUERY-TOOL'
-    || database !== 'soc_bot_dev_security' || process.env.BEDROCK_MODEL_ID !== 'us.anthropic.claude-sonnet-4-6'
+  if ((environment !== 'dev' && environment !== 'demo') || ownerId !== `soc-bot-${environment}-analyst`
+    || tableName !== `SOC-BOT-${environment.toUpperCase()}-CHAT-HISTORY`
+    || queryFunction !== `SOC-BOT-${environment.toUpperCase()}-QUERY-TOOL`
+    || database !== `soc_bot_${environment}_security` || process.env.BEDROCK_MODEL_ID !== 'us.anthropic.claude-sonnet-4-6'
     || process.env.BEDROCK_REGION !== 'us-east-1' || !Number.isInteger(maxQueryDays) || maxQueryDays < 1 || maxQueryDays > 366) {
     throw new ChatError('CONFIGURATION_ERROR', 'Chat is not available in this environment.', 503, false);
   }
-  return { environment: 'dev', ownerId, tableName, queryFunction, database, maxQueryDays,
+  return { environment, ownerId, tableName, queryFunction, database, maxQueryDays,
     modelId: process.env.BEDROCK_MODEL_ID, region: process.env.BEDROCK_REGION };
 }
 

@@ -25,7 +25,7 @@ The JSON body accepts only:
 
 The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 encoded. Unknown body keys, including client identity or transcript/history, fail validation. Extra proxy-envelope fields do not become trusted identity.
 
-[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) accepts only trusted dev configuration: fixed `DEV_USER_ID`, exact dev table/query-function/database names, approved model/Region, and a valid query-window cap. This fixed owner is not authentication. All private dev invokers share it; no public route or active Cognito integration exists.
+[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) accepts trusted dev/demo configuration: fixed `TEMPORARY_OWNER_ID`, exact matching table/query-function/database names, approved model/Region, and a valid query-window cap. The fixed owner is not authentication; all callers in an environment share it. The Regional streaming POST `/chat` route uses basic request validation before deeper Lambda validation. Dev's source-IP WAF gate is temporary; demo intentionally has no WAF and must remain undeployed until Cognito/security is complete. No active Cognito integration or frontend/CORS support exists. [Infrastructure prerequisites](../../Infra/README.md) include the foundation-owned logging setting and dev CIDR context.
 
 ## Handler lifecycle
 

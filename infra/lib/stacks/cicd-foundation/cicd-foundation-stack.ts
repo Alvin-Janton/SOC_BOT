@@ -1,4 +1,5 @@
 import {
+  Aws,
   CfnOutput,
   Duration,
   RemovalPolicy,
@@ -13,15 +14,18 @@ import {
   CfnRole,
   ManagedPolicy,
   PolicyDocument,
+  PolicyStatement,
   Role,
   ServicePrincipal,
   WebIdentityPrincipal,
 } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { CfnAccount } from 'aws-cdk-lib/aws-apigateway';
 import { BlockPublicAccess, Bucket, BucketEncryption, CfnBucket } from 'aws-cdk-lib/aws-s3';
-import { DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
+import { chatApiAccessLogGroupName, DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
 import {
   aiApplicationStatements,
+  apiGatewayLoggingStatements,
   dataAndAnalyticsStatements,
   deploymentStatements,
   environmentResources,
@@ -53,6 +57,7 @@ export class CicdFoundationStack extends Stack {
 
     const dev = this.createEnvironmentFoundation('dev', oidcProvider);
     const demo = this.createEnvironmentFoundation('demo', oidcProvider);
+    this.createApiGatewayLogging();
 
     new CfnOutput(this, 'GitHubOidcProviderArn', {
       value: oidcProvider.attrArn,
@@ -61,6 +66,49 @@ export class CicdFoundationStack extends Stack {
     new CfnOutput(this, 'DemoDeployRoleArn', { value: demo.deployRole.roleArn });
     new CfnOutput(this, 'DevCloudFormationExecutionRoleArn', { value: dev.executionRole.roleArn });
     new CfnOutput(this, 'DemoCloudFormationExecutionRoleArn', { value: demo.executionRole.roleArn });
+  }
+
+  /** Owns the single Regional API Gateway logging account setting and narrowly scoped service role. */
+  private createApiGatewayLogging(): void {
+    const role = new Role(this, 'ApiGatewayLoggingRole', {
+      roleName: 'SOC_BOT_CICD_API_GATEWAY_LOGGING',
+      description: 'Shared Regional API Gateway logging for SOC Bot dev/demo chat APIs',
+      assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+      inlinePolicies: {
+        SOC_BOT_DEV_API_GATEWAY_LOGGING: new PolicyDocument({ statements: apiGatewayLoggingStatements('dev') }),
+        SOC_BOT_DEMO_API_GATEWAY_LOGGING: new PolicyDocument({ statements: apiGatewayLoggingStatements('demo') }),
+        SOC_BOT_CICD_API_GATEWAY_LOGGING_DISCOVERY: new PolicyDocument({ statements: [new PolicyStatement({
+          actions: ['logs:DescribeLogGroups'], resources: ['*'],
+        })] }),
+        SOC_BOT_CICD_API_GATEWAY_LOGGING_INITIALIZATION: new PolicyDocument({ statements: [new PolicyStatement({
+          sid: 'InitializeApiGatewayWelcomeLogs',
+          actions: [
+            'logs:CreateLogGroup',
+            'logs:CreateLogStream',
+            'logs:DescribeLogStreams',
+            'logs:PutLogEvents',
+            'logs:GetLogEvents',
+            'logs:FilterLogEvents',
+          ],
+          resources: [`arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:/aws/apigateway/welcome:*`],
+        })] }),
+      },
+    });
+    // Shared like the OIDC provider: no single environment owns this account-level identity.
+    this.applyTags(role, { Project: 'SOC_BOT', ManagedBy: 'CDK' });
+    role.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    const account = new CfnAccount(this, 'ApiGatewayLoggingAccount', { cloudWatchRoleArn: role.roleArn });
+    // Removing an Account resource does not reset API Gateway's Regional role setting.
+    account.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    this.acknowledgeIamWildcards(role.node.defaultChild!, [
+      'Resource::*',
+      'Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:/aws/apigateway/welcome:*',
+      ...(['dev', 'demo'] as const).flatMap((environment) => [
+        `Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:${chatApiAccessLogGroupName(environment)}:*`,
+        `Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:API-Gateway-Execution-Logs_*/${environment}:*`,
+      ]),
+    ], 'Only API Gateway can assume this shared role. Application logs remain limited to the two chat access groups and AWS-fixed execution-log names for dev/demo stages; generated API IDs require a wildcard without a reverse AI-to-foundation reference. Initialization permits only the approved group/stream creation, stream discovery, and event read/write/filter actions within /aws/apigateway/welcome; its ARN qualifier wildcard does not authorize other group names. DescribeLogGroups alone requires Resource "*".');
+    new CfnOutput(this, 'ApiGatewayLoggingRoleArn', { value: role.roleArn });
   }
 
   /** Creates the deployment role, execution role, policies, and boundary for one environment. */
@@ -120,7 +168,7 @@ export class CicdFoundationStack extends Stack {
       `SOC_BOT_${upper}_CFN_FRONTEND_API`,
       frontendApiStatements(resources),
       this.iamWildcardFindings('frontend', environment),
-      'Frontend resources use environment tags and prefixes; Cognito creation and CloudFront origin access control APIs require account-scoped resources.',
+      'Frontend resources use environment tags and prefixes; dev WAF uses exact Regional chat names with generated-ID wildcards and tagged dev stage association. Cognito creation and CloudFront origin access control APIs require account-scoped resources.',
     );
     const observabilityPolicy = this.createManagedPolicy(
       `${title}ObservabilityPolicy`,
@@ -283,12 +331,19 @@ export class CicdFoundationStack extends Stack {
       frontend: [
         resource(`arn:${partition}:apigateway:${region}::/restapis/*`),
         resource(`arn:${partition}:apigateway:${region}::/tags/*`),
+        ...(environment === 'dev' ? [
+          resource(`arn:${partition}:apigateway:${region}::/restapis/*/stages/dev`),
+          resource(`arn:${partition}:wafv2:${region}:${account}:regional/ipset/SOC-BOT-DEV-CHAT-CLIENTS/*`),
+          resource(`arn:${partition}:wafv2:${region}:${account}:regional/webacl/SOC-BOT-DEV-CHAT-ALLOWLIST/*`),
+        ] : []),
         resource(`arn:${partition}:cognito-idp:${region}:${account}:userpool/*`),
         resource(`arn:${partition}:cloudfront::${account}:distribution/*`),
         'Resource::*',
       ],
       observability: [
         resource(`arn:${partition}:logs:${region}:${account}:log-group:*SOC-BOT-${upper}-*`),
+        resource(`arn:${partition}:logs:${region}:${account}:log-group:API-Gateway-Execution-Logs_*/${environment}`),
+        resource(`arn:${partition}:logs:${region}:${account}:log-group:API-Gateway-Execution-Logs_*/${environment}:*`),
         resource(`arn:${partition}:cloudwatch:${region}:${account}:alarm:SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:budgets::${account}:budget/SOC-BOT-${upper}-*`),
         'Resource::*',

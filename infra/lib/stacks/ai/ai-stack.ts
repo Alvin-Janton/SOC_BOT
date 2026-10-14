@@ -8,6 +8,7 @@ import { DeploymentEnvironment } from '../../shared/environment';
 import { AthenaQueryTool } from './athena-query-tool';
 import { ChatHistory } from './chat-history';
 import { ChatOrchestrator } from './chat-orchestrator';
+import { ChatApi } from './chat-api';
 import { LakeFormationGrants } from './lake-formation-grants';
 
 export interface AiStackProps extends StackProps {
@@ -17,13 +18,15 @@ export interface AiStackProps extends StackProps {
   readonly database: CfnDatabase;
   readonly tables: readonly CfnTable[];
   readonly maxQueryWindowDays?: number;
+  readonly devAllowedClientCidr?: string;
 }
 
-/** Owns private investigation tools, conversation storage, and the dev-only orchestrator. */
+/** Owns private investigation tools, conversation storage, and environment-specific streaming chat. */
 export class AiStack extends Stack {
   public readonly queryTool: AthenaQueryTool;
   public readonly chatHistoryTable: Table;
-  public readonly chatOrchestrator?: ChatOrchestrator;
+  public readonly chatOrchestrator: ChatOrchestrator;
+  public readonly chatApi: ChatApi;
 
   public constructor(scope: Construct, id: string, props: AiStackProps) {
     super(scope, id, props);
@@ -36,15 +39,18 @@ export class AiStack extends Stack {
       tables: props.tables,
       queryRoleArn: this.queryTool.role.roleArn,
     });
-    if (props.deploymentEnvironment === 'dev') {
-      this.chatOrchestrator = new ChatOrchestrator(this, 'ChatOrchestrator', {
-        deploymentEnvironment: props.deploymentEnvironment,
-        chatHistoryTable: this.chatHistoryTable,
-        queryToolFunction: this.queryTool.function,
-        databaseName: props.database.ref,
-        maxQueryWindowDays: props.maxQueryWindowDays,
-      });
-    }
+    this.chatOrchestrator = new ChatOrchestrator(this, 'ChatOrchestrator', {
+      deploymentEnvironment: props.deploymentEnvironment,
+      chatHistoryTable: this.chatHistoryTable,
+      queryToolFunction: this.queryTool.function,
+      databaseName: props.database.ref,
+      maxQueryWindowDays: props.maxQueryWindowDays,
+    });
+    this.chatApi = new ChatApi(this, 'ChatApi', {
+      deploymentEnvironment: props.deploymentEnvironment,
+      orchestratorFunction: this.chatOrchestrator.function,
+      devAllowedClientCidr: props.devAllowedClientCidr,
+    });
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', props.deploymentEnvironment);
     Tags.of(this).add('ManagedBy', 'CDK');

@@ -2,7 +2,8 @@
 
 This directory is source code only. No Lambda handler, API route, Cognito resource,
 auth-session table, permission, or chat identity integration is registered. The
-chat orchestrator continues to use its separate dev-only configured identity.
+chat orchestrator uses a separate fixed environment-specific temporary identity;
+dev's API is WAF-gated, and demo deployment is deferred until authentication/security is complete.
 
 `createBffAuth(configuration, dependencies?)` in `bff.ts` returns `login`,
 `resolveSession`, `requireSession`, and `logout`. Configuration is explicit:

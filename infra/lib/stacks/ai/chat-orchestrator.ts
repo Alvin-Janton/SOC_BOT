@@ -19,28 +19,27 @@ export interface ChatOrchestratorProps {
   readonly maxQueryWindowDays?: number;
 }
 
-/** Owns the dev-only private streaming orchestrator and its application execution identity. */
+/** Owns an environment's streaming orchestrator and its application execution identity. */
 export class ChatOrchestrator extends Construct {
   public readonly function: NodejsFunction;
   public readonly role: Role;
 
   public constructor(scope: Construct, id: string, props: ChatOrchestratorProps) {
     super(scope, id);
-    if (props.deploymentEnvironment !== 'dev') {
-      throw new Error('The chat orchestrator is available only in dev until authentication is integrated.');
-    }
-    const functionName = 'SOC-BOT-DEV-CHAT-ORCHESTRATOR';
+    const environment = props.deploymentEnvironment;
+    const upper = environment.toUpperCase();
+    const functionName = `SOC-BOT-${upper}-CHAT-ORCHESTRATOR`;
     const logGroupName = `/aws/lambda/${functionName}`;
     const logGroup = new LogGroup(this, 'LogGroup', {
       logGroupName,
       retention: RetentionDays.ONE_WEEK,
-      removalPolicy: RemovalPolicy.DESTROY,
+      removalPolicy: environment === 'dev' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });
     const role = new Role(this, 'ExecutionRole', {
-      roleName: 'SOC_BOT_DEV_RUNTIME_APPLICATION_CHAT_ORCHESTRATOR',
+      roleName: `SOC_BOT_${upper}_RUNTIME_APPLICATION_CHAT_ORCHESTRATOR`,
       assumedBy: new ServicePrincipal('lambda.amazonaws.com'),
       permissionsBoundary: ManagedPolicy.fromManagedPolicyArn(this, 'ApplicationBoundary',
-        runtimeBoundaryArn('dev', 'application')),
+        runtimeBoundaryArn(environment, 'application')),
     });
     Tags.of(role).add('SOCBOTAccessClass', 'application');
     this.role = role;
@@ -83,8 +82,8 @@ export class ChatOrchestrator extends Construct {
       depsLockFilePath: resolve(dirname(entry), '../../../../package-lock.json'),
       bundling: { bundleAwsSDK: true, externalModules: [], minify: true, target: 'node22' },
       environment: {
-        DEPLOYMENT_ENVIRONMENT: 'dev',
-        DEV_USER_ID: 'soc-bot-dev-analyst',
+        DEPLOYMENT_ENVIRONMENT: environment,
+        TEMPORARY_OWNER_ID: `soc-bot-${environment}-analyst`,
         CHAT_HISTORY_TABLE_NAME: props.chatHistoryTable.tableName,
         QUERY_TOOL_FUNCTION_NAME: props.queryToolFunction.functionName,
         BEDROCK_MODEL_ID: BEDROCK_INFERENCE_PROFILE.profileId,
@@ -98,18 +97,18 @@ export class ChatOrchestrator extends Construct {
     this.function.node.addDependency(policy, logGroup);
     Validations.of(this.function.node.defaultChild!).acknowledge({
       id: 'AwsSolutions-L1',
-      reason: 'The approved dev orchestrator targets supported Node.js 22, matching CI and the repository engine contract; migration to a newer major runtime is separate work.',
+      reason: 'The approved orchestrator targets supported Node.js 22, matching CI and the repository engine contract; migration to a newer major runtime is separate work.',
     });
     Validations.of(policy).acknowledge({
       id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:${logGroupName}:*]`,
-      reason: 'The orchestrator creates log streams only inside its explicitly managed dev log group.',
+      reason: 'The orchestrator creates log streams only inside its explicitly managed environment log group.',
     });
     Validations.of(policy).acknowledge({
       id: `AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:bedrock:*::foundation-model/${BEDROCK_INFERENCE_PROFILE.foundationModelId}]`,
       reason: 'The Region wildcard supports US routing destinations for the approved model; the exact us-east-1 inference-profile condition prevents direct model invocation or another profile.',
     });
     Tags.of(this).add('Project', 'SOC_BOT');
-    Tags.of(this).add('Environment', 'dev');
+    Tags.of(this).add('Environment', environment);
     Tags.of(this).add('ManagedBy', 'CDK');
     new CfnOutput(this, 'FunctionArn', { value: this.function.functionArn });
     new CfnOutput(this, 'ExecutionRoleArn', { value: role.roleArn });

@@ -67,12 +67,11 @@ function statementBySid(policy: JsonObject, sid: string): JsonObject {
 }
 
 describe('CicdFoundationStack', () => {
-  // Verifies the shared identity provider and fixed foundation-role count.
-  test('creates one native OIDC provider and exactly four roles', () => {
+  // Verifies the shared identity provider and its configuration.
+  test('creates one native OIDC provider', () => {
     const { stack, template } = synthesize();
     expect(stack.stackName).toBe('SOC-BOT-CICD-FOUNDATION');
     expect(resourcesOfType(template, 'AWS::IAM::OIDCProvider')).toHaveLength(1);
-    expect(resourcesOfType(template, 'AWS::IAM::Role')).toHaveLength(4);
 
     const provider = resourcesOfType(template, 'AWS::IAM::OIDCProvider')[0];
     expect(provider.Properties).toMatchObject({

@@ -1,6 +1,6 @@
 import { Aws } from 'aws-cdk-lib';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { dataBucketName, DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
+import { chatApiAccessLogGroupName, dataBucketName, DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
 
 export const RUNTIME_CLASSES = ['application', 'query', 'glue'] as const;
 export type RuntimeClass = typeof RUNTIME_CLASSES[number];
@@ -292,6 +292,8 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
   const apiGatewayArn = `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/restapis`;
   const userPoolArn = `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`;
   const distributionArn = `arn:${Aws.PARTITION}:cloudfront::${Aws.ACCOUNT_ID}:distribution/*`;
+  const devIpSetArn = `arn:${Aws.PARTITION}:wafv2:${Aws.REGION}:${Aws.ACCOUNT_ID}:regional/ipset/SOC-BOT-DEV-CHAT-CLIENTS/*`;
+  const devWebAclArn = `arn:${Aws.PARTITION}:wafv2:${Aws.REGION}:${Aws.ACCOUNT_ID}:regional/webacl/SOC-BOT-DEV-CHAT-ALLOWLIST/*`;
   return [
     new PolicyStatement({
       sid: `CreateTagged${title}ApiGateway`,
@@ -311,6 +313,41 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       resources: [`arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/tags/*`],
       conditions: requiredRequestTags,
     }),
+    ...(resources.environment === 'dev' ? [
+      new PolicyStatement({
+        sid: 'SetDevChatStageWebAcl',
+        actions: ['apigateway:SetWebACL'],
+        resources: [`${apiGatewayArn}/*/stages/dev`],
+        conditions: requiredResourceTags,
+      }),
+      new PolicyStatement({
+        sid: 'CreateTaggedDevChatWafResources',
+        // WebACL creation also authorizes the IPSet referenced by its single allowlist rule.
+        actions: ['wafv2:CreateIPSet', 'wafv2:CreateWebACL'],
+        resources: [devIpSetArn, devWebAclArn], conditions: requiredRequestTags,
+      }),
+      new PolicyStatement({
+        sid: 'ManageTaggedDevChatIpSet',
+        actions: ['wafv2:DeleteIPSet', 'wafv2:GetIPSet', 'wafv2:UpdateIPSet'],
+        resources: [devIpSetArn], conditions: requiredResourceTags,
+      }),
+      new PolicyStatement({
+        sid: 'ManageTaggedDevChatWebAcl',
+        actions: ['wafv2:AssociateWebACL', 'wafv2:DeleteWebACL', 'wafv2:GetWebACL',
+          'wafv2:GetWebACLForResource', 'wafv2:UpdateWebACL'],
+        // UpdateWebACL authorizes referenced IPSets as well as the WebACL itself.
+        resources: [devWebAclArn, devIpSetArn], conditions: requiredResourceTags,
+      }),
+      new PolicyStatement({
+        sid: 'TagDevChatWafResources',
+        actions: ['wafv2:TagResource'], resources: [devIpSetArn, devWebAclArn], conditions: requiredRequestTags,
+      }),
+      new PolicyStatement({
+        sid: 'ReadDevChatWafTags',
+        actions: ['wafv2:ListTagsForResource'], resources: [devIpSetArn, devWebAclArn],
+        conditions: requiredResourceTags,
+      }),
+    ] : []),
     new PolicyStatement({
       sid: `ManageTagged${title}CognitoUserPools`,
       actions: [
@@ -362,6 +399,8 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
 
 /** Defines CloudFormation permissions for environment-scoped logs, alarms, and budgets. */
 export function observabilityStatements(resources: EnvironmentResources): PolicyStatement[] {
+  const executionLogGroupArn = `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:API-Gateway-Execution-Logs_*/${resources.environment}`;
+  const ownership = { Project: 'SOC_BOT', Environment: resources.environment, ManagedBy: 'CDK' };
   return [
     new PolicyStatement({
       sid: `Manage${capitalize(resources.environment)}LogGroups`,
@@ -373,6 +412,23 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
       resources: [
         `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:*${resources.prefix}-*`,
       ],
+    }),
+    new PolicyStatement({
+      sid: `CreateTagged${capitalize(resources.environment)}ApiExecutionLogs`,
+      actions: ['logs:CreateLogGroup', 'logs:TagResource'],
+      resources: [executionLogGroupArn, `${executionLogGroupArn}:*`],
+      conditions: {
+        StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
+        'ForAllValues:StringEquals': { 'aws:TagKeys': Object.keys(ownership) },
+      },
+    }),
+    new PolicyStatement({
+      sid: `ManageTagged${capitalize(resources.environment)}ApiExecutionLogs`,
+      actions: ['logs:DeleteLogGroup', 'logs:DeleteRetentionPolicy', 'logs:ListTagsForResource', 'logs:PutRetentionPolicy'],
+      resources: [executionLogGroupArn, `${executionLogGroupArn}:*`],
+      conditions: {
+        StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:ResourceTag/${key}`, value])),
+      },
     }),
     new PolicyStatement({
       sid: `Describe${capitalize(resources.environment)}LogGroups`,
@@ -398,6 +454,20 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
       resources: [`arn:${Aws.PARTITION}:budgets::${Aws.ACCOUNT_ID}:budget/${resources.prefix}-*`],
     }),
   ];
+}
+
+/** Limits the shared API Gateway service role to each environment's access/execution logs. */
+export function apiGatewayLoggingStatements(environment: DeploymentEnvironment): PolicyStatement[] {
+  const prefix = `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:`;
+  const logGroups = [
+    `${prefix}${chatApiAccessLogGroupName(environment)}`,
+    `${prefix}API-Gateway-Execution-Logs_*/${environment}`,
+  ];
+  return [new PolicyStatement({
+    actions: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:DescribeLogStreams',
+      'logs:PutLogEvents', 'logs:GetLogEvents', 'logs:FilterLogEvents'],
+    resources: logGroups.map((arn) => `${arn}:*`),
+  })];
 }
 
 /** Defines the constrained IAM lifecycle permissions for environment-specific runtime roles. */
@@ -527,11 +597,11 @@ export function runtimeBoundaryStatements(
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
       resources: [inferenceProfileArn],
     }),
-    ...(resources.environment === 'dev' ? [new PolicyStatement({
-      sid: 'AllowDevApprovedBedrockInferenceProfileRead',
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}ApprovedBedrockInferenceProfileRead`,
       actions: ['bedrock:GetInferenceProfile'],
       resources: [inferenceProfileArn],
-    })] : []),
+    }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApprovedBedrockProfileModels`,
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],

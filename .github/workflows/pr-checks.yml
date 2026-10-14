@@ -86,4 +86,4 @@ jobs:
         run: npm test
 
       - name: Synthesize infrastructure and run cdk-nag
-        run: npm run synth
+        run: npm run synth --workspace @soc-bot/infra -- -c devAllowedClientCidr=2001:db8::1/128
