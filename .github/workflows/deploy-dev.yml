@@ -65,7 +65,7 @@ jobs:
         run: npm run build
 
       - name: Synthesize infrastructure and run cdk-nag
-        run: npm run synth --workspace @soc-bot/infra -- -c "devAllowedClientCidr=${DEV_ALLOWED_CLIENT_CIDR}"
+        run: npm run synth --workspace @soc-bot/infra -- -c "devAllowedClientCidr=${DEV_ALLOWED_CLIENT_CIDR}/128"
 
       - name: Assume dev deployment role through OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
