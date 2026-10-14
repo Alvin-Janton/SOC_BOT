@@ -356,8 +356,14 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       new PolicyStatement({
         sid: 'ReadDevChatWafTags',
         // CloudFormation must be able to inspect absence after a tagged resource is deleted.
-        actions: ['wafv2:GetIPSet', 'wafv2:GetWebACL', 'wafv2:GetWebACLForResource', 'wafv2:ListTagsForResource'],
+        actions: ['wafv2:GetIPSet', 'wafv2:GetWebACL', 'wafv2:ListTagsForResource'],
         resources: [devIpSetArn, devWebAclArn],
+      }),
+      new PolicyStatement({
+        sid: 'ReadDevWebAclAssociation',
+        // API Gateway association lookup requires GetWebACL and the Regional WebACL wildcard.
+        actions: ['wafv2:GetWebACLForResource', 'wafv2:GetWebACL'],
+        resources: [`arn:${Aws.PARTITION}:wafv2:${Aws.REGION}:${Aws.ACCOUNT_ID}:regional/webacl/*/*`],
       }),
     ] : []),
     new PolicyStatement({
