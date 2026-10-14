@@ -168,7 +168,7 @@ export class CicdFoundationStack extends Stack {
       `SOC_BOT_${upper}_CFN_FRONTEND_API`,
       frontendApiStatements(resources),
       this.iamWildcardFindings('frontend', environment),
-      'Frontend resources use environment tags and prefixes; dev WAF mutations use exact Regional chat names and tagged dev stage association. AWS requires account/Region-scoped regional/webacl/*/* for GetWebACLForResource and its dependent GetWebACL read; no broader WAF mutation is allowed. Cognito creation and CloudFront origin access control APIs require account-scoped resources.',
+      'Frontend resources use environment tags and prefixes; dev WAF mutations use exact Regional chat names. Only SetWebACL on /restapis/*/stages/dev uses approved tag-optional ownership conditions for WAF association. AWS requires account/Region-scoped regional/webacl/*/* for GetWebACLForResource and its dependent GetWebACL read; no broader WAF mutation is allowed. Cognito creation and CloudFront origin access control APIs require account-scoped resources.',
     );
     const observabilityPolicy = this.createManagedPolicy(
       `${title}ObservabilityPolicy`,

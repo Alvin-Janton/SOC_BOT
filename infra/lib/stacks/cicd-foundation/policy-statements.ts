@@ -330,7 +330,8 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
         sid: 'SetDevChatStageWebAcl',
         actions: ['apigateway:SetWebACL'],
         resources: [`${apiGatewayArn}/*/stages/dev`],
-        conditions: requiredResourceTags,
+        // Approved dev-only exception: WAF association may omit stage tags from authorization context.
+        conditions: { StringEqualsIfExists: requiredResourceTags.StringEquals },
       }),
       new PolicyStatement({
         sid: 'CreateTaggedDevChatWafResources',

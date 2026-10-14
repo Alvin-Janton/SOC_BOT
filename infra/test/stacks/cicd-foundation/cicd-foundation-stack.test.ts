@@ -255,7 +255,21 @@ describe('CicdFoundationStack', () => {
       `CreateTagged${capitalize(environment)}CloudFrontDistribution`,
     ];
 
-    expect(serialized).not.toContain('StringEqualsIfExists');
+    const tagOptionalStatements = policy.Properties.PolicyDocument.Statement
+      .filter((candidate: JsonObject) => JSON.stringify(candidate).includes('StringEqualsIfExists'));
+    expect(tagOptionalStatements).toEqual(environment === 'dev' ? [{
+      Sid: 'SetDevChatStageWebAcl',
+      Effect: 'Allow',
+      Action: 'apigateway:SetWebACL',
+      Resource: { 'Fn::Join': ['', [
+        'arn:', { Ref: 'AWS::Partition' }, ':apigateway:', { Ref: 'AWS::Region' }, '::/restapis/*/stages/dev',
+      ]] },
+      Condition: { StringEqualsIfExists: {
+        'aws:ResourceTag/Project': 'SOC_BOT',
+        'aws:ResourceTag/Environment': 'dev',
+        'aws:ResourceTag/ManagedBy': 'CDK',
+      } },
+    }] : []);
     expect(serialized).not.toContain('UntagResource');
     for (const sid of createSids) {
       const create = statementBySid(policy, sid);
