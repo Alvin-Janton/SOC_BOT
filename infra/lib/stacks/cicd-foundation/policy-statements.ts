@@ -340,13 +340,12 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       }),
       new PolicyStatement({
         sid: 'ManageTaggedDevChatIpSet',
-        actions: ['wafv2:DeleteIPSet', 'wafv2:GetIPSet', 'wafv2:UpdateIPSet'],
+        actions: ['wafv2:CreateWebACL', 'wafv2:DeleteIPSet', 'wafv2:UpdateIPSet'],
         resources: [devIpSetArn], conditions: requiredResourceTags,
       }),
       new PolicyStatement({
         sid: 'ManageTaggedDevChatWebAcl',
-        actions: ['wafv2:AssociateWebACL', 'wafv2:DeleteWebACL', 'wafv2:GetWebACL',
-          'wafv2:GetWebACLForResource', 'wafv2:UpdateWebACL'],
+        actions: ['wafv2:AssociateWebACL', 'wafv2:DeleteWebACL', 'wafv2:UpdateWebACL'],
         // UpdateWebACL authorizes referenced IPSets as well as the WebACL itself.
         resources: [devWebAclArn, devIpSetArn], conditions: requiredResourceTags,
       }),
@@ -356,8 +355,9 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       }),
       new PolicyStatement({
         sid: 'ReadDevChatWafTags',
-        actions: ['wafv2:ListTagsForResource'], resources: [devIpSetArn, devWebAclArn],
-        conditions: requiredResourceTags,
+        // CloudFormation must be able to inspect absence after a tagged resource is deleted.
+        actions: ['wafv2:GetIPSet', 'wafv2:GetWebACL', 'wafv2:GetWebACLForResource', 'wafv2:ListTagsForResource'],
+        resources: [devIpSetArn, devWebAclArn],
       }),
     ] : []),
     new PolicyStatement({
@@ -431,17 +431,37 @@ export function observabilityStatements(resources: EnvironmentResources): Policy
       resources: [executionLogGroupArn, `${executionLogGroupArn}:*`],
       conditions: {
         StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
-        'ForAllValues:StringEquals': { 'aws:TagKeys': Object.keys(ownership) },
+        'ForAllValues:StringEquals': { 'aws:TagKeys': [
+          ...Object.keys(ownership),
+          'aws:cloudformation:stack-id',
+          'aws:cloudformation:stack-name',
+          'aws:cloudformation:logical-id',
+        ] },
       },
     }),
     new PolicyStatement({
       sid: `ManageTagged${capitalize(resources.environment)}ApiExecutionLogs`,
-      actions: ['logs:DeleteLogGroup', 'logs:DeleteRetentionPolicy', 'logs:ListTagsForResource', 'logs:PutRetentionPolicy'],
+      actions: [
+        ...(resources.environment === 'demo' ? ['logs:DeleteLogGroup'] : []),
+        'logs:DeleteRetentionPolicy', 'logs:ListTagsForResource', 'logs:PutRetentionPolicy',
+      ],
       resources: [executionLogGroupArn, `${executionLogGroupArn}:*`],
       conditions: {
         StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:ResourceTag/${key}`, value])),
       },
     }),
+    ...(resources.environment === 'dev' ? [new PolicyStatement({
+      sid: 'DeleteDevApiExecutionLogs',
+      actions: ['logs:DeleteLogGroup'],
+      resources: [executionLogGroupArn, `${executionLogGroupArn}:*`],
+      conditions: {
+        StringEqualsIfExists: {
+          'aws:ResourceTag/Project': 'SOC_BOT',
+          'aws:ResourceTag/Environment': 'dev',
+          'aws:ResourceTag/ManagedBy': 'CDK',
+        },
+      },
+    })] : []),
     new PolicyStatement({
       sid: `Describe${capitalize(resources.environment)}LogGroups`,
       actions: ['logs:DescribeLogGroups'],
