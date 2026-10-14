@@ -5,10 +5,12 @@ import { CicdFoundationStack } from '../lib/stacks/cicd-foundation/cicd-foundati
 import { DataStack } from '../lib/stacks/data/data-stack';
 import { AiStack } from '../lib/stacks/ai/ai-stack';
 import { DEFAULT_QUERY_WINDOW_DAYS, queryWindowDays } from '../lib/stacks/ai/query-contract';
+import { devClientCidr } from '../lib/stacks/ai/chat-api';
 
 const app = new App();
+const devAllowedClientCidr = devClientCidr(app.node.tryGetContext('devAllowedClientCidr')).cidr;
 
-new CicdFoundationStack(app, 'CicdFoundationStack', {
+const foundation = new CicdFoundationStack(app, 'CicdFoundationStack', {
   stackName: 'SOC-BOT-CICD-FOUNDATION',
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
@@ -28,7 +30,7 @@ for (const environment of ['dev', 'demo'] as const) {
     }),
     description: `SOC Bot ${environment} security data, Glue normalization, and Athena workgroup`,
   });
-  new AiStack(app, `${environment}AiStack`, {
+  const aiStack = new AiStack(app, `${environment}AiStack`, {
     deploymentEnvironment: environment,
     stackName: `SOC-BOT-${environment.toUpperCase()}-AI`,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
@@ -39,10 +41,11 @@ for (const environment of ['dev', 'demo'] as const) {
     tables: dataStack.tables,
     workgroup: dataStack.workgroup,
     maxQueryWindowDays: queryWindowDays(Number(app.node.tryGetContext('queryMaxTimeSpanDays') ?? DEFAULT_QUERY_WINDOW_DAYS)),
-    description: environment === 'dev'
-      ? 'SOC Bot dev private investigation query tool and streaming chat orchestrator'
-      : 'SOC Bot demo private read-only investigation query tool',
+    devAllowedClientCidr: environment === 'dev' ? devAllowedClientCidr : undefined,
+    description: `SOC Bot ${environment} read-only investigation tools and streaming chat API`,
   });
+  // The Regional logging account setting is administrator-managed, never recreated by AI.
+  aiStack.addStackDependency(foundation);
 }
 
 Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

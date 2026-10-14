@@ -11,3 +11,8 @@ export function dataBucketName(environment: DeploymentEnvironment): string {
 export function glueFileBucketName(environment: DeploymentEnvironment): string {
   return `soc-bot-${environment}-glue-files-${Aws.ACCOUNT_ID}-${Aws.REGION}`;
 }
+
+/** Names the CDK-managed access log group shared by the API and foundation logging policy. */
+export function chatApiAccessLogGroupName(environment: DeploymentEnvironment): string {
+  return `/aws/apigateway/SOC-BOT-${environment.toUpperCase()}-CHAT-ACCESS`;
+}

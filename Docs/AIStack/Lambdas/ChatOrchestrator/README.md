@@ -4,7 +4,7 @@
 
 The chat orchestrator coordinates a read-only security investigation: it loads conversation history, asks Amazon Bedrock what to investigate, invokes approved query tools, and returns an evidence-backed answer. Application code controls the loop; the model proposes tool calls but does not execute them.
 
-The current implementation is the private, dev-only `SOC-BOT-DEV-CHAT-ORCHESTRATOR` Lambda. It has response-streaming support, but no API Gateway route, public Function URL, browser integration, or active Cognito authentication. It uses the server-configured `DEV_USER_ID`; all private dev invokers share that identity. This is a temporary ownership mechanism, not user authentication. Demo has no orchestrator.
+The current CDK implementation defines `SOC-BOT-<ENV>-CHAT-ORCHESTRATOR` Lambdas behind Regional dual-stack streaming POST `/chat` APIs in dev and demo. Dev alone has a default-block WAF source-IP allowlist. There is no public Function URL, frontend/CORS integration, or active Cognito authentication. CDK supplies `TEMPORARY_OWNER_ID=soc-bot-<environment>-analyst`; callers share environment conversation ownership. This is not authentication. Demo would be internet-reachable without WAF if deployed now: the user approved its definition but defers deployment until Cognito and application security are complete. See [AI infrastructure](../../Infra/README.md) for context, logging prerequisites, and deployment boundaries.
 
 Start with the [Code Guide](Code-Guide.md) for the ten runtime modules and a suggested reading order. The [CDK construct](../../../../infra/lib/stacks/ai/chat-orchestrator.ts) defines the function and execution role separately from the runtime code.
 
@@ -36,7 +36,7 @@ A **turn** is one user message and its associated investigation and answer. A re
 - Investigation tools are read-only. There is no arbitrary SQL, shell execution, unrestricted HTTP, remediation, or hidden evaluation-data access.
 - Log values, tool results, and summaries are untrusted evidence, not instructions that override the system policy.
 - Event and summary writes require the current attempt's lease and version checks. Retries reuse recorded work; ambiguous submissions are not blindly redispatched.
-- Until authentication is integrated, invocation must remain private and IAM-controlled. Internal query cancellation is not a model-selectable tool or an authenticated Stop endpoint.
+- Until authentication is integrated, dev API access is gated by the configured WAF source CIDR; direct IAM invocation remains restricted and demo must remain undeployed. The query Lambda remains private. Internal query cancellation is not a model-selectable tool or an authenticated Stop endpoint.
 
 ## Controls and streamed output
 
@@ -56,6 +56,6 @@ Use these focused guides alongside this overview and the [Code Guide](Code-Guide
 - [Persistence and context](Persistence-and-Context.md): DynamoDB events, leases/retries, history reconstruction, and conditional compaction.
 - [RAG status/design boundary](../RAGTool/README.md): documentation exists, but playbook retrieval itself remains planned and unconnected.
 
-Public API/browser streaming, Cognito-backed ownership, authenticated Stop, conversation listing, and explicit abandonment remain future integration work. Cognito BFF helpers exist as isolated source code but are not connected to this Lambda.
+Frontend integration, Cognito-backed ownership, authenticated Stop, conversation listing, and explicit abandonment remain future work. Live API streaming/WAF behavior remains operator validation. Cognito BFF helpers exist as isolated source code but are not connected to this Lambda.
 
 For the broader architecture and current slice contract, see the [Final Specification](../../../Final_Spec.md) and [AI Stack Working Specification](../../../AIStack_Spec-Temp.md). This overview describes repository behavior, not proof of a live deployment or end-to-end validation.
