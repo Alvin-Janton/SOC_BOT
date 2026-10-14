@@ -289,6 +289,18 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       'aws:ResourceTag/ManagedBy': 'CDK',
     },
   };
+  // WAF receives CloudFormation system tags; other services keep their existing allowlist.
+  const requiredWafRequestTags = {
+    ...requiredRequestTags,
+    'ForAllValues:StringEquals': {
+      'aws:TagKeys': [
+        ...requiredRequestTags['ForAllValues:StringEquals']['aws:TagKeys'],
+        'aws:cloudformation:stack-id',
+        'aws:cloudformation:stack-name',
+        'aws:cloudformation:logical-id',
+      ],
+    },
+  };
   const apiGatewayArn = `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/restapis`;
   const userPoolArn = `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`;
   const distributionArn = `arn:${Aws.PARTITION}:cloudfront::${Aws.ACCOUNT_ID}:distribution/*`;
@@ -324,7 +336,7 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
         sid: 'CreateTaggedDevChatWafResources',
         // WebACL creation also authorizes the IPSet referenced by its single allowlist rule.
         actions: ['wafv2:CreateIPSet', 'wafv2:CreateWebACL'],
-        resources: [devIpSetArn, devWebAclArn], conditions: requiredRequestTags,
+        resources: [devIpSetArn, devWebAclArn], conditions: requiredWafRequestTags,
       }),
       new PolicyStatement({
         sid: 'ManageTaggedDevChatIpSet',
@@ -340,7 +352,7 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       }),
       new PolicyStatement({
         sid: 'TagDevChatWafResources',
-        actions: ['wafv2:TagResource'], resources: [devIpSetArn, devWebAclArn], conditions: requiredRequestTags,
+        actions: ['wafv2:TagResource'], resources: [devIpSetArn, devWebAclArn], conditions: requiredWafRequestTags,
       }),
       new PolicyStatement({
         sid: 'ReadDevChatWafTags',
