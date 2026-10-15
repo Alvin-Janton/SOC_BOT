@@ -4,7 +4,9 @@
 > **Last Reviewed:** 2026-06-18
 > **Status:** `Active`
 > **NIST Framework:** SP 800-61r3 (CSF 2.0 Community Profile)
-> **Related Playbooks:** [IRP-CredCompromise](IRP-CredCompromise.md) | [IRP-S3DataExfiltration](IRP-S3DataExfiltration.md) (Coming Soon) | [IRP-PersonalDataBreach](IRP-PersonalDataBreach.md) | [IRP-InsiderThreat](IRP-InsiderThreat.md)
+> **Related Playbooks:** [IRP-CredCompromise](IRP-CredCompromise.md) | `IRP-S3DataExfiltration` (upstream; not bundled with SOC_BOT; unavailable — Coming Soon) | [IRP-PersonalDataBreach](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-PersonalDataBreach.md) (upstream; not bundled with SOC_BOT) | [IRP-InsiderThreat](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-InsiderThreat.md) (upstream; not bundled with SOC_BOT)
+
+> **SOC_BOT local adaptation — 2026-10-15 (project-authored):** Original source: [aws-samples/aws-incident-response-playbooks — IRP-DataAccess](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-DataAccess.md). SOC_BOT corrected CloudTrail investigation and resource-policy containment guidance and clarified supporting-resource availability. These changes are not AWS-authored or an AWS review; the upstream metadata is preserved, and remaining guidance is not certified by this pass. Unbundled upstream resources are external human references, not SOC_BOT retrieval content. Containment/remediation steps are for authorized human responders only; SOC_BOT remains read-only.
 
 ---
 
@@ -20,10 +22,10 @@ Unauthorized data access occurs when a party — external threat actor or intern
 
 This playbook does **not** cover:
 
-- **Bulk S3 exfiltration with specific presigned URL or VPC endpoint abuse** — For dedicated S3 exfiltration patterns, see [IRP-S3DataExfiltration](IRP-S3DataExfiltration.md). (Coming Soon)
+- **Bulk S3 exfiltration with specific presigned URL or VPC endpoint abuse** — The upstream `IRP-S3DataExfiltration` is not bundled with SOC_BOT and is unavailable (marked Coming Soon).
 - **Credential compromise as the root cause** — If the data access resulted from stolen credentials, start with [IRP-CredCompromise](IRP-CredCompromise.md) for containment, then return here for data impact assessment.
-- **Personal data breach regulatory response** — If personal/regulated data is confirmed accessed, cross-reference [IRP-PersonalDataBreach](IRP-PersonalDataBreach.md) for notification obligations.
-- **Insider threat investigation** — If the accessor is an authorized user acting outside their role, see [IRP-InsiderThreat](IRP-InsiderThreat.md).
+- **Personal data breach regulatory response** — If personal/regulated data is confirmed accessed, cross-reference [IRP-PersonalDataBreach](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-PersonalDataBreach.md) (upstream; not bundled with SOC_BOT) for notification obligations.
+- **Insider threat investigation** — If the accessor is an authorized user acting outside their role, see [IRP-InsiderThreat](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-InsiderThreat.md) (upstream; not bundled with SOC_BOT).
 
 ### Applicable Finding Types
 
@@ -182,22 +184,24 @@ Whether the activity is confirmed malicious or still under investigation, docume
 
 **CloudTrail / Athena investigation queries:**
 
-For detailed Athena queries to investigate data access (bulk read detection, principal analysis, data staging, secrets access, policy changes), see:
+For detailed Athena queries to investigate data access (bulk read detection, principal analysis, data staging, secrets access, policy changes), see this upstream resource (not bundled with SOC_BOT):
 
-📁 [`resources/athena-queries-data-access.sql`](resources/athena-queries-data-access.sql)
+📁 [`resources/athena-queries-data-access.sql`](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/resources/athena-queries-data-access.sql)
 
-**Quick CloudTrail Console approach (no Athena required):**
+These upstream queries are external human references, not executable SOC_BOT tool inputs. Do not assume native CloudTrail query columns match SOC_BOT's normalized table schema.
 
-If Athena is not configured, you can investigate directly in the CloudTrail console:
+**CloudTrail Event history — management-event investigation:**
 
-1. Navigate to **CloudTrail → Event history**
-2. Filter by **Event source** = `s3.amazonaws.com` and **Event name** = `GetObject`
-3. Review source IPs and principals — compare against known legitimate access patterns
-4. Look for volume anomalies — many `GetObject` calls in a short window from one principal
-5. Check for policy modification events (`PutBucketPolicy`, `DeleteBucketPublicAccessBlock`)
-6. Filter by **Event source** = `secretsmanager.amazonaws.com` to check for secrets access
+1. Navigate to **CloudTrail → Event history** and select the relevant Region and time window.
+2. Filter by **Event source** = `s3.amazonaws.com` and review management events such as `PutBucketPolicy` and `DeleteBucketPublicAccessBlock` for access-control changes.
+3. Review source IPs and principals — compare against known legitimate access patterns.
+4. Filter by **Event source** = `secretsmanager.amazonaws.com` for relevant management-event investigation.
 
-> 📌 CloudTrail Event history only shows management events by default. S3 data events (GetObject, PutObject) require a trail configured with data event logging.
+**S3 object-access investigation — recorded data events:**
+
+For object operations such as `GetObject` and `PutObject`, query recorded CloudTrail data events through Athena over the trail's delivered logs, or CloudTrail Lake if those data events were collected there. Review source IPs, principals, and high-volume access within the incident window.
+
+> 📌 [CloudTrail Event history](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events.html) contains management events only; it never displays data events, regardless of trail settings. Data-event logging must already have been enabled for the relevant resources and time window. Enabling logging afterward does not reconstruct unrecorded historical access.
 
 ### 2.3 Severity Determination
 
@@ -277,10 +281,11 @@ Based on the identified access path, take the appropriate containment action:
 
 **Step 3: Block unauthorized access to DynamoDB / other data stores**
 
-For data stores that don't support resource-based policies (DynamoDB, Secrets Manager, SSM Parameter Store), containment must be applied at the IAM level:
+DynamoDB and Secrets Manager support resource-based policies; containment is not limited to identity-based IAM policies. See [DynamoDB resource-based policies](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/access-control-resource-based.html) and [Secrets Manager resource-based policies](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_resource-policies.html). Identify applicable identity-based and resource-based grants for each affected service and resource. For other data stores, including SSM Parameter Store, verify the service-specific access controls rather than assuming one policy model applies to all services.
 
-- Attach an explicit deny inline policy to the unauthorized principal, blocking access to the affected data services (`dynamodb:*`, `s3:*`, `secretsmanager:*`, `ssm:GetParameter*`).
-- If the unauthorized principal is in a different account, modify the trust policy on any roles they were using, or apply an SCP to the affected account.
+- Preserve the current policies and evidence, assess effects on dependent services, and obtain the approvals identified above before an authorized human applies an appropriate service-supported restriction to the affected identity or resource.
+- For cross-account access, review role trust policies and direct resource-based grants as applicable; select an authorized restriction that addresses the actual access path.
+- Removing one allow does not necessarily eliminate every access path. Review remaining grants and verify that unauthorized access has stopped after containment.
 
 **Step 4: Revoke S3 Access Grants (if applicable)**
 
@@ -504,9 +509,9 @@ Use this incident to improve this playbook. Do not wait for the next scheduled r
 
 ## Appendix A — Investigation Resources
 
-For detailed Athena queries, S3 server access log analysis, and CLI commands relevant to data access investigations, see:
+For detailed Athena queries, S3 server access log analysis, and CLI commands relevant to data access investigations, see this upstream resource (not bundled with SOC_BOT):
 
-📁 [`resources/athena-queries-data-access.sql`](resources/athena-queries-data-access.sql)
+📁 [`resources/athena-queries-data-access.sql`](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/resources/athena-queries-data-access.sql)
 
 These queries cover:
 
@@ -557,7 +562,7 @@ aws accessanalyzer list-findings \
 
 > `[Legal / Compliance]` owns this section during an active incident.
 
-See [Regulatory Context](../REGULATORY_CONTEXT.md) for the full notification obligation matrix.
+See the upstream [Regulatory Context](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/REGULATORY_CONTEXT.md) (not bundled with SOC_BOT) for the full notification obligation matrix.
 
 **Quick reference for data access incidents:**
 

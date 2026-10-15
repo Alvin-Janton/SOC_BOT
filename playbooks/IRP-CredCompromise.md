@@ -4,7 +4,9 @@
 > **Last Reviewed:** 2026-06-18
 > **Status:** `Active`
 > **NIST Framework:** SP 800-61r3 (CSF 2.0 Community Profile)
-> **Related Playbooks:** [IRP-STSTokenAbuse](IRP-STSTokenAbuse.md) | [IRP-IdentityCenterCompromise](IRP-IdentityCenterCompromise.md) | [IRP-FederatedAccessAbuse](IRP-FederatedAccessAbuse.md) | [IRP-Ransomware](IRP-Ransomware.md)
+> **Related Playbooks (upstream; not bundled with SOC_BOT):** [IRP-STSTokenAbuse](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-STSTokenAbuse.md) | [IRP-IdentityCenterCompromise](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-IdentityCenterCompromise.md) | [IRP-FederatedAccessAbuse](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-FederatedAccessAbuse.md) | [IRP-Ransomware](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-Ransomware.md)
+
+> **SOC_BOT local adaptation — 2026-10-15 (project-authored):** Original source: [aws-samples/aws-incident-response-playbooks — IRP-CredCompromise](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-CredCompromise.md). SOC_BOT clarified supporting-resource availability; operational guidance is otherwise unchanged. These edits are not AWS-authored or an AWS review; upstream metadata is preserved, and remaining guidance is not certified by this pass. Unbundled upstream resources are external human references, not SOC_BOT retrieval content. Containment/remediation steps are for authorized human responders only; SOC_BOT remains read-only.
 
 ---
 
@@ -20,10 +22,10 @@ IAM credential compromise occurs when an unauthorized party obtains valid AWS cr
 
 This playbook does **not** cover:
 
-- **STS temporary credential abuse via AssumeRole chains** — If the primary vector is cross-account role assumption or session token manipulation without initial long-term credential theft, see [IRP-STSTokenAbuse](IRP-STSTokenAbuse.md).
-- **Identity Center (SSO) compromise** — If the compromise involves AWS Identity Center permission sets or SSO sessions, see [IRP-IdentityCenterCompromise](IRP-IdentityCenterCompromise.md).
-- **Federated identity / IdP compromise** — If the initial compromise is at the identity provider level (Okta, Azure AD, etc.) leading to AWS access, see [IRP-FederatedAccessAbuse](IRP-FederatedAccessAbuse.md).
-- **Ransomware resulting from credential compromise** — Once containment here is complete, pivot to [IRP-Ransomware](IRP-Ransomware.md) if encryption or extortion activity is detected.
+- **STS temporary credential abuse via AssumeRole chains** — If the primary vector is cross-account role assumption or session token manipulation without initial long-term credential theft, see [IRP-STSTokenAbuse](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-STSTokenAbuse.md) (upstream; not bundled with SOC_BOT).
+- **Identity Center (SSO) compromise** — If the compromise involves AWS Identity Center permission sets or SSO sessions, see [IRP-IdentityCenterCompromise](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-IdentityCenterCompromise.md) (upstream; not bundled with SOC_BOT).
+- **Federated identity / IdP compromise** — If the initial compromise is at the identity provider level (Okta, Azure AD, etc.) leading to AWS access, see [IRP-FederatedAccessAbuse](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-FederatedAccessAbuse.md) (upstream; not bundled with SOC_BOT).
+- **Ransomware resulting from credential compromise** — Once containment here is complete, pivot to [IRP-Ransomware](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/IRP-Ransomware.md) (upstream; not bundled with SOC_BOT) if encryption or extortion activity is detected.
 
 ### Applicable Finding Types
 
@@ -179,9 +181,9 @@ Whether the activity is confirmed malicious or still under investigation, docume
 
 **CloudTrail / Athena investigation queries:**
 
-For detailed Athena queries to investigate credential usage (source IP analysis, persistence detection, data access events, cross-account role assumptions), see:
+For detailed Athena queries to investigate credential usage (source IP analysis, persistence detection, data access events, cross-account role assumptions), see this upstream resource (not bundled with SOC_BOT):
 
-📁 [`resources/athena-queries-credential-compromise.sql`](resources/athena-queries-credential-compromise.sql)
+📁 [`resources/athena-queries-credential-compromise.sql`](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/resources/athena-queries-credential-compromise.sql)
 
 **Quick CloudTrail Console approach (no Athena required):**
 
@@ -338,7 +340,7 @@ Use the evidence documented in Part 2 to determine:
 
 > `[IR Lead]` coordinates. `[Account Owner]` approves changes to production resources.
 
-When a credential is compromised, threat actors commonly create additional credentials or access paths that survive deactivation of the original credential. This section focuses on identifying and removing credential-based persistence. If the threat actor also created other resources (EC2 instances, Lambda functions, modified resource policies, etc.), refer to the eradication section of the relevant playbook for that resource type — for example, [IRP-EC2Compromise](IRP-EC2Compromise.md) (Coming Soon) for unauthorized compute resources.
+When a credential is compromised, threat actors commonly create additional credentials or access paths that survive deactivation of the original credential. This section focuses on identifying and removing credential-based persistence. If the threat actor also created other resources (EC2 instances, Lambda functions, modified resource policies, etc.), refer to the eradication section of the relevant playbook for that resource type — for example, the upstream `IRP-EC2Compromise` for unauthorized compute resources is not bundled with SOC_BOT and is unavailable (marked Coming Soon).
 
 **Identify and remove unauthorized credentials:**
 
@@ -500,9 +502,9 @@ Use this incident to improve this playbook. Do not wait for the next scheduled r
 
 ## Appendix A — Investigation Resources
 
-For detailed Athena queries, GuardDuty CLI commands, and IAM Access Analyzer investigation commands relevant to credential compromise investigations, see:
+For detailed Athena queries, GuardDuty CLI commands, and IAM Access Analyzer investigation commands relevant to credential compromise investigations, see this upstream resource (not bundled with SOC_BOT):
 
-📁 [`resources/athena-queries-credential-compromise.sql`](resources/athena-queries-credential-compromise.sql)
+📁 [`resources/athena-queries-credential-compromise.sql`](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/playbooks/resources/athena-queries-credential-compromise.sql)
 
 These queries cover:
 
@@ -519,7 +521,7 @@ These queries cover:
 
 > `[Legal / Compliance]` owns this section during an active incident.
 
-See [Regulatory Context](../REGULATORY_CONTEXT.md) for the full notification obligation matrix.
+See the upstream [Regulatory Context](https://github.com/aws-samples/aws-incident-response-playbooks/blob/master/REGULATORY_CONTEXT.md) (not bundled with SOC_BOT) for the full notification obligation matrix.
 
 **Quick reference for credential compromise:**
 
