@@ -6,6 +6,7 @@ function text(maximum: number) {
 }
 
 const slug = text(64).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, 'Expected a lowercase hyphen-separated slug.');
+export { slug as playbookIdSchema };
 const category = text(64).regex(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/, 'Expected a lowercase underscore-separated tag.');
 const categories = z.array(category).min(1).refine(values => new Set(values).size === values.length, 'Duplicate tags.');
 const keywords = z.array(text(80)).min(1).refine(values => new Set(values).size === values.length, 'Duplicate keywords.');

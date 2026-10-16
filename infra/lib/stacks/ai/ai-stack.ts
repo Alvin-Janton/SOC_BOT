@@ -10,6 +10,7 @@ import { ChatHistory } from './chat-history';
 import { ChatOrchestrator } from './chat-orchestrator';
 import { ChatApi } from './chat-api';
 import { LakeFormationGrants } from './lake-formation-grants';
+import { RagTool } from './rag-tool';
 
 export interface AiStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
@@ -24,6 +25,7 @@ export interface AiStackProps extends StackProps {
 /** Owns private investigation tools, conversation storage, and environment-specific streaming chat. */
 export class AiStack extends Stack {
   public readonly queryTool: AthenaQueryTool;
+  public readonly ragTool: RagTool;
   public readonly chatHistoryTable: Table;
   public readonly chatOrchestrator: ChatOrchestrator;
   public readonly chatApi: ChatApi;
@@ -34,6 +36,10 @@ export class AiStack extends Stack {
       deploymentEnvironment: props.deploymentEnvironment,
     }).table;
     this.queryTool = new AthenaQueryTool(this, 'AthenaQueryTool', props);
+    this.ragTool = new RagTool(this, 'RagTool', {
+      deploymentEnvironment: props.deploymentEnvironment,
+      dataBucket: props.dataBucket,
+    });
     new LakeFormationGrants(this, 'LakeFormationGrants', {
       database: props.database,
       tables: props.tables,
