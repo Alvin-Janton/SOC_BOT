@@ -29,7 +29,7 @@ export const playbookDocumentSchema = z.strictObject({
     'Expected a relative playbooks/ Markdown key with safe path segments.',
   ),
   source: z.strictObject({
-    type: z.enum(['project-authored', 'upstream']),
+    type: z.enum(['project-authored', 'upstream', 'upstream-adapted']),
     author: text(128),
     reviewed_on: z.iso.date(),
     references: z.array(z.url({ protocol: /^https$/ })).min(1)

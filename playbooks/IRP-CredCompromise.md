@@ -393,7 +393,7 @@ Before moving to recovery, confirm that the threat actor's access has been fully
 
 2. **Remove containment controls** once you have confirmed eradication is complete:
    - Remove the deny-all inline or managed policy that was applied during containment
-   - Remove the session revocation policy (if applied)
+   - Remove the session-revocation policy only after confirming that all affected sessions have expired and the attacker can no longer obtain new sessions. If expiration cannot be established, retain the policy pending authorized review. Newly issued legitimate sessions after the policy's cutoff can operate without removing it.
    - Restore security group configurations (if network isolation was applied to associated resources)
 
 3. **Verify applications and services** that depended on the original credential are functioning with the new credential. Update any automation, CI/CD pipelines, or application configurations that referenced the old credential.
