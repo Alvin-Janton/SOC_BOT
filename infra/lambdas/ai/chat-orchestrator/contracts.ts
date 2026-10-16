@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Tool } from '@aws-sdk/client-bedrock-runtime';
 import { compileQuery, ContractError, QueryToolRequest } from '../../../lib/stacks/ai/query-contract';
 import { TABLE_COLUMNS } from '../../../lib/shared/catalog-schema';
+import { RagError, RagOperation, RagRequest, parseRequest as parseRagRequest, requestSchema as ragRequestSchema } from '../rag-tool/contracts';
 import { ChatError, Configuration } from './config';
 import { JsonObject } from './store';
 
@@ -26,6 +27,12 @@ const queryFields = {
   filters: z.array(filter).max(8).optional(), limit: z.number().int().min(1).max(100).optional(),
 };
 
+const ragToolSchemas = {
+  describe_documents: ragRequestSchema.options[0].omit({ operation: true }),
+  describe_document: ragRequestSchema.options[1].omit({ operation: true }),
+  retrieve_sections: ragRequestSchema.options[2].omit({ operation: true }),
+};
+
 export const toolSchemas = {
   describe_table: z.strictObject({ table }),
   query_events: z.strictObject({ ...queryFields, fields: z.array(field).min(1).max(20).optional(),
@@ -33,10 +40,27 @@ export const toolSchemas = {
   aggregate_events: z.strictObject({ ...queryFields, group_by: z.array(field).max(3).optional(),
     metrics: z.array(z.union([z.strictObject({ function: z.literal('count') }),
       z.strictObject({ function: z.enum(['sum', 'avg', 'min', 'max']), field })])).min(1).max(5).optional() }),
+  ...ragToolSchemas,
 };
 
 export type ToolName = keyof typeof toolSchemas;
 export type LogicalQuery = Exclude<QueryToolRequest, { operation: 'query_status' | 'cancel_query' }>;
+export type ToolRequest = LogicalQuery | RagRequest;
+
+/** Recognizes only the three declared document tools, including when inspecting durable call names. */
+export function isRagToolName(name: string): name is RagOperation { return Object.hasOwn(ragToolSchemas, name); }
+
+/** Keeps document requests out of SQL compilation and Athena checkpoint/cancellation paths. */
+export function isRagRequest(request: ToolRequest): request is RagRequest { return isRagToolName(request.operation); }
+
+const toolDescriptions: Record<ToolName, string> = {
+  describe_table: 'Describe the approved table columns without scanning events.',
+  query_events: 'Return bounded event evidence from one approved table within a UTC time range.',
+  aggregate_events: 'Aggregate approved numeric fields and groups within a bounded UTC time range.',
+  describe_documents: 'Discover all indexed playbooks and their context/section counts; no time range or search input.',
+  describe_document: 'Inspect one indexed playbook and its section IDs, summaries, source and version before retrieval.',
+  retrieve_sections: 'Retrieve one to three distinct indexed sections from one playbook, preserving full guidance, context and source metadata.',
+};
 
 /**
  * Parses only an API proxy body; identity, history, and undeclared fields are rejected.
@@ -68,13 +92,14 @@ export function parseRequest(event: unknown): ChatRequest {
  *   { toolSpec: { name: 'describe_table', inputSchema: { json: { type: 'object', required: ['table'] } } } },
  *   { toolSpec: { name: 'query_events', inputSchema: { json: { type: 'object', required: ['table', 'start_time', 'end_time'] } } } },
  *   { toolSpec: { name: 'aggregate_events', inputSchema: { json: { type: 'object', required: ['table', 'start_time', 'end_time'] } } } },
+ *   { toolSpec: { name: 'describe_documents', inputSchema: { json: { type: 'object', additionalProperties: false } } } },
+ *   { toolSpec: { name: 'describe_document', inputSchema: { json: { type: 'object', required: ['document_id'] } } } },
+ *   { toolSpec: { name: 'retrieve_sections', inputSchema: { json: { type: 'object', required: ['document_id', 'section_ids'] } } } },
  * ]
  */
 export function bedrockTools(): Tool[] {
   return (Object.keys(toolSchemas) as ToolName[]).map(name => ({ toolSpec: {
-    name, description: name === 'describe_table' ? 'Describe the approved table columns without scanning events.'
-      : name === 'query_events' ? 'Return bounded event evidence from one approved table within a UTC time range.'
-        : 'Aggregate approved numeric fields and groups within a bounded UTC time range.',
+    name, description: toolDescriptions[name],
     inputSchema: { json: JSON.parse(JSON.stringify(z.toJSONSchema(toolSchemas[name], { target: 'draft-7' }))) as JsonObject },
   } }));
 }
@@ -94,16 +119,18 @@ export function bedrockTools(): Tool[] {
  * }
  * The output is an approved request, not executed SQL or query results.
  */
-export function validateTool(name: string, input: unknown, config: Configuration): LogicalQuery {
+export function validateTool(name: string, input: unknown, config: Configuration): ToolRequest {
   if (!Object.hasOwn(toolSchemas, name)) throw new ChatError('INVALID_TOOL', 'Unsupported investigation operation.', 400, false);
   try {
     const parsed = toolSchemas[name as ToolName].parse(input);
+    if (isRagToolName(name)) return parseRagRequest({ operation: name, ...parsed });
     const request = { operation: name, ...parsed } as LogicalQuery;
     if (request.operation !== 'describe_table') compileQuery(request, config.database, config.maxQueryDays);
     return request;
   } catch (error) {
-    if (error instanceof ContractError || error instanceof z.ZodError) {
-      throw new ChatError('INVALID_TOOL_INPUT', 'Tool input does not match the approved query contract.', 400, false);
+    if (error instanceof ContractError || error instanceof z.ZodError || error instanceof RagError) {
+      throw new ChatError('INVALID_TOOL_INPUT', isRagToolName(name)
+        ? 'Tool input does not match the approved playbook contract.' : 'Tool input does not match the approved query contract.', 400, false);
     }
     throw error;
   }

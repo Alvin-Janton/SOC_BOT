@@ -1,9 +1,11 @@
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_RESPONSE_BYTES, QUERY_DEADLINE_SECONDS } from '../../../lib/stacks/ai/query-contract';
-import { ChatError, Configuration, TurnBudget } from './config';
+import { RagRequest, RagResponse } from '../rag-tool/contracts';
+import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { isTerminalToolResult, selectToolResult } from './context';
-import { LogicalQuery, validateTool } from './contracts';
+import { LogicalQuery, ToolRequest, isRagRequest, isRagToolName, validateTool } from './contracts';
+import { invokeRag } from './rag-tools';
 import { ChatEvent, ConversationStore, JsonObject, Lease } from './store';
 import { StreamEvent } from './stream';
 
@@ -70,7 +72,7 @@ function completedInTime(output: JsonObject, submittedAt: number): boolean {
     && completedAt >= submittedAt && completedAt <= submittedAt + QUERY_DEADLINE_SECONDS * 1_000;
 }
 
-/** Coordinates private query operations and durably checkpoints submission before polling. */
+/** Routes private tools, persists their results, and checkpoints only Athena submission/polling. */
 export class ToolExecutor {
   private readonly client = new LambdaClient({ maxAttempts: 1 });
 
@@ -241,9 +243,10 @@ export class ToolExecutor {
    * Persists the returned submission ID/original request before polling, then saves a terminal result.
    * Unlike the query Lambda's start operation, execute() does not return its SUBMITTED checkpoint as final evidence.
    */
-  public async execute(call: ToolCall, request: LogicalQuery): Promise<JsonObject> {
+  public async execute(call: ToolCall, request: ToolRequest): Promise<JsonObject> {
     this.budget.check();
     if (this.active) throw new ChatError('QUERY_TIMED_OUT', 'A previous query has not reached a confirmed terminal state.');
+    if (isRagRequest(request)) return this.executeRag(call, request);
     await this.emit({ type: 'activity', stage: 'query_started', operation: request.operation, table: request.table });
     const submittedAt = Date.now();
     let output: JsonObject;
@@ -267,6 +270,40 @@ export class ToolExecutor {
       tool_name: call.tool_name, status: 'success', output: { state: 'SUBMITTED', query_execution_id: id,
         query: request as unknown as JsonObject, submitted_at_ms: submittedAt } });
     return this.poll(call, request, id, submittedAt);
+  }
+
+  /** Saves a complete validated RAG result before model reuse; only bounded identifiers/counts become activity or logs.
+   * Input: an original TOOL_CALL and { operation: 'describe_document', document_id: 'credential-compromise' }.
+   * Output: its full persisted RAG envelope; ordinary RAG errors remain correctable error-status results.
+   */
+  private async executeRag(call: ToolCall, request: RagRequest): Promise<JsonObject> {
+    const started = Date.now();
+    const activity = { operation: request.operation,
+      ...('document_id' in request ? { documentId: request.document_id } : {}) };
+    await this.emit({ type: 'activity', stage: 'rag_started', ...activity,
+      requestedSections: request.operation === 'retrieve_sections' ? request.section_ids.length : 0 });
+    let response: RagResponse | undefined;
+    let persisted = false;
+    try {
+      response = await invokeRag(request, this.config, this.budget);
+      this.budget.check();
+      const output = response as unknown as JsonObject;
+      await this.terminal(call, output, response.ok ? 'success' : 'error');
+      persisted = true;
+      this.budget.check();
+      await this.emit({ type: 'activity', stage: response.ok ? 'rag_completed' : 'rag_failed', ...activity,
+        documentsReturned: response.ok ? (response.operation === 'describe_documents' ? response.documents.length : 1) : 0,
+        sectionsReturned: response.ok && 'sections' in response ? response.sections.length : 0,
+        ...(!response.ok ? { errorCode: response.error.code } : {}) });
+      return output;
+    } finally {
+      console.info(JSON.stringify({ event: 'rag_tool', turnId: this.lease.turnId, attemptId: this.lease.attemptId,
+        toolUseId: call.tool_use_id, ...activity, durationMs: Date.now() - started, resultPersisted: persisted,
+        outcome: persisted ? (response?.ok ? 'SUCCESS' : 'ERROR') : 'UNCONFIRMED',
+        correlationId: response?.correlation_id, errorCode: response && !response.ok ? response.error.code : undefined,
+        responseBytes: response ? Buffer.byteLength(JSON.stringify(response), 'utf8') : 0,
+        sectionsReturned: response?.ok && 'sections' in response ? response.sections.length : 0 }));
+    }
   }
 
   /**
@@ -363,7 +400,8 @@ export class ToolExecutor {
     }
     const original = responseObject(output.query);
     const request = validateTool(String(call.tool_name), call.arguments, this.config);
-    if (request.operation === 'describe_table' || canonicalJson(request as unknown as JsonObject) !== canonicalJson(original)) {
+    if (isRagRequest(request) || request.operation === 'describe_table'
+      || canonicalJson(request as unknown as JsonObject) !== canonicalJson(original)) {
       throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
     }
     return { id, request, submittedAt, call };
@@ -387,7 +425,7 @@ export class ToolExecutor {
       .sort((left, right) => left.event_sequence - right.event_sequence);
     const haltedGroups = new Map<string, ToolCall>();
     let finalizationOnly = false;
-    for (const call of calls) {
+    for (const [callIndex, call] of calls.entries()) {
       const latest = selectToolResult(events, call);
       const halt = haltedGroups.get(call.assistant_message_id);
       const queuedAfterHalt = halt && call.attempt_id === halt.attempt_id && call.event_sequence > halt.event_sequence
@@ -402,12 +440,32 @@ export class ToolExecutor {
         // Even a hidden pending checkpoint contradicts nonexecution; retain its ID for fatal-path cleanup.
         const pending = [...results].sort((left, right) => right.event_sequence - left.event_sequence)
           .find((result): boolean => !isTerminalToolResult(result));
-        if (pending) this.active = this.checkpoint(call, pending.output);
+        if (pending && !isRagToolName(call.tool_name)) this.active = this.checkpoint(call, pending.output);
         throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A halted tool group contains inconsistent dispatch evidence.', 409, false);
       }
       if (!latest && queuedAfterHalt) {
         await this.terminal(call, { ok: false, error: { code: 'NOT_EXECUTED',
           message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+        continue;
+      }
+      if (isRagToolName(call.tool_name)) {
+        if (latest) {
+          if (!isTerminalToolResult(latest) || latest.output.query_execution_id !== undefined) {
+            throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous playbook result is invalid.', 409, false);
+          }
+          // Completed durable reads (including bounded errors/rejections) are reused verbatim, never refreshed.
+          continue;
+        }
+        if (finalizationOnly) throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'Later tool work cannot continue after a confirmed query failure.', 409, false);
+        if (callIndex >= MAX_TOOL_CALLS) {
+          await this.terminal(call, { ok: false, error: { code: 'TOOL_LIMIT_REACHED',
+            message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+          continue;
+        }
+        const request = validateTool(call.tool_name, call.arguments, this.config);
+        if (!isRagRequest(request)) throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous playbook request is invalid.', 409, false);
+        // Only this read-only family may be reissued with no result; keep the original logical use ID/count.
+        await this.execute(call, request);
         continue;
       }
       if (!latest?.output || typeof latest.output !== 'object' || Array.isArray(latest.output)) {

@@ -2,14 +2,14 @@ import { Message } from '@aws-sdk/client-bedrock-runtime';
 import { randomUUID } from 'node:crypto';
 import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { buildContext, planCompaction } from './context';
-import { LogicalQuery, validateTool } from './contracts';
+import { ToolRequest, isRagRequest, validateTool } from './contracts';
 import { ModelResponse, ModelRunner } from './model';
 import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError } from './store';
 import { StreamEvent } from './stream';
 import { isConfirmedQueryFailure, ToolExecutor } from './tools';
 
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
-interface PreparedCall { call: ToolCall; request?: LogicalQuery; rejection?: string }
+interface PreparedCall { call: ToolCall; request?: ToolRequest; rejection?: string }
 
 /** Implements the bounded model loop without giving the model an AWS identity or direct query access. */
 export class Orchestrator {
@@ -82,7 +82,7 @@ export class Orchestrator {
             await this.rejected(item.call, 'FINALIZATION_REQUIRED');
           } else {
             const output = await this.tools.execute(item.call, item.request!);
-            confirmedFailure = isConfirmedQueryFailure(output);
+            confirmedFailure = !isRagRequest(item.request!) && isConfirmedQueryFailure(output);
           }
         } catch (error) {
           // These remaining calls are known not to have been dispatched. Keep their original grouping.
@@ -116,7 +116,7 @@ export class Orchestrator {
     const prepared: PreparedCall[] = [];
     for (const tool of response.toolUses) {
       this.toolCalls++;
-      let request: LogicalQuery | undefined;
+      let request: ToolRequest | undefined;
       let rejection: string | undefined;
       if (this.toolCalls > MAX_TOOL_CALLS) rejection = 'TOOL_LIMIT_REACHED';
       else if (!this.budget.canDispatch(200_000)) rejection = 'FINALIZATION_REQUIRED';

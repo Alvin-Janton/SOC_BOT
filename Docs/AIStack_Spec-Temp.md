@@ -1,6 +1,6 @@
 # AI Stack Working Specification
 
-**Status:** The Athena query tool and Lake Formation integration are deployed in dev, and query behavior has been operator-verified. The conversation table/schema are established. CDK now defines environment-specific streaming orchestrators and Regional dual-stack POST `/chat` APIs; only dev has the temporary WAF source-IP allowlist. API deployment/transport verification remains operator work. Cognito BFF source is isolated and inactive; frontend, authenticated ownership/Stop, Cognito integration, and playbook retrieval remain planned. The user approved the temporary demo API definition exception but will not deploy demo until the application and its authentication/security are complete.
+**Status:** The Athena query tool and Lake Formation integration are deployed in dev, and query behavior has been operator-verified. The conversation table/schema are established. CDK defines environment-specific streaming orchestrators, private RAG tools, and Regional dual-stack POST `/chat` APIs; only dev has the temporary WAF source-IP allowlist. RAG is integrated in source/CDK; corpus publication, deployment and live integration verification remain operator work. Cognito BFF source is isolated and inactive; frontend, authenticated ownership/Stop, and Cognito integration remain planned. The user approved the temporary demo API definition exception but will not deploy demo until the application and its authentication/security are complete.
 
 This document records the AI-stack decisions discussed so far. `Docs/Final_Spec.md` remains the broader project specification. Where this temporary document introduces a more specific choice or a different contract, reconcile the two documents before implementation.
 
@@ -17,7 +17,7 @@ The system is an investigation copilot. It may query and explain evidence, but m
 - The model has no AWS credentials or direct access to Athena, security data, or S3. Application code validates each requested tool and its typed inputs, then invokes an approved tool.
 - Define tool input contracts with TypeScript Zod schemas, derive the JSON Schema sent to Bedrock, and validate every model-proposed tool input again in the Lambda. Keep Bedrock-facing schemas to JSON-representable constraints; enforce authorization and other business rules separately in application code.
 - Use a versioned base system prompt describing the assistant's read-only SOC investigation role, evidence-grounded responses, tool-use boundaries, and treatment of log contents as untrusted data. Keep changing dataset/table metadata separate from the stable prompt. Never expose private model reasoning.
-- Limit each logical user turn to at most four model-requested tool calls total. Count every individual tool-use block, including repeated calls to the same tool and calls returned together in one Bedrock response; execute calls sequentially. Do not dispatch calls beyond the cap; return bounded tool errors for rejected requests and proceed to finalization.
+- Limit each logical user turn to an eight-call dispatch ceiling shared by all six Athena/RAG model tools across attempts. Count every individual block, including discovery, invalid/excess blocks, repeated calls, and calls returned together; execute sequentially. Recovery does not reset the count or create another logical call. Eight is a ceiling, not a target; unchanged time/context limits may end tool use sooner.
 - After a confirmed terminal Athena `FAILED` or `CANCELLED` result is durably persisted as a bounded `TOOL_RESULT`, persist `NOT_EXECUTED` results for every later queued call and disable tools for the rest of the turn. Generate a final explanation using available evidence and the query limitation; the turn completes only if final synthesis and assistant-response persistence succeed. Reusing this saved failure on retry also requires tools-disabled finalization.
 - Enforce a 10-minute end-to-end application deadline for each logical user turn, from request acceptance through final persistence or terminal outcome. Configure the chat Lambda with a 15-minute timeout as an outer cleanup limit. Before dispatching a tool, ensure its allowed execution time plus the reserved finalization budget fits before the 10-minute deadline.
 - When there is insufficient time for another tool and final synthesis, stop offering tools and make a final Bedrock request with tool use disabled, using the completed evidence already gathered. If finalization cannot complete by the hard deadline, cancel any active Athena query and record a timed-out outcome; do not claim the turn completed.
@@ -38,6 +38,14 @@ The three functions below are the chat/tool runtime. Cognito BFF handlers and se
 
 The Athena function can contain separate modules for CloudTrail, application/WAF, and VPC queries; do not create one Lambda per table or query by default. Do not create a separate DynamoDB Lambda for the initial implementation. Additional incident or conversation management functions can be added if the frontend workflows require them.
 
+### 3.1 Implemented RAG integration (October 16 contract)
+
+The approved direct-selection contract supersedes the older category/keyword-search proposal in Final_Spec section 12. Model tools are `describe_documents` (`{}`), `describe_document` (`{document_id}`), and `retrieve_sections` (`{document_id, section_ids}` with one to three distinct indexed IDs). The orchestrator supplies the operation and invokes only its exact environment RAG function ARN. It gets no S3/Athena/Glue/Lake Formation grants. Runtime boundaries, Lambda settings, APIs/auth/WAF, corpus and extractor remain unchanged.
+
+Strict pure schemas validate complete operation-specific results and identity/order. Preserve context, version, source/license and full Markdown; 4-KiB requests and 32-KiB responses fail rather than truncate. The invocation wait is bounded by 180 seconds, the remaining turn budget and existing finalization/persistence reserves, with no hidden invocation retry or remote-cancellation claim. Known RAG application/recognized availability errors are persisted error-status tool results, allowing correction or continued investigation; malformed protocols, turn termination and persistence failures remain fatal. Athena's confirmed-failure finalization rule still stops queued RAG work.
+
+Completed durable reads replay verbatim; only a RAG call missing its result may be reread under the original identity/count after revalidation, saving its actual new version/content. Unknown Athena submissions cannot be reread. The versioned prompt/summary instructions distinguish procedural guidance from observed facts, cite document/version/section separately from event provenance, and treat Markdown/metadata/URLs/commands as untrusted human-controlled guidance. No context/storage bound increased; eight maximum-sized results may not fit. Activity/logs contain only safe IDs/counts/outcomes, never full guidance or SDK diagnostics. See [RAG integration and operator checks](AIStack/Lambdas/ChatOrchestrator/RAG-Tools.md); live discovery/retrieval/correction/mixed-use/replay verification remains pending.
+
 ## 4. Query Tool Safety
 
 - The model selects from named, predefined query operations and supplies typed filter values. The query Lambda validates those values and renders type-checked, escaped literals into server-controlled SQL templates; callers never supply SQL or expressions.
@@ -50,7 +58,7 @@ The Athena function can contain separate modules for CloudTrail, application/WAF
 
 `AthenaQueryTool` creates one private function in each `SOC-BOT-<ENV>-AI` stack. Function names are `SOC-BOT-<ENV>-QUERY-TOOL`; execution roles are `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL`, matching the existing QUERY namespace. Each function uses Node.js 22, 512 MB, a 240-second invocation timeout and a named one-week log group (dev deletes, demo retains). Pinned Athena/Glue SDK clients are bundled locally. A function-specific cdk-nag acknowledgment preserves the approved Node.js 22 runtime rather than migrating to the latest major version.
 
-Logical investigation operations are `describe_table`, `query_events`, and `aggregate_events`. Only `application_events`, `waf_events`, `vpc_flow_events`, and `cloudtrail_events` are accepted. Catalog and compiler share committed column-name/type definitions; existing ETL schemas and catalog semantics are unchanged. `describe_table` returns table/column descriptions and types, including partitions, without scanning event data; schema drift fails closed. There is no API, function URL, public invocation grant or Bedrock registration yet.
+Logical Athena operations are `describe_table`, `query_events`, and `aggregate_events`. Only `application_events`, `waf_events`, `vpc_flow_events`, and `cloudtrail_events` are accepted. Catalog and compiler share committed column-name/type definitions; existing ETL schemas and catalog semantics are unchanged. `describe_table` returns table/column descriptions and types, including partitions, without scanning event data; schema drift fails closed. The query function remains private and is invoked through the orchestrator, with no direct API, Function URL, or public invocation grant.
 
 Example event request:
 
@@ -133,7 +141,7 @@ The stream exposes user-visible activity and answer content only. It must never 
 
 Implemented Lambda/API NDJSON event shapes (live API delivery remains operator validation):
 
-```json
+```jsonl
 {"type":"conversation","conversationId":"conv_...","turnId":"turn_..."}
 {"type":"activity","stage":"query_started","operation":"query_events","table":"vpc_flow_events"}
 {"type":"activity","stage":"query_completed","operation":"query_events","table":"vpc_flow_events","rowsReturned":12}
@@ -168,11 +176,11 @@ The agreed implementation sequence, reflecting completed infrastructure, is:
 
 1. Finalize remaining request, stream, tool input/result, error, and cancellation details. The Athena query tool, Lake Formation integration, DynamoDB table, and conversation data contract are already established.
 2. Implement the orchestrator and minimal streamed API route using Bedrock tool use, the existing Athena query tool, and DynamoDB persistence. For dev testing, use the WAF IP allowlist and server-configured dev identity; do not accept a client-supplied user ID.
-3. Implement and integrate the playbook retrieval function through the approved tool boundary.
+3. Playbook retrieval source/CDK integration is implemented through the approved tool boundary; coordinated corpus publication and live validation remain operator work.
 4. Develop the Cognito BFF/session module alongside the orchestrator in an isolated module. Wire it into the API and replace the temporary dev identity/WAF gate only when the authentication integration is ready.
 5. Perform an end-to-end check through the restricted dev API, Bedrock, the query and retrieval tools, Athena, DynamoDB, and the streamed response. Repeat with Cognito authentication after it is wired.
 
-Playbook retrieval is part of the MVP and must be integrated through the approved tool boundary. It can be implemented as a separate vertical slice alongside the query tool; it does not grant the orchestrator direct S3 access.
+Playbook retrieval is part of the MVP and is integrated through the approved tool boundary without orchestrator S3 access; implementation does not establish successful live deployment or verification.
 
 ## 9. Deferred Decisions
 

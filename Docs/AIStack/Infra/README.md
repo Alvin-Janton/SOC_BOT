@@ -2,7 +2,7 @@
 
 ## Implemented scope
 
-The AI stack owns conversation storage, the private Athena query Lambda and its Lake Formation grants, and an environment-specific streaming chat Lambda/API. Dev alone has a source-IP WAF gate. Demo is defined under an explicit temporary authorization exception but must not be deployed until Cognito and application security are complete. This guide describes CDK definitions, not verification of deployed endpoints.
+The AI stack owns conversation storage, private Athena/RAG tools, the query role's Lake Formation grants, and an environment-specific streaming chat Lambda/API. RAG source/CDK integration is implemented, not live-verified. Dev alone has a source-IP WAF gate. Demo is defined under an explicit temporary authorization exception but must not be deployed until Cognito and application security are complete. This guide describes CDK definitions, not verification of deployed endpoints.
 
 The [CDK entry point](../../../infra/bin/soc-bot.ts) creates `devAiStack` (`SOC-BOT-DEV-AI`) and `demoAiStack` (`SOC-BOT-DEMO-AI`) in `us-east-1`. Account values come from CDK configuration, not committed account IDs. [AiStack](../../../infra/lib/stacks/ai/ai-stack.ts) passes its environment to the constructs and applies `Project=SOC_BOT`, `Environment=dev|demo`, and `ManagedBy=CDK` tags to taggable resources.
 
@@ -12,13 +12,14 @@ The [CDK entry point](../../../infra/bin/soc-bot.ts) creates `devAiStack` (`SOC-
 | --- | --- | --- |
 | [ChatHistory](../../../infra/lib/stacks/ai/chat-history.ts) | One DynamoDB table and sparse user-listing index. | Exposed as `AiStack.chatHistoryTable`. |
 | [AthenaQueryTool](../../../infra/lib/stacks/ai/athena-query-tool.ts) | Query Lambda, QUERY-boundary execution role, inline policy, and named log group. | Exposed as `AiStack.queryTool`, with `function` and `role` properties; consumes Data resources. |
+| [RagTool](../../../infra/lib/stacks/ai/rag-tool.ts) | Private RAG Lambda, APPLICATION-boundary role, inline read/log policy, and named log group. | Exposed as `AiStack.ragTool`; consumes only the Data bucket reference and supplies its function to the orchestrator. |
 | [LakeFormationGrants](../../../infra/lib/stacks/ai/lake-formation-grants.ts) | Five principal/resource grants for the query role. | Consumes the Data database/four tables and the query-role ARN. |
-| [ChatOrchestrator](../../../infra/lib/stacks/ai/chat-orchestrator.ts) | Environment-specific chat Lambda, APPLICATION-boundary role, inline policy, and named log group. | Exposed as `AiStack.chatOrchestrator`; consumes the same-stack chat table/query Lambda and Data database name. |
+| [ChatOrchestrator](../../../infra/lib/stacks/ai/chat-orchestrator.ts) | Environment-specific chat Lambda, APPLICATION-boundary role, inline policy, and named log group. | Exposed as `AiStack.chatOrchestrator`; consumes the same-stack chat table, query/RAG functions, and Data database name. |
 | [ChatApi](../../../infra/lib/stacks/ai/chat-api.ts) | Regional dual-stack REST API, streaming POST `/chat`, validation, stage logging/throttling, and dev-only WAF IPSet/WebACL/association. | Exposed as `AiStack.chatApi`; consumes the chat Lambda and required dev CIDR context. Outputs the chat URL. |
 
 `ChatHistory` creates `SOC-BOT-<ENV>-CHAT-HISTORY` with string `PK`/`SK` keys, on-demand billing, and default DynamoDB-owned encryption. `GSI1` has string `GSI1PK`/`GSI1SK` keys and includes only `conversation_id`, `title`, `created_at`, and `updated_at` beyond automatically projected keys. Metadata items carry the index keys; events and summaries do not. No stream, TTL, or point-in-time recovery is configured. The table-specific cdk-nag PITR acknowledgment records that choice; demo retention is not a backup mechanism. The [persistence guide](../Lambdas/ChatOrchestrator/Persistence-and-Context.md) explains the application-enforced item contract.
 
-Both Lambdas use bundled TypeScript on Node.js 22 and 512 MB memory. The query function has a 240-second timeout; chat has a 15-minute Lambda timeout with a shorter application budget. Their constructs expose function/role ARN outputs and make each function depend on its inline policy and managed log group.
+All three Lambdas use bundled TypeScript on Node.js 22 and 512 MB memory. Query has a 240-second timeout, RAG 180 seconds, and chat 15 minutes with a shorter application budget. Their constructs expose function/role ARN outputs and make each function depend on its inline policy and managed log group. Integration adds only the trusted `RAG_TOOL_FUNCTION_NAME` reference and exact invocation grant to the orchestrator; existing settings/boundaries are unchanged.
 
 ## Data-to-AI wiring
 
@@ -39,17 +40,19 @@ Permission boundaries are imported by deterministic ARN from the administrator-m
 | Identity | Actual inline permissions | Deliberately absent |
 | --- | --- | --- |
 | `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL`, QUERY boundary | Log-stream/event writes to its log group; Athena start/status/results/stop on the exact workgroup; read-only catalog/database/four-table metadata; `lakeformation:GetDataAccess`; bucket location and results-prefix listing; GetObject/PutObject/AbortMultipartUpload only under `athena-results/`. | Direct raw/normalized/quarantine/evaluation reads, Bedrock invocation, conversation-table access, remediation. |
-| `SOC_BOT_<ENV>_RUNTIME_APPLICATION_CHAT_ORCHESTRATOR`, APPLICATION boundary | Exact-table GetItem/PutItem/Query/UpdateItem; invocation of only its environment's query Lambda; approved Bedrock streaming invocation and exact-profile GetInferenceProfile; log-stream/event writes to its log group. | Direct Athena/Glue/Lake Formation/security-data S3 access, GSI/scan access, authentication-resource access, playbook reads. |
+| `SOC_BOT_<ENV>_RUNTIME_APPLICATION_CHAT_ORCHESTRATOR`, APPLICATION boundary | Exact-table GetItem/PutItem/Query/UpdateItem; invocation of only its exact environment query and RAG function ARNs; approved Bedrock streaming invocation and exact-profile GetInferenceProfile; log-stream/event writes to its log group. | Direct S3 (including playbooks)/Athena/Glue/Lake Formation access, GSI/scan access, authentication-resource access. |
+| `SOC_BOT_<ENV>_RUNTIME_APPLICATION_RAG_TOOL`, APPLICATION boundary | GetObject only under the matching data bucket's `playbooks/*`; log-stream/event writes in its own log group. | Bucket listing/writing, security-log/evaluation reads, Athena/Glue/Lake Formation, Bedrock, DynamoDB, or Lambda invocation. |
 
 Bedrock configuration uses `us.anthropic.claude-sonnet-4-6` from `us-east-1`. Routed foundation-model access uses a Region wildcard for that exact model, conditioned on the exact approved inference-profile ARN. It does not permit direct foundation-model invocation. Both APPLICATION boundaries and orchestrator roles have the exact-profile read allowance; query/Glue boundaries do not. Runtime code calls `ConverseStream`, not a discovery API.
 
-Resource/action-specific cdk-nag acknowledgments explain log-stream/result-object wildcards, Lake Formation's `GetDataAccess` wildcard, the routed-model Region wildcard, and the approved Node.js 22 runtime. No broad administrative role is attached to either Lambda. Investigation changes remain read-only even though operational writes are needed for chat history, logs, and query results.
+Resource/action-specific cdk-nag acknowledgments explain log-stream/result-object/playbook wildcards, Lake Formation's `GetDataAccess` wildcard, the routed-model Region wildcard, and the approved Node.js 22 runtime. No broad administrative role is attached to any runtime Lambda. Investigation remains read-only even though operational writes are needed for chat history, logs, and query results. RAG corpus/index upload is operator-managed, not a CDK deployment resource.
 
 ## Environment and deployment behavior
 
 | Resource or behavior | Dev | Demo |
 | --- | --- | --- |
 | Query function | `SOC-BOT-DEV-QUERY-TOOL` | `SOC-BOT-DEMO-QUERY-TOOL` |
+| RAG function/logs | `SOC-BOT-DEV-RAG-TOOL`; one-week disposable logs | `SOC-BOT-DEMO-RAG-TOOL`; one-week retained logs |
 | Chat history | `SOC-BOT-DEV-CHAT-HISTORY`; destroyed on stack deletion | `SOC-BOT-DEMO-CHAT-HISTORY`; retained |
 | Query logs | One-week retention; destroyed on stack deletion | One-week retention; retained |
 | Chat orchestrator | `SOC-BOT-DEV-CHAT-ORCHESTRATOR`; one-week disposable logs | `SOC-BOT-DEMO-CHAT-ORCHESTRATOR`; one-week retained logs |
@@ -75,4 +78,4 @@ The [manual dev destroy workflow](../../../.github/workflows/destroy-dev.yml) pe
 
 The query Lambda remains private; chat has only its API Gateway route, not a Function URL. Chat ownership uses fixed `TEMPORARY_OWNER_ID=soc-bot-<environment>-analyst`; all callers share that environment's conversations. This is not authentication. Dev uses its temporary WAF network gate; demo would be public if deployed now, so its rollout is deferred. [Isolated Cognito BFF source](../../../infra/lambdas/ai/auth/README.md) does not provision Cognito, an auth-session table, or a chat identity integration.
 
-Frontend/CORS integration, authenticated Stop/ownership, conversation-listing endpoints, and explicit abandonment are future integration work. Live API streaming and WAF behavior require operator verification. [Playbook retrieval](../Lambdas/RAGTool/README.md) is planned, not deployed or connected. See the [query-tool guide](../Lambdas/AthenaQueryTool/README.md) and [orchestrator overview](../Lambdas/ChatOrchestrator/README.md) for the implemented runtime paths.
+Frontend/CORS integration, authenticated Stop/ownership, conversation-listing endpoints, and explicit abandonment are future integration work. Live API streaming/WAF behavior and [RAG integration](../Lambdas/ChatOrchestrator/RAG-Tools.md) require operator verification after reviewed deployment and coordinated corpus publication. See the [RAG contract](../Lambdas/RAGTool/README.md), [query-tool guide](../Lambdas/AthenaQueryTool/README.md), and [orchestrator overview](../Lambdas/ChatOrchestrator/README.md) for implemented runtime paths.

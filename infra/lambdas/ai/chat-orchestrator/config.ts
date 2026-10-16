@@ -2,7 +2,7 @@ export const TURN_DEADLINE_MS = 600_000; // 10 minutes
 export const FINALIZATION_RESERVE_MS = 90_000; // 90 seconds
 export const OUTCOME_RESERVE_MS = 45_000; // 45 seconds
 export const HEARTBEAT_MS = 15_000; // 15 seconds
-export const MAX_TOOL_CALLS = 4;
+export const MAX_TOOL_CALLS = 8;
 export const MAX_CONTEXT_BYTES = 262_144;
 export const MAX_OUTPUT_BYTES = 32_768;
 export const MAX_OUTPUT_TOKENS = 2_048;
@@ -12,6 +12,7 @@ export interface Configuration {
   readonly ownerId: string;
   readonly tableName: string;
   readonly queryFunction: string;
+  readonly ragFunction: string;
   readonly modelId: string;
   readonly region: string;
   readonly database: string;
@@ -26,6 +27,7 @@ export interface Configuration {
  *   DEPLOYMENT_ENVIRONMENT: 'dev', TEMPORARY_OWNER_ID: 'soc-bot-dev-analyst',
  *   CHAT_HISTORY_TABLE_NAME: 'SOC-BOT-DEV-CHAT-HISTORY',
  *   QUERY_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-QUERY-TOOL',
+ *   RAG_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-RAG-TOOL',
  *   DATABASE_NAME: 'soc_bot_dev_security', MAX_QUERY_WINDOW_DAYS: '30',
  *   BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6', BEDROCK_REGION: 'us-east-1',
  * }
@@ -33,6 +35,7 @@ export interface Configuration {
  * {
  *   environment: 'dev', ownerId: 'soc-bot-dev-analyst',
  *   tableName: 'SOC-BOT-DEV-CHAT-HISTORY', queryFunction: 'SOC-BOT-DEV-QUERY-TOOL',
+ *   ragFunction: 'SOC-BOT-DEV-RAG-TOOL',
  *   database: 'soc_bot_dev_security', maxQueryDays: 30,
  *   modelId: 'us.anthropic.claude-sonnet-4-6', region: 'us-east-1',
  * }
@@ -43,16 +46,18 @@ export function configuration(): Configuration {
   const ownerId = process.env.TEMPORARY_OWNER_ID ?? '';
   const tableName = process.env.CHAT_HISTORY_TABLE_NAME ?? '';
   const queryFunction = process.env.QUERY_TOOL_FUNCTION_NAME ?? '';
+  const ragFunction = process.env.RAG_TOOL_FUNCTION_NAME ?? '';
   const database = process.env.DATABASE_NAME ?? '';
   const maxQueryDays = Number(process.env.MAX_QUERY_WINDOW_DAYS);
   if ((environment !== 'dev' && environment !== 'demo') || ownerId !== `soc-bot-${environment}-analyst`
     || tableName !== `SOC-BOT-${environment.toUpperCase()}-CHAT-HISTORY`
     || queryFunction !== `SOC-BOT-${environment.toUpperCase()}-QUERY-TOOL`
+    || ragFunction !== `SOC-BOT-${environment.toUpperCase()}-RAG-TOOL`
     || database !== `soc_bot_${environment}_security` || process.env.BEDROCK_MODEL_ID !== 'us.anthropic.claude-sonnet-4-6'
     || process.env.BEDROCK_REGION !== 'us-east-1' || !Number.isInteger(maxQueryDays) || maxQueryDays < 1 || maxQueryDays > 366) {
     throw new ChatError('CONFIGURATION_ERROR', 'Chat is not available in this environment.', 503, false);
   }
-  return { environment, ownerId, tableName, queryFunction, database, maxQueryDays,
+  return { environment, ownerId, tableName, queryFunction, ragFunction, database, maxQueryDays,
     modelId: process.env.BEDROCK_MODEL_ID, region: process.env.BEDROCK_REGION };
 }
 
