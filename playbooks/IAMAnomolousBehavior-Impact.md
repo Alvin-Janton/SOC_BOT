@@ -65,14 +65,14 @@ Reasons for unexpected API usage could include the following:
 1. Confirm a ticket/case has been raised for the incident. If not, manually raise one
 1. Determine and begin to document any end-user impact/experience of the issue. Findings should be documented in the ticket/case related to the incident
 1. Open an incident war room using your standard communication tools, and page in the relevant stakeholders
-1. In the case of automatically created tickets/cases, verify the finding in GuardDuty (what caused the ticket to be created?) 
+1. In the case of automatically created tickets/cases, verify the finding in GuardDuty (what caused the ticket to be created?)
 
 #### For This Incident Type
 1. Identify the specific resources impacted. In GuardDuty, this will be "Resource ID" in the “Overview” section of the finding.
 1. Identify the nature of the impact (modified, deleted, etc.). In GuardDuty, Look at the “Anomolous APIs” section of the finding. Look up each in the AWS [API Reference](https://docs.aws.amazon.com/quicksight/latest/APIReference/API_Reference.html)
 1. Determine if the Anomolous API call was successfull. In GuardDuty, Look at the “Anomolous APIs” section of the finding. There are two types of subcategories: Successfully called and Error Response
 1. Identify the origination information from which the APIs were called. In GuardDuty, Look at the “Actor” section of the finding
-    - Verify that the IP address is valid for your enterprise users. 
+    - Verify that the IP address is valid for your enterprise users.
     - Verify that the Location or Organization is known or valid
 1. Identify the owner or custodian of the *impacted* resource(s) and add them to the ticket
 1. Determine what, if any, data was modified or deleted, and the date and time.
@@ -97,7 +97,7 @@ If you determine that the activity is unauthorized, or decide it is prudent to a
 
 1. Verify that disabling the credentials of the IAM principal in question will not result in a service outage.
 1. Record all permissions from the principal responsible for the activity.
-1. Remove permissions from the principal responsible for the activity. 
+1. Remove permissions from the principal responsible for the activity.
     1. If the Principal is an AWS Role, only remove permissions if no other entities need to use it. Instead, do one of the following:
         1. Remove the the Actor identified above from whatever authorization system approves the access (Active Directory security groups, etc.)
         1. Attach an inline policy with a Condition that excludes an ARN with the above Actors Session Identifier [Use an IAM policy Conditions tp limit access](https://aws.amazon.com/blogs/security/iam-makes-it-easier-to-manage-permissions-for-aws-services-accessing-resources/)
