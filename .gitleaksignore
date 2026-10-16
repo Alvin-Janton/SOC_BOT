@@ -1,0 +1,2 @@
+# Reviewed false positive: ordinary RAG-guide prose; this commit, rule, and line only.
+f721fcc605a7d37edeb7b695a4e8185fbb4bdeb6:Docs/AIStack/Lambdas/RAGTool/README.md:generic-api-key:70

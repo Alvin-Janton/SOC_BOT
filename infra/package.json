@@ -21,6 +21,7 @@
     "aws-cdk-lib": "2.273.0",
     "aws-jwt-verify": "5.2.1",
     "constructs": "10.8.1",
+    "markdown-it": "15.0.2",
     "zod": "4.6.5"
   },
   "devDependencies": {
