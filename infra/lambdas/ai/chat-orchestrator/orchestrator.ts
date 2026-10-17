@@ -2,7 +2,7 @@ import { Message } from '@aws-sdk/client-bedrock-runtime';
 import { randomUUID } from 'node:crypto';
 import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { buildContext, planCompaction } from './context';
-import { ToolRequest, ToolValidationIssue, isRagRequest, validateTool } from './contracts';
+import { ToolRequest, isRagRequest, validateTool } from './contracts';
 import { ModelResponse, ModelRunner } from './model';
 import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError, ToolRejectionCode, isToolRejectionCode } from './store';
 import { StreamEvent } from './stream';
@@ -118,24 +118,14 @@ export class Orchestrator {
       this.toolCalls++;
       let request: ToolRequest | undefined;
       let rejection: ToolRejectionCode | undefined;
-      let validationIssue: ToolValidationIssue | undefined;
-      const diagnostic = this.config.environment === 'dev' && tool.name === 'describe_documents' ? tool.diagnostic : undefined;
       if (this.toolCalls > MAX_TOOL_CALLS) rejection = 'TOOL_LIMIT_REACHED';
       else if (!this.budget.canDispatch(200_000)) rejection = 'FINALIZATION_REQUIRED';
       else {
-        try { request = validateTool(tool.name, tool.input, this.config,
-          diagnostic ? issue => { validationIssue = issue; } : undefined); }
+        try { request = validateTool(tool.name, tool.input, this.config); }
         catch (error) {
           if (!(error instanceof ChatError) || !isToolRejectionCode(error.code)) throw error;
           rejection = error.code;
         }
-      }
-      if (this.config.environment === 'dev' && tool.name === 'describe_documents' && diagnostic) {
-        console.info(JSON.stringify({ event: 'dev_describe_documents_input', turnId: this.lease.turnId,
-          attemptId: this.lease.attemptId, toolUseId: tool.id, blockIndex: tool.index, ...diagnostic,
-          schema_validation_status: request ? 'passed' : validationIssue ? 'rejected' : 'not_run',
-          validation_stage: validationIssue?.stage ?? (request ? 'complete' : 'dispatch_policy'),
-          validation_issue_codes: validationIssue?.codes ?? [], rejection_code: rejection }));
       }
       // Invalid inputs are not copied into audit history; the bounded rejection still counts as a call.
       const args = request ? Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'operation')) as JsonObject : {};
