@@ -31,6 +31,8 @@ export interface ToolInputDiagnostic {
   readonly truncated: boolean;
   readonly json_parse_status: 'parsed' | 'invalid_json';
   readonly parsed_value_kind: 'null' | 'array' | 'object' | 'string' | 'number' | 'boolean';
+  readonly empty_input_normalized: boolean;
+  readonly effective_value_kind: ToolInputDiagnostic['parsed_value_kind'];
 }
 
 export interface ModelResponse {
@@ -51,7 +53,8 @@ interface StreamBlock {
 }
 
 /** Captures at most 1,024 UTF-8 bytes without splitting a Unicode code point. */
-function toolInputDiagnostic(input: string, inputDeltaCount: number, parsed: unknown, validJson: boolean): ToolInputDiagnostic {
+function toolInputDiagnostic(input: string, inputDeltaCount: number, parsed: unknown,
+  validJson: boolean, emptyInputNormalized: boolean): ToolInputDiagnostic {
   let raw = '';
   let bytes = 0;
   for (const character of input) {
@@ -61,9 +64,11 @@ function toolInputDiagnostic(input: string, inputDeltaCount: number, parsed: unk
     bytes += width;
   }
   const originalBytes = Buffer.byteLength(input, 'utf8');
+  const parsedKind = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed as ToolInputDiagnostic['parsed_value_kind'];
   return { input_delta_count: inputDeltaCount, original_input_bytes: originalBytes, raw_input: raw,
     truncated: bytes < originalBytes, json_parse_status: validJson ? 'parsed' : 'invalid_json',
-    parsed_value_kind: parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed as ToolInputDiagnostic['parsed_value_kind'] };
+    parsed_value_kind: parsedKind, empty_input_normalized: emptyInputNormalized,
+    effective_value_kind: emptyInputNormalized ? 'object' : parsedKind };
 }
 
 /**
@@ -383,9 +388,13 @@ export class ModelRunner {
           let toolInput: unknown = null;
           let validJson = false;
           try { toolInput = JSON.parse(block.input ?? ''); validJson = true; } catch { /* The caller records a bounded validation error. */ }
+          const emptyInputNormalized = block.name === 'describe_documents' && block.input === '';
+          const diagnostic = this.config.environment === 'dev' && block.name === 'describe_documents'
+            ? toolInputDiagnostic(block.input ?? '', block.inputDeltaCount ?? 0, toolInput, validJson, emptyInputNormalized) : undefined;
+          // Only this declared zero-argument tool accepts an exactly empty streamed buffer, in either environment.
+          if (emptyInputNormalized) toolInput = {};
           return { id: block.id!, name: block.name!, index, input: toolInput,
-            ...(this.config.environment === 'dev' && block.name === 'describe_documents'
-              ? { diagnostic: toolInputDiagnostic(block.input ?? '', block.inputDeltaCount ?? 0, toolInput, validJson) } : {}) };
+            ...(diagnostic ? { diagnostic } : {}) };
         });
       if ((toolUses.length > 0) !== (stopReason === 'tool_use')) throw protocolError();
       if (!allowTools && toolUses.length > 0) throw protocolError();
