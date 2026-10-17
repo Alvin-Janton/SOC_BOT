@@ -128,6 +128,43 @@ npx cdk synth devAiStack --exclusively --lookups=false -c devAllowedClientCidr=2
 
 The Lambda console buffers streaming responses. After the operator deploys dev, validate NDJSON with a non-buffering client against the returned API URL, then verify another source IP is blocked by WAF. Lambda's existing `HttpResponseStream.from` supplies the metadata/delimiter required by [API Gateway streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-streaming-lambda-configure.html); API Gateway supports a five-minute Regional idle timeout and up to fifteen minutes of streaming. The generic fifteen-second heartbeat and ten-minute application budget are unchanged. API transport/WAF, live failure races, and authentication remain operator validation, not claims from synthesis. The isolated `infra/lambdas/ai/auth/` code creates no resources and is not connected to chat; its [notes](infra/lambdas/ai/auth/README.md) list activation prerequisites.
 
+### Manual Chat Client
+
+Use [scripts/chat_client.py](scripts/chat_client.py) with Python 3.11 or newer; it uses only the standard library and needs no package installation or AWS credentials. This is developer tooling for manually viewing responses, not an evaluation, integration, or regression test. It does not assess answer correctness and is not included in CI or `npm test`.
+
+From the repository root in PowerShell:
+
+```powershell
+# New conversation: save the printed turn ID before dispatch and the returned conversation ID.
+python scripts/chat_client.py --message "Which playbook IDs are available?"
+
+# Follow-up: use the actual returned conversation ID; a new turn ID is generated.
+python scripts/chat_client.py --conversation-id "<returned-conversation-id>" --message "Describe the credential-compromise playbook."
+
+# Deliberate retry/replay of the INITIAL request: use its actual printed UUID and exact original message.
+python scripts/chat_client.py --turn-id "<original-turn-uuid>" --message "Which playbook IDs are available?"
+
+# Retry/replay of a FOLLOW-UP must also retain its original conversation context and exact message.
+python scripts/chat_client.py --conversation-id "<original-conversation-id>" --turn-id "<original-follow-up-turn-uuid>" --message "Describe the credential-compromise playbook."
+
+# Override with the COMPLETE HTTPS endpoint, including its stage and /chat route.
+python scripts/chat_client.py --api-url "https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/chat" --message "Describe waf_events."
+
+python scripts/chat_client.py --help
+```
+
+Replace angle-bracket placeholders; the identifier/URL validators reject the examples if pasted unchanged. The default endpoint is `https://1vg8z8ov16.execute-api.us-east-1.amazonaws.com/dev/chat`, public dev configuration rather than a credential. Override it if the API is recreated; the client does not discover AWS resources or append another `/chat`. Only absolute HTTPS is accepted, with normal certificate verification and no redirect following, static keys, signing, or Cognito session/cookie support. The existing dev WAF must allow your current source address. HTTP 403 is reported explicitly; WAF is one possible cause, not the only one. This client is not authentication and does not make the temporarily unauthenticated demo deployment safe.
+
+The request contains only `turnId`, `message`, and optional `conversationId`; absent conversation IDs are omitted. Messages must be nonblank and fit the backend's 8,192 UTF-16-code-unit string limit (an emoji outside the BMP counts as two) and 32-KiB serialized-body cap. Supplied IDs are validated and retained. The actual turn ID and initial conversation context are flushed to stderr before the single POST. No automatic retries, new-turn fallback, local history/state files, or hidden second request are made.
+
+Only assistant text goes to stdout, preserving Unicode, paragraph boundaries, and Markdown as plain text; it is not printed again on completion. The Assistant heading, identifiers, readable tool activities, warnings, and errors go to stderr, so stdout can be redirected separately. Heartbeats are silent. Windows output uses UTF-8 where supported with escaped-character fallback; terminal control/format characters are removed rather than executed. The client never executes commands, renders HTML, or follows links returned by the model. NDJSON is read incrementally with a 256-KiB per-line cap, strict UTF-8/JSON/object/consumed-field validation, and matching turn/conversation IDs. HTTP error bodies are capped at 8 KiB and only the known JSON error envelope is displayed; arbitrary HTML/raw bodies and tracebacks are omitted.
+
+Exit statuses are `0` for recognized normal completion (including saved-response replay), `1` for streamed error, HTTP/connection/protocol failure, or EOF without a terminal event, `2` for invalid arguments, `3` for recognized completion with a truncated/incomplete answer, and `130` for Ctrl+C. A truncated answer is not mislabeled as a transport failure and does not trigger continuation. Unknown future informational event types produce a short warning but cannot replace `complete`/`error`. The first recognized terminal event closes the response without waiting for EOF.
+
+The 60-second socket timeout is an inactivity timeout, not a total-turn limit; the server's usual 15-second heartbeats keep healthy long turns active. A timeout, EOF, or closed client does not prove acceptance/completion or cancel Bedrock/Athena/backend work. Already printed answer text remains visible; IDs and deliberate retry guidance are shown. Reuse the **same turn ID, exact message, and original conversation context** for a retry. For an initial request, omit `--conversation-id` again, especially if no ID was received; never invent an ID or silently start a new turn as a retry. Replayed completion is labeled as a saved answer, not a fresh investigation. A server `retryable` flag is displayed, not acted on automatically.
+
+Operator validation remains pending after review: check new-conversation output/IDs, a follow-up with the returned ID, explicit same-turn replay, visible rejected/backend-tool errors, and interrupted/error/truncated handling when those outcomes occur. Confirm stdout has no status/NDJSON noise and no duplicate answer; after interruption, verify that client exit is not mistaken for remote cancellation. No live calls or response-simulation harness were run during implementation. Temporary dev tool-input diagnostics and permanent activity events remain unchanged; use controlled synthetic messages until diagnostic logging is removed through its separately approved cleanup.
+
 ### Shared application, WAF, VPC, and CloudTrail normalization
 
 The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role now serve application/WAF/CloudTrail JSONL and VPC `.log` files; their names are retained to avoid resource replacement. Default arguments use `--input_prefix s3://<data-bucket>/raw/`, `--output_prefix s3://<data-bucket>/normalized/`, and `--quarantine_prefix s3://<data-bucket>/quarantine/`. A root run reads only `raw/app/`, `raw/waf/`, `raw/vpc/`, and `raw/cloudtrail/`, never lists `raw/` or the bucket root, and reports absent supported prefixes. Override only `--input_prefix` with a source prefix such as `s3://<data-bucket>/raw/cloudtrail/` (with or without a trailing slash) for a source-specific run. Other explicit prefixes and inconsistent buckets are rejected. Existing per-source output/quarantine argument overrides must be changed to the shared roots.
