@@ -20,6 +20,17 @@ export interface ModelToolUse {
   readonly name: string;
   readonly index: number;
   readonly input: unknown;
+  readonly diagnostic?: ToolInputDiagnostic;
+}
+
+/** Temporary, bounded dev-only evidence; never part of stored calls or model history. */
+export interface ToolInputDiagnostic {
+  readonly input_delta_count: number;
+  readonly original_input_bytes: number;
+  readonly raw_input: string;
+  readonly truncated: boolean;
+  readonly json_parse_status: 'parsed' | 'invalid_json';
+  readonly parsed_value_kind: 'null' | 'array' | 'object' | 'string' | 'number' | 'boolean';
 }
 
 export interface ModelResponse {
@@ -36,6 +47,23 @@ interface StreamBlock {
   id?: string;
   name?: string;
   input?: string;
+  inputDeltaCount?: number;
+}
+
+/** Captures at most 1,024 UTF-8 bytes without splitting a Unicode code point. */
+function toolInputDiagnostic(input: string, inputDeltaCount: number, parsed: unknown, validJson: boolean): ToolInputDiagnostic {
+  let raw = '';
+  let bytes = 0;
+  for (const character of input) {
+    const width = Buffer.byteLength(character, 'utf8');
+    if (bytes + width > 1_024) break;
+    raw += character;
+    bytes += width;
+  }
+  const originalBytes = Buffer.byteLength(input, 'utf8');
+  return { input_delta_count: inputDeltaCount, original_input_bytes: originalBytes, raw_input: raw,
+    truncated: bytes < originalBytes, json_parse_status: validJson ? 'parsed' : 'invalid_json',
+    parsed_value_kind: parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed as ToolInputDiagnostic['parsed_value_kind'] };
 }
 
 /**
@@ -286,7 +314,8 @@ export class ModelRunner {
             const name = identifier(tool.name);
             if (ids.has(id) || tool.type === 'server_tool_use') throw protocolError();
             ids.add(id);
-            blocks.set(index, { kind: 'tool', stopped: false, id, name, input: '' });
+            blocks.set(index, { kind: 'tool', stopped: false, id, name, input: '',
+              ...(this.config.environment === 'dev' && name === 'describe_documents' ? { inputDeltaCount: 0 } : {}) });
           }
 
           else if (event.contentBlockDelta) {
@@ -315,6 +344,7 @@ export class ModelRunner {
 
             else if (delta.toolUse) {
               if (block.kind !== 'tool' || typeof delta.toolUse.input !== 'string') throw protocolError();
+              if (this.config.environment === 'dev' && block.name === 'describe_documents') block.inputDeltaCount!++;
               block.input = (block.input ?? '') + delta.toolUse.input;
               if (Buffer.byteLength(block.input, 'utf8') > MAX_TOOL_INPUT_BYTES) {
                 throw new ChatError('MODEL_TOOL_INPUT_LIMIT', 'The model tool request exceeds its input limit.', 502);
@@ -351,8 +381,11 @@ export class ModelRunner {
       const toolUses: ModelToolUse[] = [...blocks.entries()].filter(([, block]) => block.kind === 'tool')
         .sort(([left], [right]) => left - right).map(([index, block]) => {
           let toolInput: unknown = null;
-          try { toolInput = JSON.parse(block.input ?? ''); } catch { /* The caller records a bounded validation error. */ }
-          return { id: block.id!, name: block.name!, index, input: toolInput };
+          let validJson = false;
+          try { toolInput = JSON.parse(block.input ?? ''); validJson = true; } catch { /* The caller records a bounded validation error. */ }
+          return { id: block.id!, name: block.name!, index, input: toolInput,
+            ...(this.config.environment === 'dev' && block.name === 'describe_documents'
+              ? { diagnostic: toolInputDiagnostic(block.input ?? '', block.inputDeltaCount ?? 0, toolInput, validJson) } : {}) };
         });
       if ((toolUses.length > 0) !== (stopReason === 'tool_use')) throw protocolError();
       if (!allowTools && toolUses.length > 0) throw protocolError();

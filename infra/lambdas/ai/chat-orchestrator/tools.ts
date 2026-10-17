@@ -1,17 +1,55 @@
-import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import { InvokeCommand, InvokeCommandOutput, LambdaClient } from '@aws-sdk/client-lambda';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_RESPONSE_BYTES, QUERY_DEADLINE_SECONDS } from '../../../lib/stacks/ai/query-contract';
-import { RagRequest, RagResponse } from '../rag-tool/contracts';
+import { ErrorCode as RagErrorCode, RagRequest, RagResponse } from '../rag-tool/contracts';
 import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { isTerminalToolResult, selectToolResult } from './context';
-import { LogicalQuery, ToolRequest, isRagRequest, isRagToolName, validateTool } from './contracts';
-import { invokeRag } from './rag-tools';
-import { ChatEvent, ConversationStore, JsonObject, Lease } from './store';
+import { LogicalQuery, ToolRequest, isRagRequest, isRagToolName, toolSchemas, validateTool } from './contracts';
+import { RagBoundaryFailure, RagInvocationOutcome, invokeRag } from './rag-tools';
+import { ChatEvent, ConversationStore, JsonObject, Lease, ToolRejectionCode } from './store';
 import { StreamEvent } from './stream';
 
 const PENDING = ['SUBMITTED', 'QUEUED', 'RUNNING', 'UNKNOWN'];
 const EXECUTION_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
+type FailureStage = 'tool_error' | 'tool_invocation_failed' | 'tool_response_invalid';
+type ActivityCode = RagErrorCode | ToolRejectionCode | 'NOT_EXECUTED' | 'QUERY_FAILED' | 'QUERY_CANCELLED'
+  | 'QUERY_NOT_FOUND' | 'SERVICE_ERROR' | 'QUERY_INVOCATION_FAILED' | 'RAG_INVOCATION_FAILED' | 'TOOL_RESPONSE_INVALID';
+
+/** Builds progress from fixed codes/messages and an allowlisted name, never backend or model prose. */
+function toolActivity(call: ToolCall, stage: FailureStage | 'tool_request_rejected' | 'tool_not_executed', code: ActivityCode): StreamEvent {
+  const toolName = Object.hasOwn(toolSchemas, call.tool_name) ? call.tool_name : 'unsupported';
+  const playbook = isRagToolName(toolName);
+  let message: string;
+  if (stage === 'tool_request_rejected') message = toolName === 'describe_documents'
+    ? 'Playbook discovery request rejected.' : 'Tool request rejected before invocation.';
+  else if (stage === 'tool_not_executed') message = 'Tool call was not executed under the current turn policy.';
+  else if (stage === 'tool_invocation_failed') message = playbook
+    ? 'Playbook service could not be reached or completed; execution could not be confirmed.'
+    : 'Query service could not be reached or completed; execution could not be confirmed.';
+  else if (stage === 'tool_response_invalid') message = 'Tool response could not be safely validated.';
+  else if (code === 'DOCUMENT_NOT_FOUND') message = 'Requested playbook was not found.';
+  else if (code === 'SECTION_NOT_FOUND') message = 'Requested playbook sections were not found.';
+  else if (code === 'QUERY_FAILED') message = 'Query service reported a query failure.';
+  else if (code === 'QUERY_CANCELLED') message = 'The query reached a confirmed cancelled state.';
+  else message = playbook ? 'Playbook service returned an application error.' : 'Query service returned an application error.';
+  return { type: 'activity', stage, toolUseId: call.tool_use_id, toolName, code, message };
+}
+
+/** Announces only already-persisted local rejections/skips, including restored interrupted decisions. */
+export function rejectedToolActivity(call: ToolCall, code: ToolRejectionCode | 'NOT_EXECUTED'): StreamEvent {
+  return toolActivity(call, code === 'INVALID_TOOL' || code === 'INVALID_TOOL_INPUT'
+    ? 'tool_request_rejected' : 'tool_not_executed', code);
+}
+
+/** Recognizes only the query backend's application-owned error codes, not arbitrary returned text. */
+function queryErrorCode(output: JsonObject): 'INVALID_INPUT' | 'SERVICE_ERROR' | 'QUERY_NOT_FOUND' | 'QUERY_FAILED' | undefined {
+  const error = output.error;
+  if (output.ok !== false || !error || typeof error !== 'object' || Array.isArray(error)
+    || typeof error.message !== 'string' || !error.message || error.message.length > 512) return undefined;
+  const code = error.code;
+  return code === 'INVALID_INPUT' || code === 'SERVICE_ERROR' || code === 'QUERY_NOT_FOUND' || code === 'QUERY_FAILED' ? code : undefined;
+}
 
 /**
  * Recognizes bounded, confirmed query failures; unavailable executions are not terminal evidence.
@@ -75,6 +113,7 @@ function completedInTime(output: JsonObject, submittedAt: number): boolean {
 /** Routes private tools, persists their results, and checkpoints only Athena submission/polling. */
 export class ToolExecutor {
   private readonly client = new LambdaClient({ maxAttempts: 1 });
+  private readonly reportedFailures = new Set<string>();
 
   private active?: { id: string; submittedAt: number; request: LogicalQuery; call: ToolCall;
     cancellationRequested?: boolean; cancellationConfirmed?: boolean; failure?: JsonObject };
@@ -94,26 +133,43 @@ export class ToolExecutor {
     private readonly store: ConversationStore, private readonly lease: Lease,
     private readonly emit: (event: StreamEvent) => Promise<void>) {}
 
+  /** Emits at most one failure activity per logical call, including polling and fatal-path cleanup. */
+  private async reportFailure(call: ToolCall, stage: FailureStage, code: ActivityCode): Promise<void> {
+    if (this.reportedFailures.has(call.tool_use_id)) return;
+    this.reportedFailures.add(call.tool_use_id);
+    await this.emit(toolActivity(call, stage, code));
+  }
+
   /**
    * Invokes only the configured function; submission is never retried blindly after an ambiguous timeout.
    *
    * Example Input:
-   * { request: { operation: 'describe_table', table: 'waf_events' }, cleanup: false, timeoutMs: 20_000 }
+   * { call: ToolCall <original call>, request: { operation: 'describe_table', table: 'waf_events' }, cleanup: false, timeoutMs: 20_000 }
    * Example Output (illustrative decoded response; full schema metadata omitted):
    * { ok: true, operation: 'describe_table', table: 'waf_events',
    *   columns: [{ name: 'event_uid', type: 'string', description: '<catalog comment>', partition: false }, ...],
    *   result_count: 0, truncated: false, ... }
    * Malformed, oversized, or function-error responses throw ChatError rather than returning SDK diagnostics.
    */
-  private async invoke(request: object, cleanup = false, timeoutMs = 20_000): Promise<JsonObject> {
+  private async invoke(call: ToolCall, request: object, cleanup = false, timeoutMs = 20_000): Promise<JsonObject> {
+    let result: InvokeCommandOutput;
+    try {
+      result = await this.client.send(new InvokeCommand({
+        FunctionName: this.config.queryFunction, InvocationType: 'RequestResponse',
+        Payload: Buffer.from(JSON.stringify(request)),
+      }), { abortSignal: cleanup ? AbortSignal.timeout(5_000)
+        : AbortSignal.any([this.budget.signal, AbortSignal.timeout(Math.max(1, timeoutMs))]) });
+    } catch (error) {
+      await this.reportFailure(call, 'tool_invocation_failed', 'QUERY_INVOCATION_FAILED');
+      throw error;
+    }
 
-    const result = await this.client.send(new InvokeCommand({
-      FunctionName: this.config.queryFunction, InvocationType: 'RequestResponse',
-      Payload: Buffer.from(JSON.stringify(request)),
-    }), { abortSignal: cleanup ? AbortSignal.timeout(5_000)
-      : AbortSignal.any([this.budget.signal, AbortSignal.timeout(Math.max(1, timeoutMs))]) });
-
-    if (result.FunctionError || !result.Payload || result.Payload.byteLength > MAX_RESPONSE_BYTES) {
+    if (result.FunctionError) {
+      await this.reportFailure(call, 'tool_invocation_failed', 'QUERY_INVOCATION_FAILED');
+      throw new ChatError('TOOL_PROTOCOL_ERROR', 'The query tool could not complete the operation.');
+    }
+    if (!result.Payload || result.Payload.byteLength > MAX_RESPONSE_BYTES) {
+      await this.reportFailure(call, 'tool_response_invalid', 'TOOL_RESPONSE_INVALID');
       throw new ChatError('TOOL_PROTOCOL_ERROR', 'The query tool could not complete the operation.');
     }
 
@@ -121,8 +177,14 @@ export class ToolExecutor {
 
     try { response = responseObject(JSON.parse(Buffer.from(result.Payload).toString('utf8'))); }
 
-    catch { throw new ChatError('TOOL_PROTOCOL_ERROR', 'The query tool returned an invalid response.'); }
-    if (typeof response.ok !== 'boolean') throw new ChatError('TOOL_PROTOCOL_ERROR', 'The query tool returned an invalid response.');
+    catch {
+      await this.reportFailure(call, 'tool_response_invalid', 'TOOL_RESPONSE_INVALID');
+      throw new ChatError('TOOL_PROTOCOL_ERROR', 'The query tool returned an invalid response.');
+    }
+    if (typeof response.ok !== 'boolean') {
+      await this.reportFailure(call, 'tool_response_invalid', 'TOOL_RESPONSE_INVALID');
+      throw new ChatError('TOOL_PROTOCOL_ERROR', 'The query tool returned an invalid response.');
+    }
 
     return response;
   }
@@ -161,25 +223,31 @@ export class ToolExecutor {
   private async failed(call: ToolCall, id: string, state: 'FAILED' | 'CANCELLED'): Promise<JsonObject> {
     const code = state === 'CANCELLED' ? 'QUERY_CANCELLED' : 'QUERY_FAILED';
 
-    return this.terminal(call, { ok: false, query_execution_id: id, state, halted_tool_group: true,
+    const output = await this.terminal(call, { ok: false, query_execution_id: id, state, halted_tool_group: true,
       error: { code, message: 'The approved query did not complete successfully.' } }, 'error');
+    await this.reportFailure(call, 'tool_error', code);
+    return output;
   }
 
   /**
    * Validates a status response while retaining recognized failures for durable terminalization.
    *
    * Example Input:
-   * { request: { operation: 'query_events', table: 'waf_events', start_time: '2026-09-11T00:00:00Z', end_time: '2026-09-12T00:00:00Z', limit: 2 },
+   * { call: ToolCall <original call>, request: { operation: 'query_events', table: 'waf_events', start_time: '2026-09-11T00:00:00Z', end_time: '2026-09-12T00:00:00Z', limit: 2 },
    *   id: '11111111-1111-4111-8111-111111111111', timeoutMs: 20_000 }
    * Example Output (selected fields from a verified tool response):
    * { ok: true, operation: 'query_events', table: 'waf_events', query_execution_id: '11111111-1111-4111-8111-111111111111', state: 'RUNNING', ... }
    * Sends query_status with the complete original request; unexpected IDs, states, or contracts throw QUERY_STATUS_UNAVAILABLE.
    */
-  private async status(request: LogicalQuery, id: string, timeoutMs: number): Promise<JsonObject> {
+  private async status(call: ToolCall, request: LogicalQuery, id: string, timeoutMs: number): Promise<JsonObject> {
 
-    const output = await this.invoke({ operation: 'query_status', query_execution_id: id, query: request }, false, timeoutMs);
+    const output = await this.invoke(call, { operation: 'query_status', query_execution_id: id, query: request }, false, timeoutMs);
 
-    if (output.query_execution_id !== id) throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'The query status could not be confirmed.');
+    if (output.query_execution_id !== id) {
+      const code = queryErrorCode(output);
+      await this.reportFailure(call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
+      throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'The query status could not be confirmed.');
+    }
     const error = output.error;
 
     if (typeof output.state !== 'string' || !['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].includes(output.state)
@@ -187,6 +255,8 @@ export class ToolExecutor {
       || (output.state === 'FAILED'
         ? output.ok !== false || !error || typeof error !== 'object' || Array.isArray(error) || error.code !== 'QUERY_FAILED'
         : output.ok !== true)) {
+      const code = queryErrorCode(output);
+      await this.reportFailure(call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
       throw new ChatError('QUERY_STATUS_UNAVAILABLE', 'The query status could not be confirmed.');
     }
 
@@ -250,19 +320,25 @@ export class ToolExecutor {
     await this.emit({ type: 'activity', stage: 'query_started', operation: request.operation, table: request.table });
     const submittedAt = Date.now();
     let output: JsonObject;
-    try { output = await this.invoke(request); }
+    try { output = await this.invoke(call, request); }
     catch (error) {
       if (request.operation === 'describe_table') throw error;
       throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'The query submission could not be safely confirmed.', 409, false);
     }
     if (request.operation === 'describe_table') {
-      if (output.ok !== true) throw new ChatError('QUERY_FAILED', 'The approved table description could not complete.');
+      if (output.ok !== true) {
+        const code = queryErrorCode(output);
+        await this.reportFailure(call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
+        throw new ChatError('QUERY_FAILED', 'The approved table description could not complete.');
+      }
       await this.terminal(call, output);
       await this.emit({ type: 'activity', stage: 'query_completed', operation: request.operation, table: request.table, rowsReturned: 0 });
       return output;
     }
     const id = output.query_execution_id;
     if (output.ok !== true || typeof id !== 'string' || !EXECUTION_ID.test(id) || output.state !== 'SUBMITTED') {
+      const code = queryErrorCode(output);
+      await this.reportFailure(call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
       throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'The query submission could not be safely confirmed.', 409, false);
     }
     this.active = { id, request, submittedAt, call };
@@ -278,29 +354,44 @@ export class ToolExecutor {
    */
   private async executeRag(call: ToolCall, request: RagRequest): Promise<JsonObject> {
     const started = Date.now();
-    const activity = { operation: request.operation,
+    const activity = { operation: request.operation, toolUseId: call.tool_use_id, toolName: request.operation,
       ...('document_id' in request ? { documentId: request.document_id } : {}) };
     await this.emit({ type: 'activity', stage: 'rag_started', ...activity,
       requestedSections: request.operation === 'retrieve_sections' ? request.section_ids.length : 0 });
     let response: RagResponse | undefined;
+    let origin: RagInvocationOutcome['origin'] | undefined;
     let persisted = false;
     try {
-      response = await invokeRag(request, this.config, this.budget);
+      let invocation: RagInvocationOutcome;
+      try { invocation = await invokeRag(request, this.config, this.budget); }
+      catch (error) {
+        if (error instanceof RagBoundaryFailure) {
+          await this.reportFailure(call, error.kind === 'invocation' ? 'tool_invocation_failed' : 'tool_response_invalid',
+            error.kind === 'invocation' ? 'RAG_INVOCATION_FAILED' : 'TOOL_RESPONSE_INVALID');
+          throw error.failure;
+        }
+        throw error;
+      }
+      ({ response, origin } = invocation);
       this.budget.check();
       const output = response as unknown as JsonObject;
       await this.terminal(call, output, response.ok ? 'success' : 'error');
       persisted = true;
       this.budget.check();
-      await this.emit({ type: 'activity', stage: response.ok ? 'rag_completed' : 'rag_failed', ...activity,
-        documentsReturned: response.ok ? (response.operation === 'describe_documents' ? response.documents.length : 1) : 0,
-        sectionsReturned: response.ok && 'sections' in response ? response.sections.length : 0,
-        ...(!response.ok ? { errorCode: response.error.code } : {}) });
+      if (response.ok) {
+        await this.emit({ type: 'activity', stage: 'rag_completed', ...activity,
+          documentsReturned: response.operation === 'describe_documents' ? response.documents.length : 1,
+          sectionsReturned: 'sections' in response ? response.sections.length : 0 });
+      } else {
+        await this.reportFailure(call, origin === 'backend' ? 'tool_error' : 'tool_invocation_failed', response.error.code);
+      }
       return output;
     } finally {
       console.info(JSON.stringify({ event: 'rag_tool', turnId: this.lease.turnId, attemptId: this.lease.attemptId,
-        toolUseId: call.tool_use_id, ...activity, durationMs: Date.now() - started, resultPersisted: persisted,
+        ...activity, durationMs: Date.now() - started, resultPersisted: persisted,
         outcome: persisted ? (response?.ok ? 'SUCCESS' : 'ERROR') : 'UNCONFIRMED',
-        correlationId: response?.correlation_id, errorCode: response && !response.ok ? response.error.code : undefined,
+        correlationId: response?.correlation_id, correlationIdOrigin: origin === 'backend' ? 'backend' : origin === 'adapter' ? 'local_adapter' : undefined,
+        errorCode: response && !response.ok ? response.error.code : undefined,
         responseBytes: response ? Buffer.byteLength(JSON.stringify(response), 'utf8') : 0,
         sectionsReturned: response?.ok && 'sections' in response ? response.sections.length : 0 }));
     }
@@ -327,7 +418,7 @@ export class ToolExecutor {
       }
       let output: JsonObject;
       try {
-        output = await this.status(request, id, Math.min(20_000, QUERY_DEADLINE_SECONDS * 1_000 - (Date.now() - submittedAt)));
+        output = await this.status(call, request, id, Math.min(20_000, QUERY_DEADLINE_SECONDS * 1_000 - (Date.now() - submittedAt)));
       } catch (error) {
         if (Date.now() - submittedAt >= QUERY_DEADLINE_SECONDS * 1_000) {
           // An unavailable status must not be converted into confirmed terminal evidence.
@@ -366,7 +457,7 @@ export class ToolExecutor {
   private async recoverExpired(call: ToolCall, request: LogicalQuery, id: string, submittedAt: number): Promise<JsonObject> {
     this.active = { id, request, submittedAt, call };
     this.budget.check();
-    const output = await this.status(request, id, 20_000);
+    const output = await this.status(call, request, id, 20_000);
     if (output.state === 'SUCCEEDED' && completedInTime(output, submittedAt)) {
       return this.succeeded(call, request, output);
     } else if (output.state === 'FAILED' || output.state === 'CANCELLED') {
@@ -446,6 +537,7 @@ export class ToolExecutor {
       if (!latest && queuedAfterHalt) {
         await this.terminal(call, { ok: false, error: { code: 'NOT_EXECUTED',
           message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+        await this.emit(rejectedToolActivity(call, 'NOT_EXECUTED'));
         continue;
       }
       if (call.preparation?.status === 'rejected') {
@@ -461,6 +553,7 @@ export class ToolExecutor {
         if (!latest) {
           await this.terminal(call, { ok: false, error: { code,
             message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+          await this.emit(rejectedToolActivity(call, code));
         }
         const savedError = latest?.output.error;
         if ((!latest && code === 'INVALID_TOOL') || (savedError && typeof savedError === 'object'
@@ -483,6 +576,7 @@ export class ToolExecutor {
         if (callIndex >= MAX_TOOL_CALLS) {
           await this.terminal(call, { ok: false, error: { code: 'TOOL_LIMIT_REACHED',
             message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+          await this.emit(rejectedToolActivity(call, 'TOOL_LIMIT_REACHED'));
           continue;
         }
         const request = validateTool(call.tool_name, call.arguments, this.config);
@@ -538,10 +632,12 @@ export class ToolExecutor {
   public async cancelActive(): Promise<boolean> {
     const active = this.active;
     if (!active) return false;
-    const output = await this.invoke({ operation: 'cancel_query', query_execution_id: active.id }, true);
+    const output = await this.invoke(active.call, { operation: 'cancel_query', query_execution_id: active.id }, true);
     if (output.ok !== true || output.query_execution_id !== active.id || typeof output.state !== 'string'
       || !['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].includes(output.state)
       || typeof output.cancellation_requested !== 'boolean') {
+      const code = queryErrorCode(output);
+      await this.reportFailure(active.call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
       throw new ChatError('QUERY_CANCELLATION_UNAVAILABLE', 'Query cancellation could not be confirmed.');
     }
     active.cancellationRequested = output.cancellation_requested;

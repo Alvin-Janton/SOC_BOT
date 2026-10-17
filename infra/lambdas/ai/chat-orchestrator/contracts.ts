@@ -48,6 +48,12 @@ export type ToolName = keyof typeof toolSchemas;
 export type LogicalQuery = Exclude<QueryToolRequest, { operation: 'query_status' | 'cancel_query' }>;
 export type ToolRequest = LogicalQuery | RagRequest;
 
+/** Contains only trusted validation stages/codes, never paths, unexpected keys or input values. */
+export interface ToolValidationIssue {
+  readonly stage: 'schema' | 'operation';
+  readonly codes: readonly string[];
+}
+
 /** Recognizes only the three declared document tools, including when inspecting durable call names. */
 export function isRagToolName(name: string): name is RagOperation { return Object.hasOwn(ragToolSchemas, name); }
 
@@ -120,7 +126,8 @@ export function bedrockTools(): Tool[] {
  * }
  * The output is an approved request, not executed SQL or query results.
  */
-export function validateTool(name: string, input: unknown, config: Configuration): ToolRequest {
+export function validateTool(name: string, input: unknown, config: Configuration,
+  diagnostic?: (issue: ToolValidationIssue) => void): ToolRequest {
   if (!Object.hasOwn(toolSchemas, name)) throw new ChatError('INVALID_TOOL', 'Unsupported investigation operation.', 400, false);
   try {
     const parsed = toolSchemas[name as ToolName].parse(input);
@@ -130,6 +137,9 @@ export function validateTool(name: string, input: unknown, config: Configuration
     return request;
   } catch (error) {
     if (error instanceof ContractError || error instanceof z.ZodError || error instanceof RagError) {
+      diagnostic?.(error instanceof z.ZodError
+        ? { stage: 'schema', codes: [...new Set(error.issues.map(issue => issue.code))].slice(0, 8) }
+        : { stage: 'operation', codes: ['contract_rejected'] });
       throw new ChatError('INVALID_TOOL_INPUT', isRagToolName(name)
         ? 'Tool input does not match the approved playbook contract.' : 'Tool input does not match the approved query contract.', 400, false);
     }

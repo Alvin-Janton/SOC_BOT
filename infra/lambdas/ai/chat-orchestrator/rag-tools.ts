@@ -6,6 +6,19 @@ import { ChatError, Configuration, FINALIZATION_RESERVE_MS, TurnBudget } from '.
 const client = new LambdaClient({ maxAttempts: 1 });
 const RAG_INVOCATION_MS = 180_000;
 
+/** Keeps caller-generated availability results distinct without changing the persisted/wire envelope. */
+export interface RagInvocationOutcome {
+  readonly response: RagResponse;
+  readonly origin: 'backend' | 'adapter';
+}
+
+/** Carries a boundary classification only until the executor rethrows the original fatal failure. */
+export class RagBoundaryFailure extends Error {
+  public constructor(public readonly kind: 'invocation' | 'response', public readonly failure: unknown) {
+    super('The playbook invocation boundary failed.');
+  }
+}
+
 /** Creates a fatal protocol error without retaining response content or SDK diagnostics. */
 function protocolError(): ChatError {
   return new ChatError('TOOL_PROTOCOL_ERROR', 'The playbook tool returned an invalid response.', 502, false);
@@ -47,9 +60,10 @@ function unavailable(error: unknown): boolean {
 
 /** Invokes only the configured private RAG function once, preserving reserves and returning validated full results.
  * Example input: { operation: 'retrieve_sections', document_id: 'credential-compromise', section_ids: ['initial-triage'] }.
- * Output: the complete RAG success/error envelope; this adapter neither persists it nor cancels the remote Lambda.
+ * Output: { response: <complete RAG envelope>, origin: 'backend' | 'adapter' }; only response is persisted.
+ * This adapter neither persists results nor cancels the remote Lambda.
  */
-export async function invokeRag(request: RagRequest, config: Configuration, budget: TurnBudget): Promise<RagResponse> {
+export async function invokeRag(request: RagRequest, config: Configuration, budget: TurnBudget): Promise<RagInvocationOutcome> {
   budget.check();
   const available = budget.remaining() - FINALIZATION_RESERVE_MS;
   if (available <= 0) throw new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
@@ -62,23 +76,29 @@ export async function invokeRag(request: RagRequest, config: Configuration, budg
     result = await client.send(new InvokeCommand({ FunctionName: config.ragFunction, InvocationType: 'RequestResponse', Payload: payload }),
       { abortSignal: signal });
   } catch (error) {
-    budget.check();
+    try { budget.check(); } catch (failure) { throw new RagBoundaryFailure('invocation', failure); }
     if (timeout.aborted) {
-      if (available <= RAG_INVOCATION_MS) throw new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
+      if (available <= RAG_INVOCATION_MS) throw new RagBoundaryFailure('invocation',
+        new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504));
       // A local wait timeout does not cancel the remote function or prove it never ran.
-      return failure('READ_TIMEOUT', request.operation, randomUUID());
+      return { origin: 'adapter', response: failure('READ_TIMEOUT', request.operation, randomUUID()) };
     }
-    if (unavailable(error)) return failure('READ_FAILED', request.operation, randomUUID());
-    throw new ChatError('RAG_INVOCATION_FAILED', 'The playbook tool could not be invoked safely.', 502, false);
+    if (unavailable(error)) return { origin: 'adapter', response: failure('READ_FAILED', request.operation, randomUUID()) };
+    throw new RagBoundaryFailure('invocation',
+      new ChatError('RAG_INVOCATION_FAILED', 'The playbook tool could not be invoked safely.', 502, false));
   }
   budget.check();
   if (timeout.aborted) {
-    if (available <= RAG_INVOCATION_MS) throw new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
-    return failure('READ_TIMEOUT', request.operation, randomUUID());
+    if (available <= RAG_INVOCATION_MS) throw new RagBoundaryFailure('invocation',
+      new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504));
+    return { origin: 'adapter', response: failure('READ_TIMEOUT', request.operation, randomUUID()) };
   }
-  if (result.StatusCode !== 200 || result.FunctionError || !result.Payload || result.Payload.byteLength > MAX_RESPONSE_BYTES) throw protocolError();
-  let value: unknown;
-  try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(result.Payload)); }
-  catch { throw protocolError(); }
-  return validatedResponse(value, request);
+  if (result.StatusCode !== 200 || result.FunctionError) throw new RagBoundaryFailure('invocation', protocolError());
+  if (!result.Payload || result.Payload.byteLength > MAX_RESPONSE_BYTES) throw new RagBoundaryFailure('response', protocolError());
+  try {
+    let value: unknown;
+    try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(result.Payload)); }
+    catch { throw protocolError(); }
+    return { origin: 'backend', response: validatedResponse(value, request) };
+  } catch (failure) { throw new RagBoundaryFailure('response', failure); }
 }
