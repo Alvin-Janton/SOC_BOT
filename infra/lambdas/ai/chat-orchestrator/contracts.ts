@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { Tool } from '@aws-sdk/client-bedrock-runtime';
 import { compileQuery, ContractError, QueryToolRequest } from '../../../lib/stacks/ai/query-contract';
 import { TABLE_COLUMNS } from '../../../lib/shared/catalog-schema';
-import { RagError, RagOperation, RagRequest, parseRequest as parseRagRequest, requestSchema as ragRequestSchema } from '../rag-tool/contracts';
+import { RagError, RagOperation, RagRequest, describeDocumentRequestSchema, describeDocumentsRequestSchema,
+  parseRequest as parseRagRequest, retrieveSectionsRequestSchema } from '../rag-tool/contracts';
 import { ChatError, Configuration } from './config';
 import { JsonObject } from './store';
 
@@ -28,9 +29,9 @@ const queryFields = {
 };
 
 const ragToolSchemas = {
-  describe_documents: ragRequestSchema.options[0].omit({ operation: true }),
-  describe_document: ragRequestSchema.options[1].omit({ operation: true }),
-  retrieve_sections: ragRequestSchema.options[2].omit({ operation: true }),
+  describe_documents: describeDocumentsRequestSchema.omit({ operation: true }),
+  describe_document: describeDocumentRequestSchema.omit({ operation: true }),
+  retrieve_sections: retrieveSectionsRequestSchema.omit({ operation: true }),
 };
 
 export const toolSchemas = {

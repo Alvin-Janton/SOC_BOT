@@ -374,6 +374,7 @@ The model tool's `input` does **not** contain `operation`; the tool name supplie
   "content_block_index": 0,
   "tool_use_id": "tool-waf-1",
   "tool_name": "query_events",
+  "preparation": { "status": "approved" },
   "arguments": {
     "table": "waf_events",
     "start_time": "2026-09-11T00:00:00Z",
@@ -408,7 +409,7 @@ The model tool's `input` does **not** contain `operation`; the tool name supplie
 }
 ```
 
-The saved `arguments` omit `operation`, retaining the validated model arguments. Group/index/use IDs preserve the original assistant tool block; this is not an `ASSISTANT_MESSAGE` answer.
+The saved `arguments` omit `operation`, retaining validated model arguments. New calls also save `preparation` atomically, so an interruption cannot lose approval/rejection information. Rejected calls store `{}` arguments and an allowlisted rejection code instead; that internal decision is not copied into Bedrock's tool input. Group/index/use IDs preserve the original assistant block; this is not an `ASSISTANT_MESSAGE` answer.
 
 **Boundary: [`ToolExecutor.execute()`](../../../../infra/lambdas/ai/chat-orchestrator/tools.ts) -> query Lambda.** It invokes the full logical request from step 4. The query Lambda starts Athena and promptly returns this complete application response:
 

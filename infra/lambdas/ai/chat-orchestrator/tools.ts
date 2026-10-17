@@ -448,6 +448,26 @@ export class ToolExecutor {
           message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
         continue;
       }
+      if (call.preparation?.status === 'rejected') {
+        const code = call.preparation.code;
+        if (results.some(result => {
+          const error = result.output.error;
+          return result.status !== 'error' || result.output.ok !== false || result.output.query_execution_id !== undefined
+            || !error || typeof error !== 'object' || Array.isArray(error)
+            || (error.code !== code && error.code !== 'NOT_EXECUTED');
+        })) {
+          throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A rejected tool call contains inconsistent dispatch evidence.', 409, false);
+        }
+        if (!latest) {
+          await this.terminal(call, { ok: false, error: { code,
+            message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+        }
+        const savedError = latest?.output.error;
+        if ((!latest && code === 'INVALID_TOOL') || (savedError && typeof savedError === 'object'
+          && !Array.isArray(savedError) && savedError.code === 'INVALID_TOOL')) finalizationOnly = true;
+        // Never turn sanitized {} into an approved request, even for argument-free discovery.
+        continue;
+      }
       if (isRagToolName(call.tool_name)) {
         if (latest) {
           if (!isTerminalToolResult(latest) || latest.output.query_execution_id !== undefined) {
@@ -457,6 +477,9 @@ export class ToolExecutor {
           continue;
         }
         if (finalizationOnly) throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'Later tool work cannot continue after a confirmed query failure.', 409, false);
+        if (call.preparation?.status !== 'approved') {
+          throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A previous playbook call has no durable approval decision.', 409, false);
+        }
         if (callIndex >= MAX_TOOL_CALLS) {
           await this.terminal(call, { ok: false, error: { code: 'TOOL_LIMIT_REACHED',
             message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');

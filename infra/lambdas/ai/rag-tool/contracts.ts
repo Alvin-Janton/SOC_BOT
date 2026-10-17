@@ -4,14 +4,15 @@ import { PlaybookDocument, PlaybookSection, playbookDocumentSchema, playbookIdSc
 export const MAX_REQUEST_BYTES = 4_096;
 export const MAX_RESPONSE_BYTES = 32_768;
 
+export const describeDocumentsRequestSchema = z.strictObject({ operation: z.literal('describe_documents') });
+export const describeDocumentRequestSchema = z.strictObject({ operation: z.literal('describe_document'), document_id: playbookIdSchema });
+export const retrieveSectionsRequestSchema = z.strictObject({
+  operation: z.literal('retrieve_sections'), document_id: playbookIdSchema,
+  section_ids: z.array(playbookIdSchema).min(1).max(3)
+    .refine(ids => new Set(ids).size === ids.length, 'Section IDs must be distinct.'),
+});
 export const requestSchema = z.discriminatedUnion('operation', [
-  z.strictObject({ operation: z.literal('describe_documents') }),
-  z.strictObject({ operation: z.literal('describe_document'), document_id: playbookIdSchema }),
-  z.strictObject({
-    operation: z.literal('retrieve_sections'), document_id: playbookIdSchema,
-    section_ids: z.array(playbookIdSchema).min(1).max(3)
-      .refine(ids => new Set(ids).size === ids.length, 'Section IDs must be distinct.'),
-  }),
+  describeDocumentsRequestSchema, describeDocumentRequestSchema, retrieveSectionsRequestSchema,
 ]);
 
 export type RagRequest = z.infer<typeof requestSchema>;

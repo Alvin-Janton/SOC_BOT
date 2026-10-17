@@ -64,7 +64,18 @@ Malformed/oversized wire responses, function errors, unknown invocation failures
 
 ## Durable recovery and context
 
-A completed saved RAG result is reused verbatim, without another invocation or copy write. A saved RAG call missing a result may be revalidated and reissued under the same original `tool_use_id` and model-response group, with its existing ordinal counted against the shared ceiling. The actual newly returned version/content or error is appended under the current fenced attempt. Invalid arguments, insufficient time, or inconsistent dispatch evidence do not authorize a guessed result.
+A completed saved RAG result is reused verbatim, without another invocation or copy write. New `TOOL_CALL` items atomically include an application-owned preparation decision alongside sanitized arguments. For example, these are selected fields of a rejected call, not a full item:
+
+```json
+{
+  "arguments": {},
+  "preparation": { "status": "rejected", "code": "INVALID_TOOL_INPUT" }
+}
+```
+
+Recovery restores that rejection result if absent, or reuses its existing result without duplication. It never invokes the rejected request or reinterprets `{}` as valid `describe_documents` input. Correctable invalid document/section inputs therefore remain model-correctable after interruption. The original call still counts toward the shared ceiling. Athena-halted groups retain their `NOT_EXECUTED` result instead; inconsistent evidence remains fatal.
+
+Only a call carrying `{status: "approved"}` and missing its result may be revalidated/reissued under its original `tool_use_id`/group/ordinal. The actual newly returned version/content or error is appended under the current fenced attempt. Legacy incomplete RAG calls without a durable decision fail closed with `UNKNOWN_TOOL_DISPATCH` rather than guessing whether they were approved; their old sanitized arguments cannot establish the lost rejection reason. Completed legacy results still replay. No migration, history rewriting, or automatic reclassification is introduced. Invalid arguments, insufficient time, or inconsistent evidence do not authorize a guessed result.
 
 This exception is safe only because RAG reads are read-only; it never applies to unknown Athena submissions. It is not immutable-corpus replay: an incomplete read can observe newer S3 content, while a completed durable result is never silently refreshed. Existing group/order logic supplies the same original call/result pair to Bedrock.
 

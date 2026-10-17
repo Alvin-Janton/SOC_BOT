@@ -19,7 +19,7 @@ Only metadata carries `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<upd
 Event variants are:
 
 - `USER_MESSAGE`: original user text and role, stored once per logical turn; no attempt ID.
-- `TOOL_CALL`: original tool-use ID/name, validated arguments, model-response group ID, and content-block index.
+- `TOOL_CALL`: original tool-use ID/name, validated arguments, model-response group ID, content-block index, and application-owned `preparation` decision. New calls always include approved/rejected status and an allowlisted code for rejection; the optional field keeps completed legacy history readable without changing table keys/indexes or schema version.
 - `TOOL_RESULT`: matching tool ID/name, success/error status, and bounded output; may be a pending query checkpoint or terminal evidence/error.
 - `ASSISTANT_MESSAGE`: completed public answer, model ID, stop reason, and role; one full response, not token fragments.
 - `TURN_OUTCOME`: failed/timed-out attempt metadata, retryability, phase, and safe error code. The schema also supports cancelled/abandoned variants, but the current handler emits failed/timed-out outcomes, not an authenticated Stop or abandonment workflow.
@@ -51,8 +51,9 @@ Retry means the same turn ID and exact message with a fresh attempt, not another
 `ToolExecutor.recover()` considers original calls/results for the current logical turn across attempts:
 
 - Terminal results, including RAG successes/errors, are reused verbatim as original events, not copied into the new attempt or silently refreshed.
+- Preparation approval/rejection is written atomically in the original call item. If a rejected call lacks its result, recovery saves its original bounded rejection instead of validating sanitized `{}` as a new request. Valid rejection codes are `INVALID_TOOL`, `INVALID_TOOL_INPUT`, `TOOL_LIMIT_REACHED`, and `FINALIZATION_REQUIRED`; raw rejected arguments remain absent. Existing matching rejection/`NOT_EXECUTED` results are reused without another write, while contradictory dispatch evidence fails closed. A recovered effective `INVALID_TOOL` still disables tools.
 - Only Athena pending checkpoints retain execution ID, original validated request, and original submission time. Recovery verifies them against the saved call and polls that ID; it never restarts its 180-second clock.
-- A RAG call missing its result may be revalidated/reissued as a read-only operation under the original tool-use/group identity and saved ordinal, subject to the shared eight-call dispatch ceiling and remaining deadline. The actual new version/content is persisted; a changed corpus can produce a changed read. There is no RAG query checkpoint or remote cancellation.
+- A durably approved RAG call missing its result may be revalidated/reissued as a read-only operation under the original tool-use/group identity and saved ordinal, subject to the shared eight-call ceiling/deadline. The actual new version/content is persisted; a changed corpus can produce a changed read. An older incomplete RAG call without a preparation decision fails with `UNKNOWN_TOOL_DISPATCH`: its original decision cannot be safely inferred, especially for argument-free discovery. Completed older results still replay. There is no RAG query checkpoint, remote cancellation, or automatic legacy-history rewrite.
 - A saved confirmed Athena failure keeps tools disabled. Provably later queued calls in the halted group, including RAG calls, receive missing `NOT_EXECUTED` results without duplication.
 - Unknown Athena dispatches, contradictory later activity, invalid stored requests, and persistence failures stay fatal. The RAG reread exception is not an exactly-once guarantee for external submissions. See [RAG integration](RAG-Tools.md).
 
