@@ -46,7 +46,7 @@ Durable completion can remain replayable even when lease release or transport de
 | Event | Current contents and purpose |
 | --- | --- |
 | `conversation` | `conversationId`, `turnId`: identifies the accepted conversation/turn. |
-| `activity` | Safe `stage`; query stages retain `operation`, `table`, and completion `rowsReturned`. RAG stages (`rag_started`, `rag_completed`, `rag_failed`) add operation, optional validated `documentId`, requested/returned counts, and a known failure code where applicable. No Markdown or full payload. Existing `investigating`, `finalizing`, `summarizing`, `query_started`, and `query_completed` remain unchanged. |
+| `activity` | Safe `stage`; query start/success stages retain `operation`, `table`, and completion `rowsReturned`. RAG start/success (`rag_started`, `rag_completed`) include the original `toolUseId`, allowlisted `toolName`, operation, optional validated `documentId`, and requested/returned counts. Classified outcome stages below replace ambiguous `rag_failed`. No Markdown or full payload. Existing `investigating`, `finalizing`, `summarizing`, `query_started`, and `query_completed` remain unchanged. |
 | `heartbeat` | `turnId`, generic `stage: processing`; emitted on the 15-second timer when the stream has been idle for at least that interval. |
 | `text_delta` | Public answer `text`. These fragments are not separate database events. |
 | `complete` | `turnId`, `conversationId`, `replayed`, `truncated`; attempted after durable assistant persistence. |
@@ -64,6 +64,30 @@ Illustrative successful output, with answer text abbreviated:
 ```
 
 Activity is not assistant prose. The transport does not emit raw tool argument/result, SQL, prompt, or private-reasoning events. Public answer text is model-generated; the prompt directs it not to expose private material.
+
+## Tool activity outcomes
+
+These permanent progress stages apply in both dev and demo and keep `type: activity`. Each contains the original `toolUseId`, allowlisted `toolName` (or fixed `unsupported`), application-owned `code`, and short fixed `message`. They are not terminal stream events and do not change retry, cancellation, or continuation rules.
+
+| Stage | Meaning |
+| --- | --- |
+| `tool_request_rejected` | Local parsing/schema/operation validation rejected the request; no backend invocation. Emitted after the bounded rejection result is persisted. |
+| `tool_not_executed` | Limit/deadline/finalization/group-halt policy skipped the call. Emitted after its skipped result is persisted. |
+| `tool_error` | An invoked backend returned a recognized application error, including a durably confirmed Athena `FAILED`/`CANCELLED`. Not a Lambda crash. Existing fatal backend-error paths stay fatal. |
+| `tool_invocation_failed` | A caller transport/service invocation, Lambda `FunctionError`, or local invocation wait failed. Backend execution/completion may be uncertain; this does not mean it never ran or was cancelled. |
+| `tool_response_invalid` | The caller could not safely decode or validate the response. Not a normal backend application error or proof of terminal execution. |
+
+For example, these are different calls and outcomes, not one sequential trace:
+
+```jsonl
+{"type":"activity","stage":"tool_request_rejected","toolUseId":"playbook-1","toolName":"describe_documents","code":"INVALID_TOOL_INPUT","message":"Playbook discovery request rejected."}
+{"type":"activity","stage":"tool_error","toolUseId":"playbook-2","toolName":"describe_document","code":"DOCUMENT_NOT_FOUND","message":"Requested playbook was not found."}
+{"type":"activity","stage":"tool_invocation_failed","toolUseId":"playbook-3","toolName":"describe_documents","code":"READ_FAILED","message":"Playbook service could not be reached or completed; execution could not be confirmed."}
+```
+
+RAG's old `rag_failed` stage is replaced, not emitted alongside the classified failure. `READ_FAILED`/`READ_TIMEOUT` alone cannot identify origin: a validated RAG backend response uses `tool_error`, whereas a caller-generated availability/timeout result uses `tool_invocation_failed`. Both retain the same bounded result envelope for persistence/Bedrock. Fatal invocation/protocol errors still propagate after safe progress; persistence failures do not produce a success or a falsely durable error activity.
+
+Activities are not exactly-once evidence. Restoring an interrupted rejection may announce its newly saved result with the original ID; completed results need not be reannounced. Internal Athena polling/cleanup shares that ID and is not a new model call. A disconnect can suppress any activity while backend persistence continues. Use stored calls/results as the audit truth, not absence/presence of a progress line. Temporary raw diagnostics are CloudWatch-only, dev-only, and never part of this contract; see the [capture/removal guide](RAG-Tools.md#temporary-dev-input-diagnostics).
 
 ## Error and disconnect semantics
 
