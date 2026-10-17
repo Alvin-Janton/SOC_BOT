@@ -7,6 +7,24 @@ import { createHash, randomUUID } from 'node:crypto';
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
 
+const TOOL_REJECTION_CODES = ['INVALID_TOOL', 'INVALID_TOOL_INPUT', 'TOOL_LIMIT_REACHED', 'FINALIZATION_REQUIRED'] as const;
+export type ToolRejectionCode = typeof TOOL_REJECTION_CODES[number];
+export type ToolPreparation = { status: 'approved' } | { status: 'rejected'; code: ToolRejectionCode };
+
+/** Recognizes only bounded application-owned preparation failures, never arbitrary provider error text. */
+export function isToolRejectionCode(value: unknown): value is ToolRejectionCode {
+  return TOOL_REJECTION_CODES.some(code => code === value);
+}
+
+/** Validates a durable dispatch decision; absent decisions remain readable only for legacy history. */
+function validToolPreparation(value: unknown): value is ToolPreparation {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.hasOwn(value, 'status')) return false;
+  const decision = value as Record<string, unknown>;
+  const keys = Object.keys(decision);
+  return (decision.status === 'approved' && keys.length === 1)
+    || (decision.status === 'rejected' && keys.length === 2 && Object.hasOwn(decision, 'code') && isToolRejectionCode(decision.code));
+}
+
 interface EventBase {
   PK: string;
   SK: string;
@@ -21,7 +39,8 @@ interface EventBase {
 
 export type EventPayload =
   | { entity_type: 'USER_MESSAGE'; role: 'user'; content: string }
-  | { entity_type: 'TOOL_CALL'; assistant_message_id: string; content_block_index: number; tool_use_id: string; tool_name: string; arguments: JsonObject }
+  | { entity_type: 'TOOL_CALL'; assistant_message_id: string; content_block_index: number; tool_use_id: string; tool_name: string;
+    arguments: JsonObject; preparation?: ToolPreparation }
   | { entity_type: 'TOOL_RESULT'; tool_use_id: string; tool_name: string; status: 'success' | 'error'; output: JsonObject }
   | { entity_type: 'ASSISTANT_MESSAGE'; role: 'assistant'; model_id: string; stop_reason: string; content: string }
   | { entity_type: 'TURN_OUTCOME'; outcome: 'failed' | 'timed_out' | 'cancelled' | 'abandoned'; retryable: boolean; failure_phase: string; error_code: string };
@@ -212,7 +231,9 @@ function validatePayload(payload: EventPayload): void {
     case 'USER_MESSAGE': valid = payload.role === 'user' && text(payload.content, 32_768); break;
     case 'ASSISTANT_MESSAGE': valid = payload.role === 'assistant' && text(payload.content, 32_768) && text(payload.model_id, 256) && text(payload.stop_reason, 64); break;
     case 'TOOL_CALL': valid = text(payload.assistant_message_id, 128) && text(payload.tool_use_id, 128) && text(payload.tool_name, 128)
-      && Number.isInteger(payload.content_block_index) && payload.content_block_index >= 0 && payload.content_block_index <= 128 && jsonObject(payload.arguments); break;
+      && Number.isInteger(payload.content_block_index) && payload.content_block_index >= 0 && payload.content_block_index <= 128 && jsonObject(payload.arguments)
+      && (payload.preparation === undefined || validToolPreparation(payload.preparation))
+      && (payload.preparation?.status !== 'rejected' || Object.keys(payload.arguments).length === 0); break;
     case 'TOOL_RESULT': valid = text(payload.tool_use_id, 128) && text(payload.tool_name, 128) && ['success', 'error'].includes(payload.status) && jsonObject(payload.output); break;
     case 'TURN_OUTCOME': valid = ['failed', 'timed_out', 'cancelled', 'abandoned'].includes(payload.outcome) && typeof payload.retryable === 'boolean'
       && text(payload.failure_phase, 64) && text(payload.error_code, 64) && (payload.outcome !== 'abandoned' || payload.retryable === false); break;

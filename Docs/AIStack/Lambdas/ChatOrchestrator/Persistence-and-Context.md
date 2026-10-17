@@ -19,7 +19,7 @@ Only metadata carries `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<upd
 Event variants are:
 
 - `USER_MESSAGE`: original user text and role, stored once per logical turn; no attempt ID.
-- `TOOL_CALL`: original tool-use ID/name, validated arguments, model-response group ID, and content-block index.
+- `TOOL_CALL`: original tool-use ID/name, validated arguments, model-response group ID, content-block index, and application-owned `preparation` decision. New calls always include approved/rejected status and an allowlisted code for rejection; the optional field keeps completed legacy history readable without changing table keys/indexes or schema version.
 - `TOOL_RESULT`: matching tool ID/name, success/error status, and bounded output; may be a pending query checkpoint or terminal evidence/error.
 - `ASSISTANT_MESSAGE`: completed public answer, model ID, stop reason, and role; one full response, not token fragments.
 - `TURN_OUTCOME`: failed/timed-out attempt metadata, retryability, phase, and safe error code. The schema also supports cancelled/abandoned variants, but the current handler emits failed/timed-out outcomes, not an authenticated Stop or abandonment workflow.
@@ -50,10 +50,12 @@ Retry means the same turn ID and exact message with a fresh attempt, not another
 
 `ToolExecutor.recover()` considers original calls/results for the current logical turn across attempts:
 
-- Terminal results are reused as original events, not copied into the new attempt or redispatched.
-- Pending checkpoints retain execution ID, original validated request, and original submission time. Recovery verifies them against the saved call and polls that ID; it never restarts its 180-second clock.
-- A saved confirmed Athena failure keeps tools disabled. Provably later queued calls in the halted group receive missing `NOT_EXECUTED` results without duplication.
-- Missing/unknown dispatch evidence or contradictory later activity fails closed. This is not an exactly-once guarantee for an unconfirmed external submission.
+- Terminal results, including RAG successes/errors, are reused verbatim as original events, not copied into the new attempt or silently refreshed.
+- Preparation approval/rejection is written atomically in the original call item. If a rejected call lacks its result, recovery saves its original bounded rejection instead of validating sanitized `{}` as a new request. Valid rejection codes are `INVALID_TOOL`, `INVALID_TOOL_INPUT`, `TOOL_LIMIT_REACHED`, and `FINALIZATION_REQUIRED`; raw rejected arguments remain absent. Existing matching rejection/`NOT_EXECUTED` results are reused without another write, while contradictory dispatch evidence fails closed. A recovered effective `INVALID_TOOL` still disables tools.
+- Only Athena pending checkpoints retain execution ID, original validated request, and original submission time. Recovery verifies them against the saved call and polls that ID; it never restarts its 180-second clock.
+- A durably approved RAG call missing its result may be revalidated/reissued as a read-only operation under the original tool-use/group identity and saved ordinal, subject to the shared eight-call ceiling/deadline. The actual new version/content is persisted; a changed corpus can produce a changed read. An older incomplete RAG call without a preparation decision fails with `UNKNOWN_TOOL_DISPATCH`: its original decision cannot be safely inferred, especially for argument-free discovery. Completed older results still replay. There is no RAG query checkpoint, remote cancellation, or automatic legacy-history rewrite.
+- A saved confirmed Athena failure keeps tools disabled. Provably later queued calls in the halted group, including RAG calls, receive missing `NOT_EXECUTED` results without duplication.
+- Unknown Athena dispatches, contradictory later activity, invalid stored requests, and persistence failures stay fatal. The RAG reread exception is not an exactly-once guarantee for external submissions. See [RAG integration](RAG-Tools.md).
 
 If final assistant persistence might have committed but its acknowledgment is lost, the handler reports `OUTCOME_NOT_CONFIRMED` rather than appending a contradictory failed outcome. Retrying the original turn after the active lease expires checks the durable result. A transport failure alone does not undo completion or authorize a duplicate investigation.
 
@@ -75,7 +77,7 @@ Saved results from earlier attempts can complete an original group; failed-attem
 
 The planner retains six completed turns, considers up to twelve older completed turns per summary chunk, and stops at the current or unresolved/retryable turn. Nonretryable resolved audit-only turns can fall inside coverage but contribute no fabricated conversation text. Overlapping sequence ranges caused by retries are backed off until the checkpoint covers whole turns. No unsafe prefix means no compaction; a valid hard-bounded context may still be used, otherwise the request fails.
 
-When eligible history and time remain, the orchestrator emits `summarizing`, calls `ModelRunner.summarize()` with tools disabled, and combines the previous summary with eligible completed history. Summary generation is limited to 1,024 tokens/8 KiB and must complete normally; it is not streamed to the user.
+When eligible history and time remain, the orchestrator emits `summarizing`, calls `ModelRunner.summarize()` with tools disabled, and combines the previous summary with eligible completed history. Its instruction retains relevant playbook document/version/section references and safety context while separating recommendations from observed evidence. Summary generation remains limited to 1,024 tokens/8 KiB and must complete normally; it is not streamed to the user.
 
 `saveSummary()` independently verifies the real stored checkpoint, forward progress, current lease, and whole resolved-turn coverage. One transaction puts the summary and updates `latest_summary_sk`/`summary_covers_through_sk` on metadata. The next build uses that exact pointer plus subsequent events; multiple chunks may be summarized under one request if needed. Old events and prior summaries are not deleted, and no TTL/retention cleanup is implemented.
 
@@ -91,4 +93,4 @@ When eligible history and time remain, the orchestrator emits `summarizing`, cal
 | Generated summary | 1,024 tokens / 8 KiB; `saveSummary()` separately allows text up to 16 KiB. |
 | Final model answer | 2,048 tokens / 32 KiB. |
 
-Compaction reduces provider input, not the audit-retrieval bound. A very long conversation can still reach storage/history limits even with small summaries. Conversation records are sensitive; none of their bodies, tool arguments/results, or summaries belong in operational logs. Authentication, explicit abandonment, retention, and incident-state expansion remain separate future slices.
+Compaction reduces provider input, not the audit-retrieval bound. Increasing the shared tool allowance to eight did not increase any limit above: eight maximum-sized results may not fit, and current-turn evidence/guidance must not be clipped or compacted across unsafe boundaries. A very long conversation can still reach storage/history limits even with small summaries. Conversation records are sensitive; none of their bodies, Markdown, tool arguments/results, or summaries belong in operational logs. Authentication, explicit abandonment, retention, and incident-state expansion remain separate future slices.

@@ -1,17 +1,18 @@
 import { z } from 'zod';
-import { PlaybookDocument, PlaybookSection, playbookIdSchema } from './index-contract';
+import { PlaybookDocument, PlaybookSection, playbookDocumentSchema, playbookIdSchema, playbookSectionSchema } from './index-contract';
 
 export const MAX_REQUEST_BYTES = 4_096;
 export const MAX_RESPONSE_BYTES = 32_768;
 
+export const describeDocumentsRequestSchema = z.strictObject({ operation: z.literal('describe_documents') });
+export const describeDocumentRequestSchema = z.strictObject({ operation: z.literal('describe_document'), document_id: playbookIdSchema });
+export const retrieveSectionsRequestSchema = z.strictObject({
+  operation: z.literal('retrieve_sections'), document_id: playbookIdSchema,
+  section_ids: z.array(playbookIdSchema).min(1).max(3)
+    .refine(ids => new Set(ids).size === ids.length, 'Section IDs must be distinct.'),
+});
 export const requestSchema = z.discriminatedUnion('operation', [
-  z.strictObject({ operation: z.literal('describe_documents') }),
-  z.strictObject({ operation: z.literal('describe_document'), document_id: playbookIdSchema }),
-  z.strictObject({
-    operation: z.literal('retrieve_sections'), document_id: playbookIdSchema,
-    section_ids: z.array(playbookIdSchema).min(1).max(3)
-      .refine(ids => new Set(ids).size === ids.length, 'Section IDs must be distinct.'),
-  }),
+  describeDocumentsRequestSchema, describeDocumentRequestSchema, retrieveSectionsRequestSchema,
 ]);
 
 export type RagRequest = z.infer<typeof requestSchema>;
@@ -42,6 +43,42 @@ const FAILURES = {
   INTERNAL_ERROR: ['The RAG tool could not safely complete the operation.', false],
 } as const;
 export type ErrorCode = keyof typeof FAILURES;
+
+const catalogShape = {
+  document_id: playbookDocumentSchema.shape.document_id,
+  title: playbookDocumentSchema.shape.title,
+  version: playbookDocumentSchema.shape.version,
+  incident_types: playbookDocumentSchema.shape.incident_types,
+  keywords: playbookDocumentSchema.shape.keywords,
+  retrieval_context: playbookDocumentSchema.shape.retrieval_context,
+  section_count: z.number().int().positive(),
+};
+const catalogSchema = z.strictObject(catalogShape);
+const documentSchema = catalogSchema.extend({
+  source: playbookDocumentSchema.shape.source, license: playbookDocumentSchema.shape.license,
+});
+const sectionSchema = playbookSectionSchema.omit({ heading_path: true });
+const correlationSchema = z.string().regex(/^[a-zA-Z0-9-]{1,128}$/);
+const errorCodes = Object.keys(FAILURES) as [ErrorCode, ...ErrorCode[]];
+
+/** Validates the complete private wire response without importing a handler, S3 client, or corpus data. */
+export const responseSchema = z.union([
+  z.strictObject({ ok: z.literal(true), operation: z.literal('describe_documents'), correlation_id: correlationSchema,
+    documents: z.array(catalogSchema).min(1) }),
+  z.strictObject({ ok: z.literal(true), operation: z.literal('describe_document'), correlation_id: correlationSchema,
+    document: documentSchema, sections: z.array(sectionSchema).min(1) }),
+  z.strictObject({ ok: z.literal(true), operation: z.literal('retrieve_sections'), correlation_id: correlationSchema,
+    document: documentSchema, sections: z.array(z.strictObject({ section_id: playbookIdSchema,
+      title: playbookSectionSchema.shape.title, markdown: z.string().min(1).refine(value => /\S/u.test(value)) })).min(1).max(3) }),
+  z.strictObject({ ok: z.literal(false), operation: z.enum(['describe_documents', 'describe_document', 'retrieve_sections']).nullable(),
+    correlation_id: correlationSchema, error: z.strictObject({ code: z.enum(errorCodes), message: z.string().min(1).max(512),
+      retryable: z.boolean() }) }).superRefine((response, context) => {
+    const [message, retryable] = FAILURES[response.error.code];
+    if (response.error.message !== message || response.error.retryable !== retryable) {
+      context.addIssue({ code: 'custom', path: ['error'], message: 'Unexpected public error contract.' });
+    }
+  }),
+]);
 
 /** Carries only a fixed public error code; SDK and source diagnostics never become response text. */
 export class RagError extends Error {

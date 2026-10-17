@@ -1,13 +1,13 @@
 # Agent Loop and Tools
 
-This guide follows the investigation inside one accepted turn. See [request/streaming](Request-and-Streaming.md) for the outer handler and [persistence/context](Persistence-and-Context.md) for saved state and recovery. The [Code Guide](Code-Guide.md) maps all ten modules.
+This guide follows the investigation inside one accepted turn. See [request/streaming](Request-and-Streaming.md) for the outer handler, [RAG integration](RAG-Tools.md) for document calls, and [persistence/context](Persistence-and-Context.md) for saved state and recovery. The [Code Guide](Code-Guide.md) maps all eleven modules.
 
 ## One model cycle
 
 [Orchestrator.run()](../../../../infra/lambdas/ai/chat-orchestrator/orchestrator.ts) starts by counting this logical turn's existing `TOOL_CALL` events and calling `ToolExecutor.recover()`. It then repeats:
 
 1. Check the shared time budget and rebuild context through `context()`. This reloads events and the latest summary; compaction is conditional, not performed on every model call.
-2. Decide whether to offer tools: `finalizationOnly` must be false, the recorded tool count must be below four, and `canDispatch(200_000)` must pass. That check requires more than 200 seconds plus the 90-second finalization reserve.
+2. Decide whether to offer tools: `finalizationOnly` must be false, the shared recorded tool count must be below eight, and `canDispatch(200_000)` must pass. That unchanged check requires more than 200 seconds plus the 90-second finalization reserve.
 3. Emit safe `investigating` or `finalizing` activity and call `ModelRunner.respond()` with messages and the tool-availability flag.
 4. If the response has no tool calls and an accepted stop reason (`end_turn`, `stop_sequence`, or `max_tokens`), return it to the handler. The handler, not this method, persists the final answer and emits completion.
 5. Otherwise `prepare()` validates and records every proposed block, then executes eligible calls sequentially. Saved results feed the next model cycle unless a fatal error or confirmed-failure finalization intervenes.
@@ -16,15 +16,18 @@ Application code owns these decisions. The model chooses only declared tools and
 
 ## Prompt, schemas, and model adaptation
 
-[prompt.ts](../../../../infra/lambdas/ai/chat-orchestrator/prompt.ts) supplies `soc_bot_system_v1` and its stable read-only policy. It tells the model to treat requests, logs, catalog descriptions, tool results, and summaries as untrusted; distinguish observations from inference; cite provenance; and state missing evidence. It explicitly says playbook retrieval is unavailable. These are model instructions, not a programmatic proof that every answer is correct.
+[prompt.ts](../../../../infra/lambdas/ai/chat-orchestrator/prompt.ts) supplies `soc_bot_system_v2` and its read-only policy. Requests, logs, tool results, summaries, and retrieved Markdown/metadata/URLs/commands are untrusted, not instructions or authorization. It distinguishes observed event evidence from procedural guidance, requires separate document/version/section citations, and keeps recommendations human-controlled. It directs discovery/inspection when needed, reuse of established IDs, and retrieval for relevant incident-response recommendations, not mandatory discovery for greetings/simple counts. Only log queries require time ranges. These are model instructions, not a programmatic proof of every answer.
 
-[contracts.ts](../../../../infra/lambdas/ai/chat-orchestrator/contracts.ts) derives the three Bedrock JSON Schemas from strict Zod definitions:
+[contracts.ts](../../../../infra/lambdas/ai/chat-orchestrator/contracts.ts) derives all six Bedrock JSON Schemas from strict Zod definitions:
 
 - `describe_table`: approved catalog metadata without scanning events.
 - `query_events`: bounded event evidence from one approved table and UTC range.
 - `aggregate_events`: approved numeric metrics/grouping over a bounded range.
+- `describe_documents`: all indexed document metadata, with no arguments.
+- `describe_document`: one document's detailed metadata and indexed section IDs.
+- `retrieve_sections`: one to three distinct selected sections from one document, retaining full original guidance/context/provenance.
 
-`validateTool()` validates again at execution time and invokes the shared controlled-query compiler for data requests. Changing table facts are supplied separately through `tableFacts()`; there is no RAG tool, arbitrary SQL, shell, HTTP, or remediation tool. The [Athena query guide](../AthenaQueryTool/README.md) owns detailed filters, fields, groups, and result bounds.
+`validateTool()` validates again at execution time and invokes the controlled-query compiler only for Athena data requests. RAG schemas reuse the pure backend request/ID contract, remove `operation` from model input, and enforce distinct section IDs at runtime. The adapter supplies the operation; no Lambda/bucket/key/URL override is accepted. Changing table facts remain separate through `tableFacts()`. There is no arbitrary SQL, shell, HTTP, or remediation tool. See the [Athena query guide](../AthenaQueryTool/README.md) and [RAG guide](../RAGTool/README.md) for each backend contract.
 
 [model.ts](../../../../infra/lambdas/ai/chat-orchestrator/model.ts) sends `ConverseStream` to the configured profile with the versioned prompt, table facts, bounded messages, and tool definitions only when allowed. Extended thinking is disabled; reasoning blocks are discarded rather than retained or streamed. The parser checks event/block ordering, unique identifiers, valid stop reasons, and size/token limits before returning `ModelResponse`. It attempts to parse tool-input JSON; malformed input becomes `null` for execution-time validation to reject safely.
 
@@ -34,11 +37,11 @@ Tool-enabled answer text is buffered until the stop reason is known. If that res
 
 ## Validation, recording, and dispatch
 
-`prepare()` creates one `assistant_message_id` for the model response, preserves each block's index/use ID/name, and increments the count for every block, including invalid and excess ones. Each call is saved before dispatch. Invalid arguments are replaced with `{}` in the audit call rather than copied into storage.
+`prepare()` creates one `assistant_message_id` for the model response, preserves each block's index/use ID/name, and increments the count for every block, including invalid and excess ones. Each call is saved before dispatch with an application-owned `preparation` decision: `{status: "approved"}` or `{status: "rejected", code: <allowlisted rejection code>}`. Invalid arguments stay `{}` rather than being copied into storage; the rejection reason is durably saved in that same call write, not only in memory.
 
-Valid requests go to [ToolExecutor.execute()](../../../../infra/lambdas/ai/chat-orchestrator/tools.ts). Rejected blocks receive bounded persisted errors such as `INVALID_TOOL_INPUT`, `TOOL_LIMIT_REACHED`, or `FINALIZATION_REQUIRED`. A correctable input error can be returned to the model for correction if tools/time remain; an unsupported tool name sets finalization-only mode. No call beyond the four-block dispatch allowance executes, and retries do not reset the count.
+Valid requests go to [ToolExecutor.execute()](../../../../infra/lambdas/ai/chat-orchestrator/tools.ts). Rejected blocks receive bounded persisted errors such as `INVALID_TOOL_INPUT`, `TOOL_LIMIT_REACHED`, or `FINALIZATION_REQUIRED`. A correctable input error can be returned to the model if tools/time remain; an unsupported tool name sets finalization-only mode. All six tools, discovery, invalid blocks, and retry history share the eight-call dispatch ceiling; recovery does not create another logical call or reset the count.
 
-Calls run sequentially through the exact configured query Lambda using synchronous Lambda invocation, not direct Athena access. Invocation and response decoding are bounded. The Lambda client has `maxAttempts: 1`; ambiguous query submissions are not blindly retried.
+Calls run sequentially through the exact configured query or RAG Lambda using synchronous invocation, never direct Athena/S3 access. Both clients have `maxAttempts: 1`. RAG has its own up-to-180-second invocation wait, not the Athena helper's 20 seconds; it validates complete responses and persists successes/known errors before model reuse. A normal RAG failure permits correction or continued investigation, not finalization-only. Malformed protocols, exhausted turn budgets, and persistence failures remain fatal. See [RAG integration](RAG-Tools.md) for recovery and local-wait semantics.
 
 For `describe_table`, a successful metadata response is persisted as a terminal result immediately. A failed description is fatal; it is not a confirmed terminal Athena execution.
 
@@ -75,6 +78,6 @@ Final explanation becomes a completed assistant event only if model synthesis an
 
 ## Bounds and recovery
 
-The main controls are four model-issued tool blocks across retries, a ten-minute budget per accepted invocation, 90-second model-request bounds, 2,048-token/32 KiB answers, and bounded context/provider requests. Query results remain capped at 100 rows/64 KiB before storage/model use. Tool input is bounded at 16 KiB per streamed model block. These are independent controls, not one interchangeable token limit.
+The main controls are eight shared model-issued tool blocks across retries, a ten-minute budget per accepted invocation, 90-second model-request bounds, 2,048-token/32 KiB answers, and unchanged context/provider limits. Query results remain capped at 100 rows/64 KiB; RAG requests/responses are capped at 4/32 KiB. Tool input is bounded at 16 KiB per streamed model block. Eight maximum-sized results may exceed context; current-turn guidance is never clipped or compacted unsafely to make it fit. These are independent controls, not one interchangeable token limit.
 
-Before new model work, `recover()` reuses saved terminal results without copy-writing them, validates pending checkpoints against the original call, and polls only known IDs under their original deadlines. Confirmed-failure group markers let it safely finish missing `NOT_EXECUTED` records for provably queued calls. Contradictory dispatch evidence fails closed. See [persistence/context](Persistence-and-Context.md#retry-recovery) for how event identity and reconstruction support this path.
+Before new model work, `recover()` reuses saved terminal results without copy-writing them. Interrupted rejected calls receive their saved rejection result, never revalidation/dispatch of sanitized `{}`. Only a RAG call with durable approved preparation and no result may be revalidated/reissued under its original tool-use identity and saved ordinal, within the same cap/deadline; it can observe a newer corpus revision. Legacy incomplete RAG calls without a decision are ambiguous and fail closed; completed legacy results still replay. Athena checkpoints are validated against the original call and only known IDs are polled under their original deadlines. Confirmed-failure markers still complete missing `NOT_EXECUTED` records for provably queued calls, including RAG. Contradictory evidence fails closed. See [persistence/context](Persistence-and-Context.md#retry-recovery).

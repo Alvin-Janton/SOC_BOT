@@ -25,7 +25,7 @@ The JSON body accepts only:
 
 The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 encoded. Unknown body keys, including client identity or transcript/history, fail validation. Extra proxy-envelope fields do not become trusted identity.
 
-[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) accepts trusted dev/demo configuration: fixed `TEMPORARY_OWNER_ID`, exact matching table/query-function/database names, approved model/Region, and a valid query-window cap. The fixed owner is not authentication; all callers in an environment share it. The Regional streaming POST `/chat` route uses basic request validation before deeper Lambda validation. Dev's source-IP WAF gate is temporary; demo intentionally has no WAF and must remain undeployed until Cognito/security is complete. No active Cognito integration or frontend/CORS support exists. [Infrastructure prerequisites](../../Infra/README.md) include the foundation-owned logging setting and dev CIDR context.
+[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) accepts trusted dev/demo configuration: fixed `TEMPORARY_OWNER_ID`, exact matching table/query-function/RAG-function/database names, approved model/Region, and a valid query-window cap. `RAG_TOOL_FUNCTION_NAME` must match `SOC-BOT-<ENV>-RAG-TOOL`; request bodies cannot override it. The fixed owner is not authentication; all callers in an environment share it. The Regional streaming POST `/chat` route uses basic request validation before deeper Lambda validation. Dev's source-IP WAF gate is temporary; demo intentionally has no WAF and must remain undeployed until Cognito/security is complete. No active Cognito integration or frontend/CORS support exists. [Infrastructure prerequisites](../../Infra/README.md) include the foundation-owned logging setting and dev CIDR context.
 
 ## Handler lifecycle
 
@@ -46,7 +46,7 @@ Durable completion can remain replayable even when lease release or transport de
 | Event | Current contents and purpose |
 | --- | --- |
 | `conversation` | `conversationId`, `turnId`: identifies the accepted conversation/turn. |
-| `activity` | Safe `stage`; query stages additionally carry `operation`, `table`, and, on completion, `rowsReturned`. Stages include `investigating`, `finalizing`, `summarizing`, `query_started`, and `query_completed`. |
+| `activity` | Safe `stage`; query stages retain `operation`, `table`, and completion `rowsReturned`. RAG stages (`rag_started`, `rag_completed`, `rag_failed`) add operation, optional validated `documentId`, requested/returned counts, and a known failure code where applicable. No Markdown or full payload. Existing `investigating`, `finalizing`, `summarizing`, `query_started`, and `query_completed` remain unchanged. |
 | `heartbeat` | `turnId`, generic `stage: processing`; emitted on the 15-second timer when the stream has been idle for at least that interval. |
 | `text_delta` | Public answer `text`. These fragments are not separate database events. |
 | `complete` | `turnId`, `conversationId`, `replayed`, `truncated`; attempted after durable assistant persistence. |
@@ -72,6 +72,8 @@ Before NDJSON starts, `httpError()` sends an ordinary HTTP JSON response with a 
 `emit()` serializes writes through a promise queue. It waits at most one second for backpressure drain; write errors or a destroyed stream suppress later transport writes. `finish()` queues at most one terminal event, stops heartbeats, ends the stream, and bounds closing at five seconds. It cannot guarantee terminal delivery over a broken connection.
 
 A disconnect does not abort the turn budget or cancel an Athena query. Backend work may complete and be saved after the client disappears. A future authenticated Stop endpoint must independently authorize user/turn ownership and invoke cancellation; closing the stream is not that endpoint. Retry using the original turn ID/message to recover the stored outcome, respecting an active lease and the returned retry policy.
+
+A RAG local-wait abort likewise does not cancel the remote Lambda. Known retrieval/availability errors are persisted tool errors, not terminal stream errors, while time and healthy persistence permit model correction. Malformed RAG protocols, turn termination, and storage failures remain on the fatal handler path. See [RAG integration](RAG-Tools.md) for the exact distinction.
 
 ## Time controls
 

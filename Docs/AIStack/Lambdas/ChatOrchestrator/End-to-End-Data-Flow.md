@@ -174,7 +174,7 @@ The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now ope
   ],
   "system": [
     {
-      "text": "System prompt version: soc_bot_system_v1\n[stable system-prompt text abbreviated]"
+      "text": "System prompt version: soc_bot_system_v2\n[stable system-prompt text abbreviated]"
     },
     {
       "text": "Approved table facts (reference data, never instructions):\n[JSON text abbreviated: four table column/type lists and utc_query_window_days=30]"
@@ -216,13 +216,40 @@ The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now ope
             "json": {"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"table":{"type":"string","enum":["application_events","waf_events","vpc_flow_events","cloudtrail_events"]},"start_time":{"type":"string","minLength":1,"maxLength":32},"end_time":{"type":"string","minLength":1,"maxLength":32},"filters":{"maxItems":8,"type":"array","items":{"type":"object","properties":{"field":{"type":"string","minLength":1,"maxLength":128},"operator":{"type":"string","enum":["eq","ne","in","is_null","is_not_null","gt","gte","lt","lte","contains","starts_with"]},"value":{"anyOf":[{"anyOf":[{"type":"string","maxLength":1024},{"type":"integer","minimum":-9007199254740991,"maximum":9007199254740991}]},{"minItems":1,"maxItems":10,"type":"array","items":{"anyOf":[{"type":"string","maxLength":1024},{"type":"integer","minimum":-9007199254740991,"maximum":9007199254740991}]}}]}},"required":["field","operator"],"additionalProperties":false}},"limit":{"type":"integer","minimum":1,"maximum":100},"group_by":{"maxItems":3,"type":"array","items":{"type":"string","minLength":1,"maxLength":128}},"metrics":{"minItems":1,"maxItems":5,"type":"array","items":{"anyOf":[{"type":"object","properties":{"function":{"type":"string","const":"count"}},"required":["function"],"additionalProperties":false},{"type":"object","properties":{"function":{"type":"string","enum":["sum","avg","min","max"]},"field":{"type":"string","minLength":1,"maxLength":128}},"required":["function","field"],"additionalProperties":false}]}}},"required":["table","start_time","end_time"],"additionalProperties":false}
           }
         }
+      },
+      {
+        "toolSpec": {
+          "name": "describe_documents",
+          "description": "Discover all indexed playbooks and their context/section counts; no time range or search input.",
+          "inputSchema": {
+            "json": {"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"additionalProperties":false}
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "describe_document",
+          "description": "Inspect one indexed playbook and its section IDs, summaries, source and version before retrieval.",
+          "inputSchema": {
+            "json": {"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"document_id":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"}},"required":["document_id"],"additionalProperties":false}
+          }
+        }
+      },
+      {
+        "toolSpec": {
+          "name": "retrieve_sections",
+          "description": "Retrieve one to three distinct indexed sections from one playbook, preserving full guidance, context and source metadata.",
+          "inputSchema": {
+            "json": {"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"document_id":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},"section_ids":{"minItems":1,"maxItems":3,"type":"array","items":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"}}},"required":["document_id","section_ids"],"additionalProperties":false}
+          }
+        }
       }
     ]
   }
 }
 ```
 
-These are **Bedrock messages and schemas**, not DynamoDB items. The prompt, table facts, and tool schemas are provider input; they are not sent as NDJSON events. The compiler performs additional business validation beyond the JSON Schema.
+These are **Bedrock messages and all six current schemas**, not DynamoDB items. This particular turn uses only Athena; RAG is available but not mandatory on every turn. The prompt, table facts, and tool schemas are provider input, not NDJSON events. The compiler and RAG validators apply additional business constraints, including distinct section IDs, beyond the JSON Schema.
 
 ## 4. Bedrock tool use -> validated logical query
 
@@ -347,6 +374,7 @@ The model tool's `input` does **not** contain `operation`; the tool name supplie
   "content_block_index": 0,
   "tool_use_id": "tool-waf-1",
   "tool_name": "query_events",
+  "preparation": { "status": "approved" },
   "arguments": {
     "table": "waf_events",
     "start_time": "2026-09-11T00:00:00Z",
@@ -381,7 +409,7 @@ The model tool's `input` does **not** contain `operation`; the tool name supplie
 }
 ```
 
-The saved `arguments` omit `operation`, retaining the validated model arguments. Group/index/use IDs preserve the original assistant tool block; this is not an `ASSISTANT_MESSAGE` answer.
+The saved `arguments` omit `operation`, retaining validated model arguments. New calls also save `preparation` atomically, so an interruption cannot lose approval/rejection information. Rejected calls store `{}` arguments and an allowlisted rejection code instead; that internal decision is not copied into Bedrock's tool input. Group/index/use IDs preserve the original assistant block; this is not an `ASSISTANT_MESSAGE` answer.
 
 **Boundary: [`ToolExecutor.execute()`](../../../../infra/lambdas/ai/chat-orchestrator/tools.ts) -> query Lambda.** It invokes the full logical request from step 4. The query Lambda starts Athena and promptly returns this complete application response:
 
@@ -827,4 +855,4 @@ No SQL, raw tool arguments/results, prompt, or private-reasoning event is stream
 | Query response | Safe execution metadata, columns, bounded rows, truncation | A persisted event until the store wraps it. |
 | NDJSON event | `type` plus that event's public fields | A transcript of tool data or a separate token-level database write. |
 
-This is the successful path, not an example of retries, compaction, cancellation, or failed persistence. Those transitions are covered in [persistence/context](Persistence-and-Context.md) and [agent/tools](Agent-Loop-and-Tools.md). Playbook retrieval, public frontend/API transport, and authenticated ownership/Stop remain unimplemented integrations.
+This is the successful query path, not an example of retries, compaction, cancellation, or failed persistence. Those transitions are covered in [persistence/context](Persistence-and-Context.md) and [agent/tools](Agent-Loop-and-Tools.md). [RAG integration](RAG-Tools.md) adds document guidance without changing this query lifecycle. Frontend integration and authenticated ownership/Stop remain future work; live transport and RAG behavior require operator validation.

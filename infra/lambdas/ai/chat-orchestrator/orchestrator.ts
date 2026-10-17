@@ -2,14 +2,14 @@ import { Message } from '@aws-sdk/client-bedrock-runtime';
 import { randomUUID } from 'node:crypto';
 import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { buildContext, planCompaction } from './context';
-import { LogicalQuery, validateTool } from './contracts';
+import { ToolRequest, isRagRequest, validateTool } from './contracts';
 import { ModelResponse, ModelRunner } from './model';
-import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError } from './store';
+import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError, ToolRejectionCode, isToolRejectionCode } from './store';
 import { StreamEvent } from './stream';
 import { isConfirmedQueryFailure, ToolExecutor } from './tools';
 
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
-interface PreparedCall { call: ToolCall; request?: LogicalQuery; rejection?: string }
+interface PreparedCall { call: ToolCall; request?: ToolRequest; rejection?: ToolRejectionCode }
 
 /** Implements the bounded model loop without giving the model an AWS identity or direct query access. */
 export class Orchestrator {
@@ -82,7 +82,7 @@ export class Orchestrator {
             await this.rejected(item.call, 'FINALIZATION_REQUIRED');
           } else {
             const output = await this.tools.execute(item.call, item.request!);
-            confirmedFailure = isConfirmedQueryFailure(output);
+            confirmedFailure = !isRagRequest(item.request!) && isConfirmedQueryFailure(output);
           }
         } catch (error) {
           // These remaining calls are known not to have been dispatched. Keep their original grouping.
@@ -116,21 +116,22 @@ export class Orchestrator {
     const prepared: PreparedCall[] = [];
     for (const tool of response.toolUses) {
       this.toolCalls++;
-      let request: LogicalQuery | undefined;
-      let rejection: string | undefined;
+      let request: ToolRequest | undefined;
+      let rejection: ToolRejectionCode | undefined;
       if (this.toolCalls > MAX_TOOL_CALLS) rejection = 'TOOL_LIMIT_REACHED';
       else if (!this.budget.canDispatch(200_000)) rejection = 'FINALIZATION_REQUIRED';
       else {
         try { request = validateTool(tool.name, tool.input, this.config); }
         catch (error) {
-          if (!(error instanceof ChatError)) throw error;
+          if (!(error instanceof ChatError) || !isToolRejectionCode(error.code)) throw error;
           rejection = error.code;
         }
       }
       // Invalid inputs are not copied into audit history; the bounded rejection still counts as a call.
       const args = request ? Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'operation')) as JsonObject : {};
       const event = await this.store.append(this.lease, { entity_type: 'TOOL_CALL', assistant_message_id: assistantMessageId,
-        content_block_index: tool.index, tool_use_id: tool.id, tool_name: tool.name, arguments: args });
+        content_block_index: tool.index, tool_use_id: tool.id, tool_name: tool.name, arguments: args,
+        preparation: rejection ? { status: 'rejected', code: rejection } : { status: 'approved' } });
       if (event.entity_type !== 'TOOL_CALL') throw new ChatError('STORAGE_ERROR', 'Conversation state could not be saved.');
       prepared.push({ call: event, request, rejection });
     }

@@ -49,6 +49,7 @@ export class AiStack extends Stack {
       deploymentEnvironment: props.deploymentEnvironment,
       chatHistoryTable: this.chatHistoryTable,
       queryToolFunction: this.queryTool.function,
+      ragToolFunction: this.ragTool.function,
       databaseName: props.database.ref,
       maxQueryWindowDays: props.maxQueryWindowDays,
     });

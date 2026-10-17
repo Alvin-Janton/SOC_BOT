@@ -15,6 +15,7 @@ export interface ChatOrchestratorProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
   readonly chatHistoryTable: ITable;
   readonly queryToolFunction: IFunction;
+  readonly ragToolFunction: IFunction;
   readonly databaseName: string;
   readonly maxQueryWindowDays?: number;
 }
@@ -56,7 +57,7 @@ export class ChatOrchestrator extends Construct {
     }));
     role.addToPolicy(new PolicyStatement({
       actions: ['lambda:InvokeFunction'],
-      resources: [props.queryToolFunction.functionArn],
+      resources: [props.queryToolFunction.functionArn, props.ragToolFunction.functionArn],
     }));
     const inferenceProfileArn = `arn:${Aws.PARTITION}:bedrock:${BEDROCK_INFERENCE_PROFILE.sourceRegion}:${Aws.ACCOUNT_ID}:inference-profile/${BEDROCK_INFERENCE_PROFILE.profileId}`;
     const foundationModelArn = `arn:${Aws.PARTITION}:bedrock:*::foundation-model/${BEDROCK_INFERENCE_PROFILE.foundationModelId}`;
@@ -86,6 +87,7 @@ export class ChatOrchestrator extends Construct {
         TEMPORARY_OWNER_ID: `soc-bot-${environment}-analyst`,
         CHAT_HISTORY_TABLE_NAME: props.chatHistoryTable.tableName,
         QUERY_TOOL_FUNCTION_NAME: props.queryToolFunction.functionName,
+        RAG_TOOL_FUNCTION_NAME: props.ragToolFunction.functionName,
         BEDROCK_MODEL_ID: BEDROCK_INFERENCE_PROFILE.profileId,
         BEDROCK_REGION: BEDROCK_INFERENCE_PROFILE.sourceRegion,
         DATABASE_NAME: props.databaseName,
