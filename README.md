@@ -51,6 +51,14 @@ SOC_BOT/
 
 The exact layout will evolve as planned MVP components are implemented. Empty directories are not created solely to match this outline.
 
+## Evaluator-only investigation cases
+
+[evaluation/cases.json](evaluation/cases.json) defines four standalone questions and evidence-backed reference keys for an initial application, WAF, and CloudTrail baseline. Its versioned JSON contract includes UTC scopes, reference counts and identifiers, outcome distinctions, indexed playbook guidance, unsupported conclusions, and separate criterion-specific 0/1/2 scoring anchors. Benign-case playbook scoring is explicitly not applicable; no weighted total or automatic pass threshold is defined.
+
+Only a case's `question` may enter the investigating agent's request, using a fresh conversation for each baseline case. All other fields remain evaluator-only. Never upload this file under `playbooks/` or investigated data, import it into runtime code, or package it in Lambda, Glue, or frontend assets. Runtime permissions are unchanged. Repository visibility does not guarantee secrecy from humans who can read the repository; the boundary is agent runtime/tool access.
+
+Reference facts were checked against local synthetic source records and the existing pure Glue parsers/normalizers, without querying AWS. The operator reported correcting ten trailing-space WAF client IPs, rerunning Glue, and confirming 61 rows in the selected Athena window; offline inspection independently confirms the current local count and references, not the deployed Parquet contents. Before the first evaluation run, the operator should confirm deployed records/identifiers match the keys. The reviewed database is `soc_bot_dev_security`; demo has not been verified. Application scopes use an exclusive next-day end, while WAF/CloudTrail questions include both endpoints; a future runner must respect the query tool's exclusive-end contract. Evaluation execution, judge design, result storage, and deployment/dataset revision tracking remain deferred. These four cases are a fixed baseline, not a general detector assessment.
+
 ## Infrastructure Development
 
 The repository is an npm workspace. The `@soc-bot/infra` workspace contains the TypeScript AWS CDK application and targets Node.js 22.
