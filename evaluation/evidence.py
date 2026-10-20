@@ -21,7 +21,28 @@ VARIANTS = {
 
 
 def decoded(value, depth: int = 0):
-    """Convert DynamoDB Decimals exactly and reject non-JSON attributes/deep data."""
+    """Convert a DynamoDB value into JSON-compatible Python values without losing precision.
+
+    Recursively copy dictionaries/lists, converting integral Decimals to integers
+    and fractional Decimals to exact decimal strings while retaining other allowed
+    scalar values. Reject unsupported types, non-string dictionary keys, non-finite
+    numbers and nesting deeper than the supported limit.
+
+    Example input:
+        value = {
+            "event_sequence": Decimal("3"),
+            "ratio": Decimal("0.1234567890123456789"),
+            "output": {"rows": [{"count_rows": Decimal("12")}], "ok": True},
+        }
+        depth = 0
+
+    Example output:
+        {
+            "event_sequence": 3,
+            "ratio": "0.1234567890123456789",
+            "output": {"rows": [{"count_rows": 12}], "ok": True},
+        }
+    """
 
     require(depth <= 24, "Durable JSON exceeds maximum nesting.")
 
@@ -41,7 +62,37 @@ def decoded(value, depth: int = 0):
 
 
 def read_events(session, table: str, conversation_id: str, statistics: dict) -> list[dict]:
-    """Paginate a strongly consistent PK/prefix Query, including empty pages."""
+    """Read a conversation's EVT# records using strongly consistent base-table queries.
+
+    Follow every pagination cursor, including those on empty pages, normalize
+    DynamoDB values with decoded(), and update statistics with page/record/byte
+    counts and SDK attempts. Enforce the read limits here; event validation and
+    filtering to a particular turn happen later in select().
+
+    Example input:
+        session = boto3.Session(
+            profile_name="soc-bot-evaluator", region_name="us-east-1",
+        )
+        table = "SOC-BOT-DEV-CHAT-HISTORY"
+        conversation_id = "conversation-001"
+        statistics = {}
+
+    Example output (one record shown; remaining stored fields/records omitted):
+        [
+            {
+                "PK": "CONV#conversation-001",
+                "entity_type": "USER_MESSAGE",
+                "conversation_id": "conversation-001",
+                "event_sequence": 1,
+                "role": "user",
+                "content": "Describe waf_events.",
+                # SK, UUIDs, schema version and timestamps omitted.
+            },
+        ]
+
+    statistics after a successful one-page read (illustrative sizes):
+        {"pages": 1, "records": 1, "decoded_bytes": 480, "service_attempts": 1}
+    """
 
     from botocore.config import Config
 
@@ -151,19 +202,104 @@ def validate_event(event: dict, conversation_id: str) -> None:
 
 
 def reference(event: dict) -> dict:
-    """Retain explicit causal identifiers without copying raw table envelopes."""
+    """Extract the event metadata needed to locate and order a stored evidence item.
+
+    Copy only the available event ID, sequence, turn ID, attempt ID, timestamp and
+    entity type, leaving message text, tool payloads and table keys behind.
+    Missing optional fields, such as a user message's attempt_id, stay absent.
+
+    Example input:
+        event = {
+            "event_id": "11111111-1111-4111-8111-111111111111",
+            "event_sequence": 3,
+            "turn_id": "22222222-2222-4222-8222-222222222222",
+            "attempt_id": "33333333-3333-4333-8333-333333333333",
+            "created_at": "2026-10-20T12:00:00.000Z",
+            "entity_type": "TOOL_RESULT",
+            "tool_use_id": "tool-001",
+            "output": {"ok": True, "rows": []},
+        }
+
+    Example output:
+        {
+            "event_id": "11111111-1111-4111-8111-111111111111",
+            "event_sequence": 3,
+            "turn_id": "22222222-2222-4222-8222-222222222222",
+            "attempt_id": "33333333-3333-4333-8333-333333333333",
+            "created_at": "2026-10-20T12:00:00.000Z",
+            "entity_type": "TOOL_RESULT",
+        }
+    """
 
     return {key: event[key] for key in ("event_id", "event_sequence", "turn_id", "attempt_id", "created_at", "entity_type") if key in event}
 
 
 def terminal(event: dict) -> bool:
-    """Mirror context.ts: errors are terminal; successful checkpoints are not."""
+    """Decide whether a TOOL_RESULT is final evidence rather than a pending checkpoint.
+
+    Error-status results are always terminal, while success-status results with
+    SUBMITTED, QUEUED, RUNNING or UNKNOWN states remain pending. Other successful
+    results are terminal, including tools such as describe_table that have no state.
+
+    Example input:
+        event = {"status": "success", "output": {"state": "SUBMITTED"}}
+    Example output:
+        False
+
+    Another input:
+        event = {"status": "success", "output": {"ok": True, "state": "SUCCEEDED"}}
+    Corresponding output:
+        True
+    """
 
     return event["status"] == "error" or event["output"].get("state") not in PENDING
 
 
 def select(records: list[dict], case: dict, application: dict) -> dict:
-    """Select complete call/result pairs across attempts and enforce final-answer agreement."""
+    """Validate conversation events and select the requested turn's causal evidence.
+
+    Require the matching user message and, for completed/truncated streams, exact
+    agreement with the persisted assistant answer before applying its event cutoff.
+    Pair calls with compatible terminal results across attempts, retaining pending
+    checkpoints for audit and rejecting conflicting or invalid associations.
+
+    Example input (repeated stored envelopes and some payload fields abbreviated):
+        records = [
+            {
+                "entity_type": "USER_MESSAGE", "event_sequence": 1,
+                "role": "user", "content": "Describe waf_events.",
+            },
+            {
+                "entity_type": "TOOL_CALL", "event_sequence": 2,
+                "assistant_message_id": "group-001", "content_block_index": 0,
+                "tool_use_id": "tool-001", "tool_name": "describe_table",
+                "arguments": {"table": "waf_events"},
+                "preparation": {"status": "approved"},
+            },
+            {
+                "entity_type": "TOOL_RESULT", "event_sequence": 3,
+                "tool_use_id": "tool-001", "tool_name": "describe_table",
+                "status": "success",
+                "output": {"ok": True, "table": "waf_events", "columns": []},
+            },
+            {
+                "entity_type": "ASSISTANT_MESSAGE", "event_sequence": 4,
+                "role": "assistant", "content": "The table contains WAF events.",
+                "model_id": "us.anthropic.claude-sonnet-4-6",
+                "stop_reason": "end_turn",
+            },
+        ]
+        # Actual records also include valid PK/SK, schema_version, conversation_id,
+        # UUID event_id/turn_id, created_at, and attempt_id for non-user events.
+        case = {"question": "Describe waf_events."}  # Other case fields omitted.
+        application = {
+            "conversation_id": "conversation-001",
+            "turn_id": "22222222-2222-4222-8222-222222222222",
+            "status": "completed",
+            "answer": "The table contains WAF events.",
+            "terminal": {"type": "complete", "truncated": False, "replayed": False},
+        }
+    """
 
     seen_sequences, seen_ids = set(), set()
 
@@ -245,7 +381,46 @@ def select(records: list[dict], case: dict, application: dict) -> dict:
 
 
 def execution_checks(case: dict, application: dict, evidence: dict) -> dict:
-    """Report declared coverage without mistaking it for semantic investigation completeness."""
+    """Summarize application status, tool outcomes and declared query-time coverage.
+
+    Compare successful named-table query intervals with the case scope using the
+    query tool's exclusive-end semantics, while allowing corroborating tables and
+    subwindows. Report counts, preparation decisions and available usage without
+    treating time coverage as proof that filters or bounded rows captured every event.
+
+    Example input (case, stream and selected-pair metadata abbreviated):
+        case = {
+            "scope": {
+                "table": "waf_events",
+                "start_time": "2026-10-20T00:00:00Z",
+                "end_time": "2026-10-21T00:00:00Z",
+                "end_inclusive": False,
+            },
+        }
+        application = {
+            "status": "completed",
+            "terminal": {"type": "complete", "truncated": False, "replayed": False},
+        }
+        evidence = {
+            "answer_agrees": True,
+            "pairs": [
+                {
+                    "tool_use_id": "tool-001", "tool_name": "query_events",
+                    "arguments": {
+                        "table": "waf_events",
+                        "start_time": "2026-10-20T00:00:00Z",
+                        "end_time": "2026-10-21T00:00:00Z",
+                    },
+                    "preparation": {"status": "approved"}, "status": "success",
+                    "output": {
+                        "ok": True, "state": "SUCCEEDED", "duration_ms": 1200,
+                        "bytes_scanned": 2048, "result_count": 1, "truncated": False,
+                    },
+                },
+            ],
+            "unresolved_calls": [],
+        }
+    """
 
     pairs = evidence["pairs"]
     scope = case["scope"]
@@ -285,7 +460,7 @@ def execution_checks(case: dict, application: dict, evidence: dict) -> dict:
 
     covered = reached > end if scope["end_inclusive"] else reached >= end
     preparations = [pair.get("preparation") for pair in pairs + evidence["unresolved_calls"]]
-    
+
     return {"application_status": application["status"], "terminal": application["terminal"],
             "answer_persistence_agreement": evidence["answer_agrees"], "logical_tool_calls": len(pairs) + len(evidence["unresolved_calls"]),
             "preparation_outcomes": {"approved": sum(item == {"status": "approved"} for item in preparations),

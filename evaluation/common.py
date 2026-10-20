@@ -92,10 +92,23 @@ def diagnostic(exc: BaseException) -> dict:
 
 
 def sdk_call(action, deadline: float, statistics: dict):
-    """Bound SDK work and transient retries; never retry an unfinished worker.
+    """Run action(deadline) in a daemon thread and return its result within a shared deadline.
 
-    The daemon worker owns and closes its client. A local deadline/interrupt does
-    not prove remote cancellation; late results are discarded, never graded.
+    Retry recognized transient failures up to three total attempts, waiting 0.5
+    then 1 second between attempts and updating statistics with attempts/failures.
+    An unfinished worker is never retried after the deadline, and stopping the
+    local wait does not cancel the remote AWS operation or accept its late result.
+
+    Example input (query is a callable supplied by read_events):
+        action = query                     # Passed as a function, not query().
+        deadline = time.monotonic() + 60    # Absolute monotonic time, not 60 alone.
+        statistics = {}
+
+    Example output (an abbreviated successful DynamoDB response):
+        {"Items": [], "Count": 0, "ScannedCount": 0}
+
+    statistics after that successful first attempt:
+        {"service_attempts": 1}
     """
 
     transient_codes = {"ThrottlingException", "TooManyRequestsException", "ServiceUnavailableException",
@@ -139,7 +152,7 @@ def sdk_call(action, deadline: float, statistics: dict):
 
         if not transient or attempt == 2:
             raise EvaluationError("SDK_REQUEST_FAILED", "SDK request failed; check profile, permissions, availability and recorded retry counts.") from result
-            
+
         wait = 0.5 * 2 ** attempt
         require(time.monotonic() + wait < deadline, "Stage deadline exceeded.", "STAGE_DEADLINE")
         time.sleep(wait)

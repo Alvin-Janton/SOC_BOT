@@ -22,7 +22,7 @@ def settings(model: str) -> dict:
     if model == DEFAULT_MODEL or model.endswith("/" + DEFAULT_MODEL):
         configuration["inferenceConfig"]["temperature"] = 0
         configuration["additionalModelRequestFields"] = {"thinking": {"type": "disabled"}}
-        
+
     return configuration
 
 
@@ -46,7 +46,29 @@ def request(model: str, prompt: str, data: dict) -> dict:
 
 
 def resolve_pointer(pointer: dict, data: dict):
-    """Resolve an origin-qualified RFC 6901 pointer to actual supplied evidence/key data."""
+    """Locate the exact value identified by a judge's evidence or ground-truth reference.
+
+    Require the path prefix to agree with its origin, then walk dictionary keys
+    and zero-based list indices, decoding RFC 6901 escapes (~1 for / and ~0 for ~).
+    Return the value at that location, whether scalar, list or dictionary, and
+    raise EvaluationError for invalid syntax, missing keys or out-of-range indices.
+
+    Example input:
+        pointer = {
+            "origin": "observed",
+            "path": "/observed/pairs/0/output/rows/0/request_id",
+        }
+        data = {
+            "observed": {
+                "pairs": [
+                    {"output": {"rows": [{"request_id": "request-001"}]}},
+                ],
+            },
+        }
+
+    Example output:
+        "request-001"
+    """
 
     require(isinstance(pointer, dict) and set(pointer) == {"origin", "path"}
             and pointer["origin"] in {"observed", "ground_truth"} and text(pointer["path"], 1024), "Invalid judge reference.")
@@ -73,7 +95,36 @@ def resolve_pointer(pointer: dict, data: dict):
 
 
 def references(values: object, data: dict) -> None:
-    """Require short, resolvable references without restricting them to key exemplars."""
+    """Validate an assessment's supporting reference list against the judge input bundle.
+
+    Require one to eight distinct pointers and pass each to resolve_pointer() so
+    its origin and path resolve to supplied evidence or ground truth. Allow any
+    valid supplied evidence location, rather than only the answer key's exemplars.
+
+    Example input (other judge-bundle fields omitted):
+        values = [
+            {
+                "origin": "observed",
+                "path": "/observed/pairs/0/output/rows/0/request_id",
+            },
+            {
+                "origin": "ground_truth",
+                "path": "/ground_truth/acceptable_evidence/0/source_record_ref",
+            },
+        ]
+        data = {
+            "observed": {
+                "pairs": [
+                    {"output": {"rows": [{"request_id": "request-001"}]}},
+                ],
+            },
+            "ground_truth": {
+                "acceptable_evidence": [
+                    {"source_record_ref": "request-001"},
+                ],
+            },
+        }
+    """
 
     require(isinstance(values, list) and 1 <= len(values) <= 8, "Expected one to eight judge references.")
     require(len({encoded(item) for item in values}) == len(values), "Duplicate judge references.")
@@ -141,7 +192,69 @@ def total(judgment: dict) -> dict:
 
 
 def grade(session, payload: dict, data: dict, stage: dict) -> dict:
-    """Invoke once logically (bounded transient retries), then strictly parse all text blocks."""
+    """Submit the prepared Converse request and validate the returned case judgment.
+
+    Use bounded SDK attempts, record attempt/stop-reason/token metadata in stage,
+    and join all response text blocks before strict JSON, rubric and reference
+    validation. Return the validated judgment without a total, raising on malformed
+    or unfinished output; the caller handles eligibility, totals and stage status.
+
+    Example input (payload text and reference/evidence snapshots abbreviated):
+        session = boto3.Session(
+            profile_name="soc-bot-evaluator", region_name="us-east-1",
+        )
+        payload = {
+            "modelId": "us.anthropic.claude-sonnet-4-6",
+            "system": [{"text": "...versioned judge instructions..."}],
+            "messages": [
+                {"role": "user", "content": [{"text": "...complete data as JSON..."}]},
+            ],
+            "inferenceConfig": {"maxTokens": 4096, "temperature": 0},
+            "additionalModelRequestFields": {"thinking": {"type": "disabled"}},
+        }
+        data = {
+            "case_id": "app-benign-001",
+            "ground_truth": {
+                "case_id": "app-benign-001", "expected_findings": [],
+                "scoring_notes": {
+                    "criteria": {
+                        "detection_and_false_positives": {
+                            "applicability": "applicable",
+                            # The full 0/1/2 anchors and other three criteria omitted.
+                        },
+                    },
+                },
+                # Other reviewed case fields omitted.
+            },
+            "observed": {
+                "answer": "No clear malicious activity in the inspected records.",
+                "pairs": [],  # Full selected tool evidence omitted here.
+            },
+            # Other bundle fields omitted; payload contains the complete snapshot.
+        }
+        stage = {"status": "incomplete", "usage": None}
+
+    Example possible output (criterion entries abbreviated; no model-owned total):
+        {
+            "case_id": "app-benign-001",
+            "criteria": {
+                "detection_and_false_positives": {
+                    "applicability": "applicable", "score": 2,
+                    "justification": "The answer makes a bounded negative finding.",
+                    "references": [{"origin": "observed", "path": "/observed/answer"}],
+                },
+                # Other three assessments omitted; benign guidance has score None.
+            },
+            "expected_findings": {}, "observed_findings": [],
+            "missed_findings": [], "false_positives": [], "unsupported_claims": [],
+        }
+
+    stage additions after that response (illustrative usage, existing fields retained):
+        {
+            "service_attempts": 1, "stop_reason": "end_turn",
+            "usage": {"inputTokens": 1200, "outputTokens": 400, "totalTokens": 1600},
+        }
+    """
 
     from botocore.config import Config
 
