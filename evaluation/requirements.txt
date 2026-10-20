@@ -1,0 +1,2 @@
+# Evaluator-only SDK. boto3 supplies its compatible botocore dependency.
+boto3==1.43.115
