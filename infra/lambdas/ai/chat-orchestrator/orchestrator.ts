@@ -59,7 +59,7 @@ export class Orchestrator {
       this.phase = allowTools ? 'model' : 'finalization';
       await this.emit({ type: 'activity', stage: allowTools ? 'investigating' : 'finalizing' });
       const response = await this.model.respond(messages, allowTools, this.budget,
-        text => this.emit({ type: 'text_delta', text }));
+        text => this.emit({ type: 'text_delta', text }), this.toolCalls);
       this.inputTokens += response.inputTokens;
       this.outputTokens += response.outputTokens;
       if (response.toolUses.length === 0) {

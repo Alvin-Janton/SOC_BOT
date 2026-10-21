@@ -48,6 +48,8 @@ Only definite conditional conflicts get bounded retries; ambiguous network failu
 
 Retry means the same turn ID and exact message with a fresh attempt, not another `USER_MESSAGE`. Completed answers replay without new tools/model calls. Incomplete retryable turns may acquire a new lease after release/expiry.
 
+Before recovery, `Orchestrator.run()` restores `toolCalls` from all durable current-turn `TOOL_CALL` events, including invalid, rejected, skipped and excess requests. It passes that count to every investigation/finalization model request; the trusted budget block derives remaining capacity from the same `MAX_TOOL_CALLS` used by enforcement. Neither retries nor compaction reset it. Forced finalization reports zero available calls even with unused nominal capacity; summaries receive no live budget and retain the unchanged summary task. See [call-allowance details](Agent-Loop-and-Tools.md#backend-derived-call-allowance).
+
 `ToolExecutor.recover()` considers original calls/results for the current logical turn across attempts:
 
 - Terminal results, including RAG successes/errors, are reused verbatim as original events, not copied into the new attempt or silently refreshed.
