@@ -28,7 +28,7 @@ A **turn** is one user message and its associated investigation and answer. A re
 | DynamoDB chat-history table | Conversation metadata, ordered audit events, attempt leases, and summary checkpoints. |
 | Query-tool Lambda | Approved catalog descriptions and controlled query start/status/cancel operations. That Lambda, not the orchestrator, reaches Athena and Lake Formation. |
 | RAG Lambda | Indexed playbook/section discovery and complete section reads. Only that Lambda reads the non-Lake-Formation `playbooks/` prefix. |
-| CloudWatch Logs | Operational identifiers, counts, timing, and outcome flags; not message bodies, tool arguments/results, summaries, credentials, or private reasoning. |
+| CloudWatch Logs | Operational identifiers, counts, timing and outcome flags, plus the narrowly approved temporary synthetic-dev [final-response diagnostics](Request-and-Streaming.md#temporary-dev-response-diagnostics). No raw request, full response, tool payload, summary or private-reasoning capture. |
 
 ## Security boundaries
 

@@ -66,6 +66,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
   let cancellationConfirmed = false;
   let completionWriteAttempted = false;
   let errorCode: string | undefined;
+  let responseDiagnostics: { stop_reason: string; response_preview: string } | undefined;
 
   try {
     const config = configuration();
@@ -102,6 +103,10 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
 
     orchestrator = new Orchestrator(config, store, begun.lease, budget, activity => stream!.emit(activity));
     const response = await orchestrator.run(begun.events);
+    // Temporary synthetic-dev privacy exception; capture once from the assembled fresh final response.
+    if (config.environment === 'dev') {
+      responseDiagnostics = { stop_reason: response.stopReason, response_preview: Array.from(response.text).slice(0, 100).join('') };
+    }
     budget.check();
     orchestrator.phase = 'persistence';
     completionWriteAttempted = true;
@@ -152,11 +157,12 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
   }
 
   finally {
-    // Intentionally exclude user text, tool arguments/results, summaries, SDK diagnostics and reasoning.
+    // Exclude content except the explicitly approved, temporary dev-only final-response preview.
     console.info(JSON.stringify({ event: 'chat_turn', requestId: context.awsRequestId, conversationId, turnId,
       attemptId: lease?.attemptId, outcome, errorCode, outcomePersisted, leaseReleased, cancellationConfirmed,
       durationMs: Date.now() - acceptedAt, toolCalls: orchestrator?.toolCalls ?? 0,
-      inputTokens: orchestrator?.inputTokens ?? 0, outputTokens: orchestrator?.outputTokens ?? 0 }));
+      inputTokens: orchestrator?.inputTokens ?? 0, outputTokens: orchestrator?.outputTokens ?? 0,
+      ...responseDiagnostics }));
   }
 }
 

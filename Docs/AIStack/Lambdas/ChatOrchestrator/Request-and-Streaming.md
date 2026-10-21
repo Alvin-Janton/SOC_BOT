@@ -35,9 +35,24 @@ The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 e
 4. **Replay or investigate.** Completed matching retries emit the saved answer and `complete` with `replayed: true`, without invoking the model or tools. Otherwise `Orchestrator.run()` handles recovery, context, model calls, and tools.
 5. **Save completion.** After `run()` returns, the handler rechecks the budget and persists one full `ASSISTANT_MESSAGE`. It attempts lease release, then emits `complete`. `max_tokens` sets `truncated: true`; it is not proof that the investigation covered everything.
 6. **Handle errors safely.** The catch path attempts active-query cleanup, maps errors to safe contracts, and records a failed/timed-out `TURN_OUTCOME` when possible. It does not fabricate an assistant answer. If the final answer write may already have committed, it reports `OUTCOME_NOT_CONFIRMED` without writing a contradictory failure; that branch leaves lease expiry as recovery.
-7. **Log metadata.** The `finally` block records identifiers, counts, timing, outcome/persistence/release/cancellation flags, and safe error codes. It excludes user text, tool arguments/results, summaries, SDK diagnostics, credentials, and reasoning.
+7. **Log once.** The `finally` block records identifiers, counts, timing, outcome/persistence/release/cancellation flags, and safe error codes. Normal logging excludes content; the narrowly approved temporary dev response diagnostics below are the only exception in this turn log.
 
 Durable completion can remain replayable even when lease release or transport delivery fails. A successful write, a released lease, and a delivered stream are separate facts.
+
+## Temporary dev response diagnostics
+
+For a fresh final `ModelResponse` returned by `Orchestrator.run()`, the handler captures only these additional fields when `config.environment === 'dev'` and adds them once to the existing JSON `chat_turn` log:
+
+| Field | Meaning and bound |
+| --- | --- |
+| `stop_reason` | The exact Bedrock `response.stopReason`, including `end_turn`, `stop_sequence` or `max_tokens`; never inferred from answer text or stored replay. |
+| `response_preview` | The first at most 100 Unicode code points of the assembled `response.text`, using `Array.from(text).slice(0, 100).join('')`; supplementary characters are not split into UTF-16 halves. The existing JSON logger escapes embedded newlines/control characters. |
+
+Demo emits neither field. Idempotent replay, summaries, intermediate tool rounds and failures that never returned a final model response also emit neither field. A response returned before a later persistence/budget/transport failure can still have these diagnostics; existing outcome flags describe what was saved/delivered separately. No preview is written to DynamoDB, context, summaries, tool results, activities or stream events, and no additional request, configuration switch or log group is introduced.
+
+`end_turn` describes model termination, not correctness or answer quality. Tool-shaped ordinary text is not an executed tool call; consult durable call/result records. The projection change addresses a working request-formatting hypothesis, not a proven provider defect. After reviewed deployment, the operator should rerun the same benign question in three fresh conversations and compare answers, stop reasons/previews, tool histories and truncation without changing the broader prompt or token/tool limits.
+
+This is an explicitly approved temporary privacy exception for synthetic dev validation. Synthetic evidence can still contain credential-like values, and the preview is not redacted. Do not enable this capture for demo or real-sensitive-data use; remove it after validation. Existing log retention is unchanged, so source removal stops future capture after deployment rather than deleting already written entries. No raw request, full response, tool payload, role-map, SDK-diagnostic or private-reasoning log is added.
 
 ## NDJSON event contract
 
