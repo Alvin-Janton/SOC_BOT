@@ -142,7 +142,7 @@ def atomic(path: Path, data: bytes) -> None:
 
 def save(directory: Path, run: dict) -> None:
     """Check both caps before replacing; JSON stays authoritative if HTML writing fails."""
-    
+
     run['summary'] = summary(run)
     data = encoded(run) + b'\n'
     require(len(data) <= ARTIFACT_BYTES, 'JSON exceeds 16 MiB; prior artifacts preserved.', 'ARTIFACT_LIMIT')

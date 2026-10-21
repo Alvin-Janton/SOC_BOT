@@ -387,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
 
         else:
             progress(f"Saved {directory / 'results.json'} and report.html")
-            
+
     return exit_code
 
 

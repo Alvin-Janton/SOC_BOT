@@ -152,7 +152,7 @@ def collect(endpoint: str, question: str, capture: dict) -> None:
 
     except Exception as exc:
         capture["error"] = diagnostic(exc)
-        
+
     finally:
         timer.cancel()
         connection.close()
