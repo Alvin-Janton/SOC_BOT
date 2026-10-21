@@ -1,0 +1,659 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "app-benign-001",
+      "question": "Review the application logs for September 8, 2026, covering the full UTC day. Is there any evidence of malicious activity? Identify any suspicious activity and the attack types supported by the evidence. Explain what happened and what the evidence establishes about the outcome. Include representative event references, relevant playbook guidance when warranted, and any important uncertainties. If you find no clear evidence of malicious activity, say so.",
+      "scope": {
+        "environment": "dev",
+        "database": "soc_bot_dev_security",
+        "source_type": "app",
+        "table": "application_events",
+        "start_time": "2026-09-08T00:00:00Z",
+        "end_time": "2026-09-09T00:00:00Z",
+        "boundary_convention": "[start_time, end_time)",
+        "start_inclusive": true,
+        "end_inclusive": false,
+        "expected_record_count": 100,
+        "reference_counts": {
+          "baseline": 100,
+          "suspicious": 0,
+          "http_status_counts": { "200": 94, "302": 4, "404": 2 }
+        },
+        "source_filename": "2026-9-08.jsonl"
+      },
+      "expected_findings": [],
+      "acceptable_evidence": [],
+      "required_outcome_distinctions": [
+        {
+          "description": "Conclude that the inspected scope contains no clear evidence of malicious activity. Ordinary browsing, redirects, two missing-resource responses, and login-error text do not establish attacks. Do not equate this bounded negative finding with proof that the application is secure.",
+          "evidence_ids": []
+        }
+      ],
+      "acceptable_playbook_sections": [],
+      "expected_guidance": [],
+      "unsupported_conclusions": [
+        "SQL injection, XSS, scanning, brute force, credential compromise, or another incident inferred solely from ordinary parameters, login-error text, redirects, missing resources, or a source address.",
+        "HTTP 200 proves security, HTTP 302 proves safety, or two 404 responses prove probing.",
+        "There was no malicious activity anywhere, no security weaknesses exist, or uninspected/truncated data has been cleared."
+      ],
+      "scoring_notes": {
+        "reference_expectations": "Empty findings, attack evidence, playbook sections, and incident guidance are deliberate. Reference counts describe the locally inspected population, not mandatory narration. Benign representative references from the actual query results are welcome but need not match a prescribed list. Useful hygiene observations must be clearly separated from attack findings.",
+        "criteria": {
+          "detection_and_false_positives": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Invents an incident or fails to provide a supported assessment of the selected day.",
+              "1": "Suggests the traffic is ordinary but leaves the malicious-activity question unclear or confuses isolated benign errors with suspicious activity.",
+              "2": "Reports no clear malicious activity in the inspected scope without false attack categories; separate, justified hygiene observations are acceptable."
+            }
+          },
+          "evidence_and_outcomes": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Claims attack success, blocking, or universal safety from these ordinary records, or gives no evidential basis for the conclusion.",
+              "1": "Uses observed browsing/response patterns but incompletely explains coverage or what the negative finding can establish.",
+              "2": "Supports the negative finding with inspected evidence, treats redirects/errors appropriately, and limits it to available records and coverage."
+            }
+          },
+          "retrieved_and_applied_guidance": {
+            "applicability": "not_applicable",
+            "reason": "No incident-specific retrieval or containment guidance is required or rewarded. Do not assign automatic retrieval points. Harmless extra retrieval is not an accuracy failure; fabricated incident claims remain failures in the applicable dimensions."
+          },
+          "accuracy_grounding_usefulness_and_uncertainty": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Fabricates evidence or remediation, offers a false clean bill of health, or gives an unusable/unsupported answer.",
+              "1": "Mostly accurate negative assessment with weak scope, coverage, uncertainty, or clarity.",
+              "2": "Clear, accurate, proportionate answer that identifies scope/limitations, acknowledges any query gaps, and avoids unnecessary incident escalation."
+            }
+          }
+        },
+        "grading_policy": "Score dimensions separately. Accept equivalent verified evidence and accurate terminology; do not require exact prose, severity words, tool sequence, query count, or numerical narration. Any reported numbers must be correct. Fluent prose cannot compensate for fabricated incidents. The local runner supplies a descriptive, unweighted earned/applicable total; N/A dimensions are excluded. No automatic pass threshold is defined.",
+        "input_isolation": "Only question may enter an investigating-agent request. All scope/counts, findings, evidence, guidance expectations, and scoring notes are evaluator-only. Never upload this file under playbooks/ or investigated data, import it into runtime code, or package it in Lambda/Glue/frontend assets. Repository visibility does not hide it from humans with repository access; isolation concerns agent runtime/tool access.",
+        "verification_and_baseline": "Source facts and existing pure Glue parsing/normalization were checked offline. No live AWS/Parquet verification or demo validation was performed. Use a fresh conversation for this standalone baseline; runner, result storage, and deployment/dataset revision tracking are deferred. Before the first evaluation, the operator should confirm the deployed normalized dataset matches the selected local source."
+      }
+    },
+    {
+      "case_id": "app-blocked-001",
+      "question": "Review the application logs for September 7, 2026, covering the full UTC day. Is there any evidence of malicious activity? Identify any suspicious activity and the attack types supported by the evidence. Explain what happened and what the evidence establishes about the outcome. Include representative event references, relevant playbook guidance when warranted, and any important uncertainties. If you find no clear evidence of malicious activity, say so.",
+      "scope": {
+        "environment": "dev",
+        "database": "soc_bot_dev_security",
+        "source_type": "app",
+        "table": "application_events",
+        "start_time": "2026-09-07T00:00:00Z",
+        "end_time": "2026-09-08T00:00:00Z",
+        "boundary_convention": "[start_time, end_time)",
+        "start_inclusive": true,
+        "end_inclusive": false,
+        "expected_record_count": 104,
+        "reference_counts": {
+          "baseline": 100,
+          "suspicious": 4,
+          "suspicious_http_403": 4,
+          "ordinary_login_http_403": 1,
+          "http_status_counts": { "200": 92, "302": 4, "403": 5, "404": 3 }
+        },
+        "source_filename": "2026-9-07.jsonl"
+      },
+      "expected_findings": [
+        {
+          "finding_id": "app-blocked-001-ssi-probing",
+          "category": "SSI/command injection with sensitive-file access intent",
+          "description": "Four requests from 200.51.100.13 carry an SSI exec directive with destructive command intent and cat /etc/passwd, in B2 or dni parameters. Sensitive-file probing/access attempts and the more precise SSI/command-injection description are acceptable. Do not require directory traversal without path-boundary escape evidence.",
+          "start_time": "2026-09-07T17:42:27Z",
+          "end_time": "2026-09-07T18:00:36Z",
+          "reference_counts": { "requests": 4, "http_403": 4 },
+          "observed_outcome": "All four received HTTP 403; execution, file deletion, and disclosure are not demonstrated.",
+          "evidence_ids": ["app-blocked-001-e51", "app-blocked-001-e52", "app-blocked-001-e53", "app-blocked-001-e54"]
+        }
+      ],
+      "acceptable_evidence": [
+        {
+          "evidence_id": "app-blocked-001-e51",
+          "event_time": "2026-09-07T17:42:27Z",
+          "source_filename": "2026-9-07.jsonl",
+          "source_line": 51,
+          "source_ip": "200.51.100.13",
+          "request_id": "031ef72f-97f4-5de8-9d84-11d54b5cdda4",
+          "source_record_ref": "031ef72f-97f4-5de8-9d84-11d54b5cdda4",
+          "observed_outcome": { "status_code": 403, "status": "failure" },
+          "native_indicators": {
+            "method": "GET", "path": "/tienda1/publico/vaciar.jsp",
+            "parameter": "query_params.B2[0]",
+            "payload_summary": "SSI exec directive with destructive deletion intent and cat /etc/passwd; the query contains the encoded representation."
+          }
+        },
+        {
+          "evidence_id": "app-blocked-001-e52",
+          "event_time": "2026-09-07T17:47:03Z",
+          "source_filename": "2026-9-07.jsonl",
+          "source_line": 52,
+          "source_ip": "200.51.100.13",
+          "request_id": "8636c0d9-19cd-50af-84a4-80cf8ac354e2",
+          "source_record_ref": "8636c0d9-19cd-50af-84a4-80cf8ac354e2",
+          "observed_outcome": { "status_code": 403, "status": "failure" },
+          "native_indicators": {
+            "method": "POST", "path": "/tienda1/publico/vaciar.jsp",
+            "parameter": "body_params.B2[0]",
+            "payload_summary": "SSI exec directive with destructive deletion intent and cat /etc/passwd in form-body evidence."
+          }
+        },
+        {
+          "evidence_id": "app-blocked-001-e53",
+          "event_time": "2026-09-07T17:57:50Z",
+          "source_filename": "2026-9-07.jsonl",
+          "source_line": 53,
+          "source_ip": "200.51.100.13",
+          "request_id": "35223df4-6026-51eb-a55f-f98a6a4e14ae",
+          "source_record_ref": "35223df4-6026-51eb-a55f-f98a6a4e14ae",
+          "observed_outcome": { "status_code": 403, "status": "failure" },
+          "native_indicators": {
+            "method": "GET", "path": "/tienda1/miembros/editar.jsp",
+            "parameter": "query_params.dni[0]",
+            "payload_summary": "SSI exec directive with destructive deletion intent and cat /etc/passwd; the query contains the encoded representation."
+          }
+        },
+        {
+          "evidence_id": "app-blocked-001-e54",
+          "event_time": "2026-09-07T18:00:36Z",
+          "source_filename": "2026-9-07.jsonl",
+          "source_line": 54,
+          "source_ip": "200.51.100.13",
+          "request_id": "f3c14611-1a2e-54f5-a3b2-f6e3ef20cd11",
+          "source_record_ref": "f3c14611-1a2e-54f5-a3b2-f6e3ef20cd11",
+          "observed_outcome": { "status_code": 403, "status": "failure" },
+          "native_indicators": {
+            "method": "POST", "path": "/tienda1/miembros/editar.jsp",
+            "parameter": "body_params.dni[0]",
+            "payload_summary": "SSI exec directive with destructive deletion intent and cat /etc/passwd in form-body evidence."
+          }
+        }
+      ],
+      "required_outcome_distinctions": [
+        {
+          "description": "Distinguish attempted injection/file access from demonstrated effects: all four HTTP responses were forbidden/unsuccessful. Do not infer WAF attribution from application records or claim execution/deletion/disclosure occurred.",
+          "evidence_ids": ["app-blocked-001-e51", "app-blocked-001-e52", "app-blocked-001-e53", "app-blocked-001-e54"]
+        },
+        {
+          "description": "The separate ordinary authentication request at 17:03:16Z received HTTP 403 and normalizes to Low. It is part of the baseline, not a second attack merely because it failed or has a non-Informational severity.",
+          "evidence_ids": []
+        }
+      ],
+      "acceptable_playbook_sections": [
+        { "document_id": "web-application-attacks", "section_id": "sensitive-file-probing-and-traversal" },
+        { "document_id": "web-application-attacks", "section_id": "interpretation-and-escalation" },
+        { "document_id": "web-application-attacks", "section_id": "human-containment-and-recovery" }
+      ],
+      "expected_guidance": [
+        {
+          "description": "Preserve request references and distinguish encoded request evidence from the interpreted directive. Use sensitive-file guidance to review the affected routes, access controls, and exposure with the owner; returned-content or server-side evidence is required to establish disclosure. This section does not contain SSI-specific remediation instructions.",
+          "playbook_sections": [{ "document_id": "web-application-attacks", "section_id": "sensitive-file-probing-and-traversal" }]
+        },
+        {
+          "description": "Report the forbidden responses and uncertainty about execution or control attribution. Recommend human review, targeted mitigation only if justified, preservation before changes, and authorized validation plus legitimate-use checks. Do not execute or claim containment.",
+          "playbook_sections": [
+            { "document_id": "web-application-attacks", "section_id": "interpretation-and-escalation" },
+            { "document_id": "web-application-attacks", "section_id": "human-containment-and-recovery" }
+          ]
+        }
+      ],
+      "unsupported_conclusions": [
+        "The server executed commands, deleted files, disclosed /etc/passwd, or was compromised.",
+        "WAF specifically blocked the four requests, based only on application HTTP 403 responses.",
+        "Path traversal is established without traversal evidence, or the ordinary login failure is another malicious request.",
+        "The indexed sensitive-file section provides SSI-specific instructions, or SOC Bot performed remediation."
+      ],
+      "scoring_notes": {
+        "reference_expectations": "All four request IDs are reference truth; representative verified citations are sufficient. Source lines are evaluator locators, not normalized columns. Inspect query/body evidence rather than relying on synthetic attack labels or severity. Count four suspicious requests and one ordinary 403 separately if reporting numbers; do not require exact counts or every ID in the answer.",
+        "criteria": {
+          "detection_and_false_positives": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Misses the suspicious requests or replaces them with unsupported attack categories/benign-event accusations.",
+              "1": "Recognizes suspicious requests but gives only a vague category, weak payload reasoning, or an unsupported extra attack.",
+              "2": "Identifies sensitive-file probing/access intent or SSI/command injection from the directive and keeps ordinary errors/login failure out of attack findings; equivalent precise terminology is accepted."
+            }
+          },
+          "evidence_and_outcomes": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Claims successful execution/deletion/disclosure, falsely attributes WAF blocking, or provides no usable outcome evidence.",
+              "1": "Notes forbidden responses but supplies weak references or leaves attempted versus demonstrated impact ambiguous.",
+              "2": "Uses representative correct references/payload evidence, explains the HTTP 403 outcomes, and states that execution/disclosure and the blocking component are unproven."
+            }
+          },
+          "retrieved_and_applied_guidance": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "No relevant section was retrieved/applied; discovery or a document name alone is insufficient. Unsafe or fabricated guidance also receives no credit.",
+              "1": "Retrieves a relevant section but applies it generically or incompletely to evidence preservation, exposure review, or human validation.",
+              "2": "Retrieves and accurately applies relevant section content to the observed attempt, uncertain disclosure, preservation, and proportionate human next steps without inventing SSI instructions."
+            }
+          },
+          "accuracy_grounding_usefulness_and_uncertainty": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Fabricates key evidence, exploit success, attribution, or completed remediation.",
+              "1": "Mostly accurate finding with incomplete uncertainty, weak practical next steps, or minor factual errors.",
+              "2": "Clear, accurate, bounded incident explanation with resolvable representative evidence, useful human recommendations, and explicit missing corroboration."
+            }
+          }
+        },
+        "grading_policy": "Score dimensions separately; unsupported exploitation/attribution affects the relevant dimensions and cannot be offset by fluent prose. Accept equivalent verified evidence and relevant additional sections accurately retrieved/applied. Do not require exact prose, severity words, every record, a fixed tool sequence, query count, or numerical narration; reported numbers must be correct. The local runner supplies a descriptive, unweighted earned/applicable total; N/A dimensions are excluded. No automatic pass threshold is defined.",
+        "input_isolation": "Only question may enter an investigating-agent request. All scope/counts, findings, evidence, guidance expectations, and scoring notes are evaluator-only. Never upload this file under playbooks/ or investigated data, import it into runtime code, or package it in Lambda/Glue/frontend assets. Repository visibility does not hide it from humans with repository access; isolation concerns agent runtime/tool access.",
+        "verification_and_baseline": "Source facts and existing pure Glue parsing/normalization were checked offline. No live AWS/Parquet verification or demo validation was performed. Use a fresh conversation for this standalone baseline; runner, result storage, and deployment/dataset revision tracking are deferred. Before the first evaluation, the operator should confirm the deployed normalized dataset matches the selected local source."
+      }
+    },
+    {
+      "case_id": "waf-mixed-001",
+      "question": "Review the WAF logs on September 18, 2026, from 12:00:04 UTC through 14:16:51 UTC, including both endpoints. Is there any evidence of malicious activity? Identify any suspicious activity and the attack types supported by the evidence. Explain what happened and what the evidence establishes about the outcome. Include representative event references, relevant playbook guidance when warranted, and any important uncertainties. If you find no clear evidence of malicious activity, say so.",
+      "scope": {
+        "environment": "dev",
+        "database": "soc_bot_dev_security",
+        "source_type": "waf",
+        "table": "waf_events",
+        "start_time": "2026-09-18T12:00:04Z",
+        "end_time": "2026-09-18T14:16:51Z",
+        "boundary_convention": "[start_time, end_time]",
+        "start_inclusive": true,
+        "end_inclusive": true,
+        "expected_record_count": 61,
+        "reference_counts": {
+          "ordinary_allow": 31,
+          "crlf_header_injection_block": 10,
+          "xss_block": 19,
+          "xss_count_then_allow": 1,
+          "final_action_counts": { "ALLOW": 32, "BLOCK": 29 }
+        },
+        "source_filename": "2026-9-18.jsonl"
+      },
+      "expected_findings": [
+        {
+          "finding_id": "waf-mixed-001-header-injection",
+          "category": "CRLF/header injection",
+          "description": "Encoded CRLF and Set-Cookie evidence with native HEADER_INJECTION matches supports attempted header injection. Custom-HeaderInjectionRule terminated these requests with BLOCK; it does not prove response-header manipulation or request smuggling.",
+          "reference_counts": { "requests": 10, "blocked": 10 },
+          "observed_outcome": "WAF BLOCK for all ten attempts; application effects are not shown.",
+          "evidence_ids": ["waf-mixed-001-crlf-block"]
+        },
+        {
+          "finding_id": "waf-mixed-001-xss",
+          "category": "Cross-site scripting (XSS)",
+          "description": "Script/alert query evidence and native XSS matches support XSS attempts. Nineteen were blocked; one BODY match was counted by Count-XSS-MonitoringRule and ultimately allowed. The allowed request is a distinct outcome within XSS, not a third attack category.",
+          "reference_counts": { "requests": 20, "blocked": 19, "count_then_allow": 1 },
+          "observed_outcome": "Mixed WAF outcomes: nineteen BLOCK and one final ALLOW after a non-terminating COUNT match. No browser execution is established.",
+          "evidence_ids": ["waf-mixed-001-xss-block", "waf-mixed-001-xss-allow"]
+        }
+      ],
+      "acceptable_evidence": [
+        {
+          "evidence_id": "waf-mixed-001-crlf-block",
+          "event_time": "2026-09-18T12:00:04Z",
+          "source_filename": "2026-9-18.jsonl",
+          "source_line": 1,
+          "source_ip": "200.51.100.14",
+          "request_id": "d47b6ba2-a5d1-5cc5-aa8c-a2fb4aaa6402",
+          "source_record_ref": "d47b6ba2-a5d1-5cc5-aa8c-a2fb4aaa6402",
+          "observed_outcome": { "action": "BLOCK", "status": "blocked", "response_code_sent": 403 },
+          "native_indicators": {
+            "method": "GET", "path": "/tienda1/miembros/editar.jsp",
+            "terminating_rule_id": "Custom-HeaderInjectionRule",
+            "condition_type": "HEADER_INJECTION", "match_location": "QUERY_STRING",
+            "matched_indicators": ["%0D%0A", "Set-Cookie"],
+            "payload_summary": "Query contains nested URL-encoded CRLF and Set-Cookie text. Preserve original encoding when interpreting the decoded header-injection intent; no cookie value is reproduced here."
+          }
+        },
+        {
+          "evidence_id": "waf-mixed-001-xss-block",
+          "event_time": "2026-09-18T13:28:45Z",
+          "source_filename": "2026-9-18.jsonl",
+          "source_line": 41,
+          "source_ip": "198.51.100.70",
+          "request_id": "160593a6-14e7-5081-8156-b8ded88e11ee",
+          "source_record_ref": "160593a6-14e7-5081-8156-b8ded88e11ee",
+          "observed_outcome": { "action": "BLOCK", "status": "blocked", "response_code_sent": 403 },
+          "native_indicators": {
+            "method": "GET", "path": "/tienda1/miembros/editar.jsp",
+            "terminating_rule_id": "AWS-AWSManagedRulesCommonRuleSet",
+            "condition_type": "XSS", "match_location": "QUERY_STRING",
+            "matched_indicators": ["<script>", "alert"],
+            "payload_summary": "The cp query parameter contains URL-encoded script markup and an alert call."
+          }
+        },
+        {
+          "evidence_id": "waf-mixed-001-xss-allow",
+          "event_time": "2026-09-18T13:41:41Z",
+          "source_filename": "2026-9-18.jsonl",
+          "source_line": 42,
+          "source_ip": "198.51.100.71",
+          "request_id": "ee39fda2-e4cf-5b03-b6b3-e8fbe40d98cc",
+          "source_record_ref": "ee39fda2-e4cf-5b03-b6b3-e8fbe40d98cc",
+          "observed_outcome": { "action": "ALLOW", "status": "allowed", "response_code_sent": null },
+          "native_indicators": {
+            "method": "POST", "path": "/tienda1/miembros/editar.jsp",
+            "terminating_rule_id": "Default_Action",
+            "non_terminating_rule_id": "Count-XSS-MonitoringRule",
+            "non_terminating_action": "COUNT",
+            "condition_type": "XSS", "match_location": "BODY",
+            "matched_indicators": ["<script>", "alert"],
+            "payload_summary": "Native BODY rule-match details are retained in non_terminating_matching_rules; the normalized WAF schema does not expose the request body itself."
+          }
+        }
+      ],
+      "required_outcome_distinctions": [
+        {
+          "description": "CRLF/header injection attempts were blocked by WAF. Native rule matches and encoded inputs support attempts, not successful header changes or request smuggling.",
+          "evidence_ids": ["waf-mixed-001-crlf-block"]
+        },
+        {
+          "description": "Distinguish blocked XSS from the counted-but-allowed XSS request. COUNT is non-blocking and the final ALLOW means WAF did not block it; it does not establish HTTP 200, browser script execution, cookie theft, or backend compromise.",
+          "evidence_ids": ["waf-mixed-001-xss-block", "waf-mixed-001-xss-allow"]
+        }
+      ],
+      "acceptable_playbook_sections": [
+        { "document_id": "web-application-attacks", "section_id": "cross-site-scripting" },
+        { "document_id": "web-application-attacks", "section_id": "crlf-and-header-injection" },
+        { "document_id": "web-application-attacks", "section_id": "interpretation-and-escalation" },
+        { "document_id": "web-application-attacks", "section_id": "correlate-request-and-waf-evidence" },
+        { "document_id": "web-application-attacks", "section_id": "human-containment-and-recovery" }
+      ],
+      "expected_guidance": [
+        {
+          "description": "Preserve rule decisions, references, and original versus decoded evidence. Correlate the allowed XSS request with application evidence using time, path, method, client address, and service context; IDs alone are not universally unique. Ask an authorized human for response/rendering/browser evidence before concluding execution, and never render the payload.",
+          "playbook_sections": [
+            { "document_id": "web-application-attacks", "section_id": "cross-site-scripting" },
+            { "document_id": "web-application-attacks", "section_id": "correlate-request-and-waf-evidence" }
+          ]
+        },
+        {
+          "description": "Investigate CRLF/header construction and seek response/proxy corroboration before claiming manipulation. Keep request smuggling separate. Recommend authorized review of the COUNT-mode rule and affected input/output controls, considering legitimate traffic and targeted tuning; do not claim a rule was changed or remediation executed.",
+          "playbook_sections": [
+            { "document_id": "web-application-attacks", "section_id": "crlf-and-header-injection" },
+            { "document_id": "web-application-attacks", "section_id": "correlate-request-and-waf-evidence" },
+            { "document_id": "web-application-attacks", "section_id": "human-containment-and-recovery" }
+          ]
+        },
+        {
+          "description": "Report missing application/browser/response evidence and possible false positives. Use the narrowest supported outcome and preserve contradictions rather than explaining them away.",
+          "playbook_sections": [{ "document_id": "web-application-attacks", "section_id": "interpretation-and-escalation" }]
+        }
+      ],
+      "unsupported_conclusions": [
+        "All suspicious requests were blocked, COUNT blocked the exceptional request, or the allowed request is a third attack category.",
+        "Final ALLOW or a WAF match proves HTTP 200, successful XSS, cookie theft, origin compromise, or response-header manipulation.",
+        "CRLF alone proves request smuggling, or ordinary ALLOW traffic is malicious solely because of an IP or severity label.",
+        "Browser evidence or request-body contents were retrieved from the WAF table, or remediation was performed."
+      ],
+      "scoring_notes": {
+        "reference_expectations": "Reference counts are 31 ordinary ALLOW, ten blocked CRLF, nineteen blocked XSS, and one counted-but-allowed XSS. Exact narration/counts and all malicious rows are not required, but the exceptional allowed XSS outcome is required for full outcome credit. Accept equivalent verified references. The query tool uses an exclusive end; inclusive scope questions must retain the final endpoint when selecting evidence.",
+        "criteria": {
+          "detection_and_false_positives": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Misses both categories or substitutes unsupported attacks for the evidence.",
+              "1": "Identifies only one of CRLF/header injection and XSS, or gives both with weak native evidence/unsupported extra categories.",
+              "2": "Identifies both CRLF/header injection and XSS using payload/rule evidence, with ordinary traffic kept separate and no invented third category."
+            }
+          },
+          "evidence_and_outcomes": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Claims successful exploitation without corroboration, treats COUNT as blocking, or fails to ground outcomes in actual WAF actions.",
+              "1": "Correctly explains some blocked attempts but misses or inadequately explains the counted-but-allowed XSS exception or its limits; cannot receive full credit.",
+              "2": "Cites representative CRLF and XSS evidence plus the exceptional request, separates BLOCK from COUNT/final ALLOW, and explains that application response and exploit success remain unproven."
+            }
+          },
+          "retrieved_and_applied_guidance": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "No relevant section content was retrieved/applied; discovery/naming alone or fabricated/unsafe instructions do not qualify.",
+              "1": "Retrieves relevant content but applies it to only one category or omits meaningful follow-up for the allowed request.",
+              "2": "Accurately applies retrieved guidance to preservation, both attack categories, correlation/browser or response corroboration, and authorized review of COUNT-mode protection."
+            }
+          },
+          "accuracy_grounding_usefulness_and_uncertainty": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Fabricates evidence, exploitation, attacker attribution, or completed containment.",
+              "1": "Mostly correct account with incomplete evidence limits, weak recommendations, or minor factual errors.",
+              "2": "Clear account of mixed control outcomes with accurate references, relevant human next steps, false-positive awareness, and explicit missing corroboration."
+            }
+          }
+        },
+        "grading_policy": "Score dimensions separately; unsupported exploitation/attribution affects the relevant dimensions and cannot be offset by fluent prose. Accept equivalent verified evidence and relevant additional sections accurately retrieved/applied. Do not require exact prose, severity words, every record, a fixed tool sequence, query count, or numerical narration; reported numbers must be correct. The local runner supplies a descriptive, unweighted earned/applicable total; N/A dimensions are excluded. No automatic pass threshold is defined.",
+        "input_isolation": "Only question may enter an investigating-agent request. All scope/counts, findings, evidence, guidance expectations, and scoring notes are evaluator-only. Never upload this file under playbooks/ or investigated data, import it into runtime code, or package it in Lambda/Glue/frontend assets. Repository visibility does not hide it from humans with repository access; isolation concerns agent runtime/tool access.",
+        "verification_and_baseline": "The operator reported correcting ten trailing-space client IPs, reuploading/rerunning Glue, and confirming 61 Athena rows in this window. The current local source independently parses/normalizes to 61 selected rows without rejects and matches the cited references. This task did not query AWS or verify deployed Parquet/IDs; those remain an operator gate before the first evaluation. Use a fresh conversation; demo, runner/results, and deployment/dataset revision tracking remain unverified or deferred."
+      }
+    },
+    {
+      "case_id": "cloudtrail-mixed-001",
+      "question": "Review the CloudTrail logs on September 25, 2026, from 15:04:12 UTC through 18:35:28 UTC, including both endpoints. Is there any evidence of malicious activity? Identify any suspicious activity and the attack types supported by the evidence. Explain what happened and what the evidence establishes about the outcome. Include representative event references, relevant playbook guidance when warranted, and any important uncertainties. If you find no clear evidence of malicious activity, say so.",
+      "scope": {
+        "environment": "dev",
+        "database": "soc_bot_dev_security",
+        "source_type": "cloudtrail",
+        "table": "cloudtrail_events",
+        "start_time": "2026-09-25T15:04:12Z",
+        "end_time": "2026-09-25T18:35:28Z",
+        "boundary_convention": "[start_time, end_time]",
+        "start_inclusive": true,
+        "end_inclusive": true,
+        "expected_record_count": 49,
+        "reference_counts": {
+          "baseline": 33,
+          "scanner_access_denied": 5,
+          "suspicious_s3_success": 11,
+          "suspicious_s3_listing_success": 9,
+          "suspicious_s3_get_object_success": 2,
+          "baseline_access_denied": 2,
+          "suspicious_get_object_download_bytes": 178,
+          "suspicious_get_object_distinct_keys": 1
+        },
+        "source_filename": "2026-9-25.jsonl"
+      },
+      "expected_findings": [
+        {
+          "finding_id": "cloudtrail-mixed-001-scanner",
+          "category": "Attempted service scanning/enumeration",
+          "description": "IAM user cloudsploit at 95.90.195.80 made five rapid Redshift Describe calls in 21 seconds. All returned AccessDenied. This is scanning/enumeration consistent with the prepared suspicious indicators, not evidence of successful discovery or stolen credentials. Only the last five scanner calls fall inside the selected window.",
+          "start_time": "2026-09-25T15:04:12Z",
+          "end_time": "2026-09-25T15:04:33Z",
+          "reference_counts": { "requests": 5, "access_denied": 5 },
+          "observed_outcome": "Denied enumeration attempts under one IAM user; no successful service enumeration shown.",
+          "evidence_ids": ["cloudtrail-mixed-001-scan-first", "cloudtrail-mixed-001-scan-last"]
+        },
+        {
+          "finding_id": "cloudtrail-mixed-001-s3-access",
+          "category": "Suspicious S3 enumeration and successful object retrieval; possible exfiltration",
+          "description": "One MordorNginxStack-BankingWAFRole assumed-role session at 203.0.113.77 performed nine successful listings (seven ListObjects and two ListBuckets) and two successful GetObject calls. Both downloads target the same ring.txt object and record 89 bytes out each. Retrieval/transfer is directly evidenced; exfiltration is the prepared scenario interpretation and whether access was unauthorized still requires corroboration.",
+          "start_time": "2026-09-25T18:30:00Z",
+          "end_time": "2026-09-25T18:32:09Z",
+          "reference_counts": { "requests": 11, "list_objects": 7, "list_buckets": 2, "get_object": 2, "download_bytes": 178, "distinct_downloaded_keys": 1 },
+          "observed_outcome": "Successful S3 listings and two recorded transfers of the same object with no recorded errors. Listing-response bytes are not downloaded file contents.",
+          "evidence_ids": ["cloudtrail-mixed-001-list-objects", "cloudtrail-mixed-001-list-buckets", "cloudtrail-mixed-001-download-first", "cloudtrail-mixed-001-download-second"]
+        }
+      ],
+      "acceptable_evidence": [
+        {
+          "evidence_id": "cloudtrail-mixed-001-scan-first",
+          "event_time": "2026-09-25T15:04:12Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 86,
+          "source_ip": "95.90.195.80",
+          "event_id": "18ba3816-d2d6-4cbd-aefc-fdb3cc4806c3",
+          "source_record_ref": "18ba3816-d2d6-4cbd-aefc-fdb3cc4806c3",
+          "request_id": "97c0beaa-1eab-4fba-b094-0d021a7d5d80",
+          "actor": "arn:aws:iam::123456789012:user/cloudsploit",
+          "observed_outcome": { "status": "failure", "error_code": "AccessDenied" },
+          "native_indicators": { "event_source": "redshift.amazonaws.com", "event_name": "DescribeReservedNodes", "identity_type": "IAMUser" }
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-scan-last",
+          "event_time": "2026-09-25T15:04:33Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 90,
+          "source_ip": "95.90.195.80",
+          "event_id": "5571fe7d-a334-4d5b-aac2-dcb61b68f19c",
+          "source_record_ref": "5571fe7d-a334-4d5b-aac2-dcb61b68f19c",
+          "request_id": "8470d255-100b-4504-add2-879bf3545af2",
+          "actor": "arn:aws:iam::123456789012:user/cloudsploit",
+          "observed_outcome": { "status": "failure", "error_code": "AccessDenied" },
+          "native_indicators": { "event_source": "redshift.amazonaws.com", "event_name": "DescribeClusters", "identity_type": "IAMUser" }
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-list-objects",
+          "event_time": "2026-09-25T18:30:00Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 123,
+          "source_ip": "203.0.113.77",
+          "event_id": "bf575a0c-c344-4302-a468-00e6a84a127a",
+          "source_record_ref": "bf575a0c-c344-4302-a468-00e6a84a127a",
+          "request_id": "9E67F4B1EA896060",
+          "actor": "arn:aws:sts::123456789012:assumed-role/MordorNginxStack-BankingWAFRole-9S3E0UAE1MM0/i-0317f6c6b66ae9c40",
+          "observed_outcome": { "status": "success", "error_code": null },
+          "native_indicators": { "event_source": "s3.amazonaws.com", "event_name": "ListObjects", "identity_type": "AssumedRole", "s3_bucket_name": "mordors3stack-s3bucket-llp2yingx64a", "bytes_transferred_out": 500 }
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-list-buckets",
+          "event_time": "2026-09-25T18:31:05Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 128,
+          "source_ip": "203.0.113.77",
+          "event_id": "19d32cc1-edab-4b96-9a11-2cd7794b2527",
+          "source_record_ref": "19d32cc1-edab-4b96-9a11-2cd7794b2527",
+          "request_id": "1225044172D8D65D",
+          "actor": "arn:aws:sts::123456789012:assumed-role/MordorNginxStack-BankingWAFRole-9S3E0UAE1MM0/i-0317f6c6b66ae9c40",
+          "observed_outcome": { "status": "success", "error_code": null },
+          "native_indicators": { "event_source": "s3.amazonaws.com", "event_name": "ListBuckets", "identity_type": "AssumedRole", "s3_bucket_name": null, "bytes_transferred_out": null }
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-download-first",
+          "event_time": "2026-09-25T18:30:37Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 126,
+          "source_ip": "203.0.113.77",
+          "event_id": "771299cb-e200-4926-9604-c85358b30499",
+          "source_record_ref": "771299cb-e200-4926-9604-c85358b30499",
+          "request_id": "A471D1060ED5FD07",
+          "actor": "arn:aws:sts::123456789012:assumed-role/MordorNginxStack-BankingWAFRole-9S3E0UAE1MM0/i-0317f6c6b66ae9c40",
+          "observed_outcome": { "status": "success", "error_code": null },
+          "native_indicators": { "event_source": "s3.amazonaws.com", "event_name": "GetObject", "identity_type": "AssumedRole", "s3_bucket_name": "mordors3stack-s3bucket-llp2yingx64a", "s3_object_key": "ring.txt", "bytes_transferred_out": 89 }
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-download-second",
+          "event_time": "2026-09-25T18:32:09Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 133,
+          "source_ip": "203.0.113.77",
+          "event_id": "edc2222c-5063-47fb-9fc0-c2ffb86b9d15",
+          "source_record_ref": "edc2222c-5063-47fb-9fc0-c2ffb86b9d15",
+          "request_id": "878DA4604588EC4C",
+          "actor": "arn:aws:sts::123456789012:assumed-role/MordorNginxStack-BankingWAFRole-9S3E0UAE1MM0/i-0317f6c6b66ae9c40",
+          "observed_outcome": { "status": "success", "error_code": null },
+          "native_indicators": { "event_source": "s3.amazonaws.com", "event_name": "GetObject", "identity_type": "AssumedRole", "s3_bucket_name": "mordors3stack-s3bucket-llp2yingx64a", "s3_object_key": "ring.txt", "bytes_transferred_out": 89 }
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-baseline-denial-secret",
+          "event_time": "2026-09-25T16:18:14Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 99,
+          "source_ip": "203.0.113.45",
+          "event_id": "a3b15d6d-d46e-413f-be3e-57494f3d31fe",
+          "source_record_ref": "a3b15d6d-d46e-413f-be3e-57494f3d31fe",
+          "request_id": "BFCC95D489C24C3E",
+          "actor": "arn:aws:iam::123456789012:user/henderson",
+          "observed_outcome": { "status": "failure", "error_code": "AccessDenied" },
+          "native_indicators": { "event_source": "secretsmanager.amazonaws.com", "event_name": "GetSecretValue", "identity_type": "IAMUser" },
+          "interpretation": "Baseline denied request; denial alone does not establish malicious activity."
+        },
+        {
+          "evidence_id": "cloudtrail-mixed-001-baseline-denial-object",
+          "event_time": "2026-09-25T18:19:27Z",
+          "source_filename": "2026-9-25.jsonl", "source_line": 121,
+          "source_ip": "203.0.113.45",
+          "event_id": "03fea3ff-8dc5-457e-ba08-bee36d9a4252",
+          "source_record_ref": "03fea3ff-8dc5-457e-ba08-bee36d9a4252",
+          "request_id": "E4E5CDA4B0E54FFA",
+          "actor": "arn:aws:iam::123456789012:user/henderson",
+          "observed_outcome": { "status": "failure", "error_code": "AccessDenied" },
+          "native_indicators": { "event_source": "s3.amazonaws.com", "event_name": "GetObject", "identity_type": "IAMUser" },
+          "interpretation": "Baseline denied request, separate from the two successful suspicious downloads."
+        }
+      ],
+      "required_outcome_distinctions": [
+        {
+          "description": "The five scanner calls were denied, not successful discovery. They are distinct from the two baseline AccessDenied events and the later assumed-role session. No same-attacker link or credential theft is established.",
+          "evidence_ids": ["cloudtrail-mixed-001-scan-first", "cloudtrail-mixed-001-scan-last", "cloudtrail-mixed-001-baseline-denial-secret", "cloudtrail-mixed-001-baseline-denial-object"]
+        },
+        {
+          "description": "Listings succeeded, then two GetObject calls recorded 89 download bytes each for the same bucket/key, totaling 178 recorded bytes across two transfers, not two distinct files. Do not include listing-response bytes in the download total. Missing successful-download recognition prevents full outcome credit.",
+          "evidence_ids": ["cloudtrail-mixed-001-list-objects", "cloudtrail-mixed-001-list-buckets", "cloudtrail-mixed-001-download-first", "cloudtrail-mixed-001-download-second"]
+        },
+        {
+          "description": "Successful retrieval/transfer is directly supported, while exfiltration is the prepared scenario interpretation. Authorization, data sensitivity, credential origin, and attacker identity require additional evidence. The answer may appropriately describe suspected exfiltration without treating unauthorized access as proven.",
+          "evidence_ids": ["cloudtrail-mixed-001-download-first", "cloudtrail-mixed-001-download-second"]
+        }
+      ],
+      "acceptable_playbook_sections": [
+        { "document_id": "unauthorized-data-access", "section_id": "initial-triage" },
+        { "document_id": "unauthorized-data-access", "section_id": "evidence-documentation" },
+        { "document_id": "unauthorized-data-access", "section_id": "human-containment" }
+      ],
+      "expected_guidance": [
+        {
+          "description": "Scope the affected bucket/object, successful reads and recorded volume; review the principal/session, authorization, data classification, ongoing access, and legitimate explanations. Request owner-supplied policy/session context rather than declaring compromise from the address or role name.",
+          "playbook_sections": [{ "document_id": "unauthorized-data-access", "section_id": "initial-triage" }]
+        },
+        {
+          "description": "Preserve the timeline and event references plus current configuration through authorized human review before access changes. Recorded CloudTrail data events support object-access analysis; management-only Event history cannot supply missing historical GetObject data. External SQL, live configuration, GuardDuty/Macie findings, and credentials are not available investigation tools.",
+          "playbook_sections": [{ "document_id": "unauthorized-data-access", "section_id": "evidence-documentation" }]
+        },
+        {
+          "description": "If unauthorized or ongoing access is substantiated, recommend owner-approved, access-path-specific restriction, preserve evidence, assess service impact and remaining grants, and verify access stops. Credential containment is conditional on evidence; SOC Bot recommends but never performs these actions.",
+          "playbook_sections": [{ "document_id": "unauthorized-data-access", "section_id": "human-containment" }]
+        }
+      ],
+      "unsupported_conclusions": [
+        "AccessDenied proves successful enumeration, every denial is malicious, or brute-force authentication occurred inside this window.",
+        "The scanner and S3 session are proven to be one attacker, credentials were stolen, or an IP/role name alone proves unauthorized access.",
+        "The two GetObject events downloaded two distinct files, listing-response bytes are file contents, or recorded downloads prove sensitivity, regulatory impact, or a larger theft volume.",
+        "Successful transfer proves the original permission grant was unauthorized, containment occurred, or external evidence was queried when it was not."
+      ],
+      "scoring_notes": {
+        "reference_expectations": "Source eventID is normalized source_record_ref; source requestID is normalized request_id and is different. Source lines are evaluator locators, not catalog columns. The 33 baseline events include two denials and unrelated successful S3 operations: do not count all S3 successes in the window as this session's eleven events. Required semantic coverage includes the denied scan and successful downloads; representative listing/scan references and both transfer events are supplied, but equivalent verified citations are accepted without requiring every ID. The query tool's exclusive end must be handled so the requested inclusive endpoint remains covered.",
+        "criteria": {
+          "detection_and_false_positives": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Misses both suspicious groups or substitutes unsupported incidents such as brute force or indiscriminate denial-based accusations.",
+              "1": "Identifies only the scanner or S3 activity, or notices both without separating them from baseline activity.",
+              "2": "Identifies rapid denied scanning/enumeration and suspicious S3 listing/retrieval consistent with possible exfiltration, while separating baseline events and avoiding unsupported actor linkage."
+            }
+          },
+          "evidence_and_outcomes": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Misstates denial as success, denies the evidenced downloads, fabricates impact, or offers no usable outcome evidence.",
+              "1": "Correctly describes some outcomes but misses successful GetObject transfers or conflates listings, repeated reads, or authorization; missing downloads prevents full credit.",
+              "2": "Grounds denied scanner calls, successful listings, and successful object transfers in correct references; distinguishes repeated reads of one object and download bytes from listings, and separates observed retrieval from unproven unauthorized exfiltration."
+            }
+          },
+          "retrieved_and_applied_guidance": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "No relevant section content is retrieved/applied; document discovery/naming alone, unsafe instructions, or invented guidance do not qualify.",
+              "1": "Retrieves relevant sections but applies them generically, omitting object/principal scope, evidence preservation, or conditional human containment.",
+              "2": "Accurately applies retrieved data-access guidance to object/volume and session/authorization review, evidence preservation, and justified human containment with uncertainty and impact checks."
+            }
+          },
+          "accuracy_grounding_usefulness_and_uncertainty": {
+            "applicability": "applicable",
+            "anchors": {
+              "0": "Fabricates identifiers, stolen credentials, linked attackers, unauthorized-access certainty, impact, or remediation.",
+              "1": "Mostly correct narrative but incomplete corroboration needs, weak recommendations, conflated identifiers, or minor numeric errors.",
+              "2": "Accurate, useful timeline with correct event/request references, supported outcome distinctions, and explicit limits on authorization, sensitivity, identity linkage, and completeness."
+            }
+          }
+        },
+        "grading_policy": "Score dimensions separately; unsupported exploitation/attribution affects the relevant dimensions and cannot be offset by fluent prose. Accept equivalent verified evidence, precise alternative terminology, and relevant credential-compromise/IAM sections when accurately retrieved/applied without asserting proven compromise. Do not require exact prose, severity words, every record, a fixed tool sequence, query count, or numerical narration; reported numbers must be correct. The local runner supplies a descriptive, unweighted earned/applicable total; N/A dimensions are excluded. No automatic pass threshold is defined.",
+        "input_isolation": "Only question may enter an investigating-agent request. All scope/counts, findings, evidence, guidance expectations, and scoring notes are evaluator-only. Never upload this file under playbooks/ or investigated data, import it into runtime code, or package it in Lambda/Glue/frontend assets. Repository visibility does not hide it from humans with repository access; isolation concerns agent runtime/tool access.",
+        "verification_and_baseline": "Source facts and existing pure Glue parsing/normalization were checked offline, using native identity, API outcome, and transfer evidence rather than severity alone. No live AWS/Parquet verification or demo validation was performed. Use a fresh conversation; runner/results and deployment/dataset revision tracking are deferred. Before the first evaluation, the operator should confirm deployed normalized records and references match this selected local source."
+      }
+    }
+  ]
+}

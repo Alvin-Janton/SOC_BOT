@@ -221,7 +221,7 @@ export class ModelRunner {
             text: 'Tools are disabled for this request. Give the final answer using only the evidence already gathered, with explicit limitations. Do not request more tools.',
           }]),
         ],
-        inferenceConfig: { maxTokens },
+        inferenceConfig: { maxTokens, temperature: 0 },
         additionalModelRequestFields: { thinking: { type: 'disabled' } },
         ...(allowTools ? { toolConfig: { tools: bedrockTools() } } : {}),
       };

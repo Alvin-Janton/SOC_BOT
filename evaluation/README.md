@@ -1,0 +1,120 @@
+# Local investigation evaluator
+
+This operator-run package evaluates the four reviewed cases against the existing **dev** chat API. The application receives only `{ "turnId": "<fresh UUID>", "message": "<case question>" }`, never the answer key. A separate local judge receives the reviewed key and the evidence actually returned to the agent. Nothing here is deployed or imported by runtime assets.
+
+The first paid baseline and human calibration have **not** been run during implementation. Confirm deployed normalized records/identifiers match [cases.json](cases.json) before using the scores. Source facts, old verification notes and reviewed scopes in that file remain historical snapshots; only its obsolete no-total policy wording changed. A successful query or local Git SHA does not prove dataset/deployment parity.
+
+## Setup and operator gates
+
+Use Python 3.11+ in your existing/chosen virtual environment. This package does not create an environment or install dependencies automatically. Only the AWS SDK is added; no npm, Pandas, HTML library or server is needed.
+
+```powershell
+python -m pip install -r evaluation/requirements.txt
+# Alternative, in your selected environment:
+uv pip install -r evaluation/requirements.txt
+python -m evaluation.run --help
+```
+
+`boto3==1.43.115` is pinned; its compatible botocore comes from boto3. Configure an existing evaluator profile through your normal authorized AWS workflow. Do not use GitHub deployment/CloudFormation execution roles or embed keys in arguments/files. The package uses `boto3.Session(profile_name=..., region_name=...)`; it implements no additional STS assumption flow. Standard SDK profile resolution may itself use your configured identity provider.
+
+Required data/service permissions, provisioned separately by the operator:
+
+- `dynamodb:Query` on only `arn:<partition>:dynamodb:<region>:<account>:table/SOC-BOT-DEV-CHAT-HISTORY`. The evaluator does not use `GetItem`, `Scan`, indexes, writes, or table discovery.
+- `bedrock:InvokeModel` for the approved inference-profile ARN and its required underlying foundation-model resources/destination Regions. Match your existing approved profile/model conditions; this document does not create policies or expand the application roles.
+- No S3, Athena, CloudWatch, application-deployment, or remediation permissions are used by this evaluator.
+
+The HTTPS request must still pass the existing dev WAF gate from the operator's currently allowlisted address. Local AWS credentials are **not** forwarded to the API and do not bypass WAF/authentication. There are no cookies, redirects, custom auth workarounds or browser automation. Future authenticated evaluation needs a separately reviewed slice.
+
+Use an authorized account/profile, confirm the exact table/Region and model availability, verify deployed data parity, and budget for both application and judge invocations before running. The CLI does not verify cloud prerequisites by making extra discovery calls.
+
+## Run after review
+
+From the repository root:
+
+```powershell
+python -m evaluation.run --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile soc-bot-evaluator
+python -m evaluation.run --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile soc-bot-evaluator --case-ids waf-mixed-001
+```
+
+The profile name is illustrative. Omit `--profile` to use normal SDK default credential resolution. Options:
+
+| Option | Default / contract |
+| --- | --- |
+| `--cases` | `evaluation/cases.json`; strict version-1 document, at most 1 MiB |
+| `--case-ids` | All in file order; otherwise one or more known, distinct IDs, still in file order |
+| `--api-url` | Full dev URL from [the manual client](../scripts/chat_client.py); HTTPS `/dev/chat`, no query string, credentials or fragment |
+| `--chat-table` | Required; initial runner accepts only `SOC-BOT-DEV-CHAT-HISTORY` |
+| `--region` | `us-east-1`; overrides do not establish verified dataset scope |
+| `--profile` | Optional existing SDK profile; only its name, not contents, is recorded |
+| `--judge-model` | `us.anthropic.claude-sonnet-4-6`; no silent model fallback |
+| `--output-dir` | `artifacts/evaluation`; repository-local overrides must remain under ignored `artifacts/`; external local directories are allowed |
+
+Each run exclusively creates a UTC timestamp + UUID directory containing `results.json` and `report.html`. Fresh UUID turns are saved before dispatch; conversation IDs are assigned by the API. Cases are sequential, with exactly one application POST per case and no supplied IDs/repeats or automatic replay. Do not immediately rerun an uncertain request assuming it did nothing. Closing a socket/pressing Ctrl+C does **not** cancel application or judge work remotely.
+
+The runner continues case-local failures. It stops on Ctrl+C or an artifact failure. Exit codes: `0` all selected cases fully scored, even with low scores; `1` any execution/evidence/judge/artifact error or incomplete case, including any application answer returned with `truncated: true`; `2` invalid configuration; `130` interruption. Truncated answers remain incomplete even when persistence agrees: their partial text, evidence and diagnostics are preserved, Bedrock judging is skipped (`judge.status=not_run`, `skip_reason=APPLICATION_TRUNCATED`), and scores/total stay unset. JSON and HTML distinguish truncated answers from untruncated completions and exclude them from scored aggregates. An unexpected replay is not a fresh baseline and is never graded.
+
+## Modules and data boundaries
+
+| File | Responsibility |
+| --- | --- |
+| [run.py](run.py) | Offline preflight, fresh case IDs, sequential stages and incremental artifact lifecycle |
+| [api.py](api.py) | One structured HTTPS/NDJSON request; exact deltas, bounded activities, terminal and partial outcomes |
+| [evidence.py](evidence.py) | Strong base-table Query, durable validation, cross-attempt terminal selection and declared coverage checks |
+| [judge.py](judge.py) / [judge_prompt.txt](judge_prompt.txt) | Versioned complete-evidence projection, bounded Converse request, strict judgment validation, Python totals |
+| [report.py](report.py) | Authoritative strict JSON, atomic replacement and escaped self-contained HTML |
+| [common.py](common.py) | Shared safe errors, JSON/UTC validation and bounded SDK attempts; no plugin framework |
+
+Only safe pure validation/JSON helpers are imported from the existing manual client; that client is not modified or run as a subprocess. This package does not depend on Spark, datasets or application Python internals.
+
+## Durable evidence and execution checks
+
+The reader queries `PK=CONV#<returned conversationId>` and `begins_with(SK, 'EVT#')` on the explicit base table with `ConsistentRead=True`. It follows `LastEvaluatedKey` even through an empty page. It validates envelope, UUIDs, sequence/key consistency, payload sizes, duplicate IDs and metadata; other turns are counted but excluded, not archived. DynamoDB integers stay integers and nonintegral Decimals become exact decimal strings, never lossy floats.
+
+Exactly one persisted user event must match the question. A completed stream must exactly match the persisted assistant text and stop reason/truncation. Evidence is cut off at that assistant's sequence. These audit checks still run for a truncated completion; its case remains incomplete and unscored regardless of the evidence-stage outcome, with any evidence errors preserved. Missing/mismatched persistence, contradictory terminals, orphan results, duplicate calls, inconsistent groups or unresolved completed-turn calls produce evidence errors, not guesses. Failed/incomplete API calls may still yield an audit bundle if their conversation ID was received, but cannot be promoted into scored completions.
+
+Calls/results pair by exact turn and tool-use ID with matching name and causal order. `success` results with state `SUBMITTED`, `QUEUED`, `RUNNING` or `UNKNOWN` are checkpoints, not evidence. Error-status results are terminal. The latest terminal is reusable across attempts, including an earlier attempt than the final assistant; identical duplicate terminal references are retained, but conflicting terminal outputs fail validation. Checkpoints, rejections, `NOT_EXECUTED`, attempt outcomes and missing associations remain visible separately.
+
+All selected query, aggregation, schema and playbook outputs are retained in full, including rows, retrieved sections and small discovery results. Projection `complete_terminal_pairs_v1` excludes only transport duplication, pending checkpoints and raw table envelopes from the judge; those audit checkpoints remain in the artifact. No counter-evidence sampling, row clipping or section shortening is performed.
+
+Declared query table/time checks allow alternative/corroborating tables and subwindows, rather than enforcing a tool order. A union of successful named-table intervals covers an inclusive endpoint only if its exclusive end is **later** than that timestamp. These checks do not rewrite the agent's request, execute extra Athena queries, or prove semantic completeness: filters, returned-row limits, truncation and evidential adequacy still require review.
+
+## Limits and retry behavior
+
+| Stage | Bounds |
+| --- | --- |
+| Application | 60-second socket inactivity; 900-second overall transport deadline; 256 KiB/line; 1 MiB cumulative stream; 32 KiB exact answer; 1,024 activities |
+| Evidence | 60-second stage; 128 pages, 100 items/page, 10,000 records, 8 MiB decoded JSON; 96 KiB/event, 64 KiB/result, 20 KiB/arguments; nesting 24 |
+| DynamoDB request | 5-second connect / 10-second read; at most three attempts per page, with bounded transient backoff |
+| Judge | 512 KiB complete serialized Converse request; 4,096 output tokens; 64 KiB parsed response; 10-second connect / 120-second read; 400-second stage; at most three attempts |
+| Artifacts | 16 MiB each for complete JSON and rendered HTML |
+
+TLS verification is mandatory. Heartbeats are counted instead of individually archived; other accepted stream events and exact answer strings are preserved. The cumulative stream cap conservatively counts heartbeats too. Overflows cause a visible incomplete/error outcome, never a partial-grounding grade. DNS/socket interruption remains subject to operating-system behavior; no subsequent stage starts after an elapsed API deadline.
+
+SDK-internal retries are disabled so the evaluator controls the maximum attempts. Only recognized transient service/connection failures retry with 0.5/1-second backoff. Credential resolution and each request run inside a deadline-bounded worker that owns/closes its client. A timed-out/interrupted worker's result is never used or retried automatically; its underlying SDK/remote request may finish later. Retry counts/failures are recorded; ambiguous judge transport retries may cause multiple billed invocations. Invalid responses, permission failures and low scores never trigger repair/regrade requests.
+
+The reviewed Sonnet 4.6 profile uses `maxTokens=4096`, `temperature=0`, and explicit `thinking.type=disabled`, with no tools. Unknown model overrides receive only `maxTokens`; unsupported controls are not guessed. Operators must review an override's model capabilities/defaults first. No extended thinking is requested; non-text/reasoning responses are rejected and not archived. Actual request settings and hashes are saved, and no fallback model is selected. See [AWS Converse guidance](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html), [Query pagination](https://docs.aws.amazon.com/boto3/latest/reference/services/dynamodb/table/query.html), and [AWS's Sonnet 4.6 Converse example](https://github.com/aws/agent-toolkit-for-aws/blob/main/skills/core-skills/amazon-bedrock/references/sdk-converse-api-python.md).
+
+## Judgment and artifact contracts
+
+`cases.json` remains schema version 1. `results.json` independently uses schema version 1 and records run metadata, exact prompt/version/hash, complete case snapshots/hash, requested configuration/effective limits, local revision caveat, generated turn IDs, API capture, selected evidence, execution checks, judge input/projection/request hashes, validated judgment, totals, timings, usage and safe diagnostics. Major stages are saved by same-directory temporary write plus atomic replacement. Both size caps are checked before replacement; JSON is authoritative if an HTML write fails. Inspect saved stage states after an interrupted run, and heed write-failure warnings: an older report is not proof the latest result was saved.
+
+The judge's strict JSON fields are:
+
+- `case_id`; `criteria` with exactly the four rubric IDs, each containing exact applicability, `score`, short `justification`, and `references`.
+- `expected_findings` keyed by every known finding ID with `assessment` (`detected`, `partial`, `missed`), justification and references. Benign cases have an empty object.
+- `observed_findings` describing findings actually stated; `missed_findings` containing exactly the missed IDs.
+- `false_positives` and `unsupported_claims`, each with exact `answer_quote`, justification and references. Serious discrepancies remain prominent regardless of total.
+
+References are `{ "origin": "observed" | "ground_truth", "path": "/observed/..." | "/ground_truth/..." }` resolving into the saved judge input using RFC 6901 JSON pointers. They can identify any supplied tool row, section or event reference, not just the key's small exemplar list. HTML reference links open the corresponding complete input section; use the displayed path to locate the precise item. Hidden truth is never presented as agent-retrieved evidence. Valid reference resolution proves existence, not that the judgment interpreted it correctly.
+
+All returned text blocks are joined and parsed strictly, optionally stripping one exact outer ` ```json\n...\n``` ` fence. Duplicate keys, NaN/Infinity, unknown fields/IDs, invalid applicability, boolean scores, unresolved references, fabricated quotations, non-text/tool responses and max-token truncation are errors. Short scoring explanations are required; private reasoning is neither requested nor stored. Malformed response text and SDK transport bodies are not archived.
+
+Python computes the unweighted earned/applicable total: 0–6 for the benign case and 0–8 otherwise. N/A is `null`, not zero or automatic full credit. Aggregate totals include **only fully scored cases** and explicitly show scored/attempted/selected counts and excluded cases. No pass/fail threshold exists. Same-family model judging remains potentially biased and nondeterministic; calibrate all four initial results manually against source truth.
+
+API/evidence/judge wall times, logical tool counts and query duration/scanned bytes are recorded when available. Judge token usage comes from the actual service response. Agent tokens are `null` with an explicit reason: only CloudWatch has those totals and this slice does not access it. No character-based token estimates, monetary estimates, zero placeholders or claimed deployed prompt versions are fabricated.
+
+## Reading, privacy and offline checks
+
+Open `report.html` manually; no browser is launched. It contains native disclosures and escaped preformatted text, no JavaScript, external resources or active Markdown. Everything from answers, evidence and judge output is untrusted. `results.json` preserves exact strings, while HTML escapes them. Reports contain private evaluator truth and security evidence. Git ignore is not access control: protect the local directory, choose retention deliberately, and manually delete only a reviewed run directory when no longer needed. Never upload reports/keys into runtime corpora, public hosting, playbooks or deployment assets. No S3 archival is implemented.
+
+Offline verification for this slice covers syntax/imports, help, strict cases/config preflight, and bounded in-memory serialization/rendering. It adds no tests, mock servers, recorded traces or fixtures. **Do not run a valid CLI invocation as an offline check**: it intentionally makes a paid application request followed by authorized DynamoDB and Bedrock calls. No AWS calls, live baseline or deployment are part of implementation verification.
