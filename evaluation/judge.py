@@ -43,6 +43,32 @@ class MissedFindingsValidationError(EvaluationError):
                         "mismatch_type": mismatch_type}
 
 
+class ReferenceValidationError(EvaluationError):
+    """Carry private reference-check locations without exposing judge/evidence text in errors."""
+
+    def __init__(self, message: str, failed_check: str, judgment_path: str | None,
+                 pointer: dict | None = None, traversal_index: int | None = None):
+        """Attach supplied pointer strings only after shape validation; never include traversed values."""
+        super().__init__("INVALID_DATA", message)
+        self.details = {"reason": "INVALID_JUDGE_REFERENCE", "failed_check": failed_check, "judgment_path": judgment_path}
+        if pointer is not None:
+            self.details.update(reference_origin=pointer["origin"], reference_path=pointer["path"])
+        if traversal_index is not None:
+            self.details["traversal_index"] = traversal_index
+
+
+def reference_require(condition: bool, message: str, failed_check: str, judgment_path: str | None,
+                      pointer: dict | None = None, traversal_index: int | None = None) -> None:
+    """Keep existing reference predicates fail-fast while handing private locations to grade()."""
+    if not condition:
+        raise ReferenceValidationError(message, failed_check, judgment_path, pointer, traversal_index)
+
+
+def judgment_segment(key: str) -> str:
+    """Escape a returned-judgment object key for diagnostics, never modify evidence pointers."""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
 def settings(model: str) -> dict:
     """Send model-specific controls only for the reviewed Sonnet 4.6 identifier."""
 
@@ -74,13 +100,15 @@ def request(model: str, prompt: str, data: dict) -> dict:
     return payload
 
 
-def resolve_pointer(pointer: dict, data: dict):
+def resolve_pointer(pointer: dict, data: dict, judgment_path: str | None = None):
     """Locate the exact value identified by a judge's evidence or ground-truth reference.
 
     Require the path prefix to agree with its origin, then walk dictionary keys
     and zero-based list indices, decoding RFC 6901 escapes (~1 for / and ~0 for ~).
     Return the value at that location, whether scalar, list or dictionary, and
-    raise EvaluationError for invalid syntax, missing keys or out-of-range indices.
+    raise ReferenceValidationError (an EvaluationError) for controlled invalid
+    syntax, missing keys or out-of-range indices. Optional judgment_path locates
+    the returned reference for private diagnostics, not the evidence being read.
 
     Example input:
         pointer = {
@@ -99,36 +127,43 @@ def resolve_pointer(pointer: dict, data: dict):
         "request-001"
     """
 
-    require(isinstance(pointer, dict) and set(pointer) == {"origin", "path"}
-            and pointer["origin"] in {"observed", "ground_truth"} and text(pointer["path"], 1024), "Invalid judge reference.")
+    reference_require(isinstance(pointer, dict) and set(pointer) == {"origin", "path"}
+                      and pointer["origin"] in {"observed", "ground_truth"} and text(pointer["path"], 1024),
+                      "Invalid judge reference.", "reference_shape", judgment_path)
 
     path = pointer["path"]
-    require(path.startswith("/" + pointer["origin"] + "/"), "Reference origin/path disagree.")
+    reference_require(path.startswith("/" + pointer["origin"] + "/"), "Reference origin/path disagree.",
+                      "origin_path", judgment_path, pointer)
     value = data
 
-    for component in path[1:].split("/"):
+    for traversal_index, component in enumerate(path[1:].split("/")):
 
         # Only RFC 6901's two escapes are valid; no forgiving path repair.
-        require(not re.search(r"~(?![01])", component), "Invalid JSON pointer escape.")
+        reference_require(not re.search(r"~(?![01])", component), "Invalid JSON pointer escape.",
+                          "pointer_escape", judgment_path, pointer, traversal_index)
         key = component.replace("~1", "/").replace("~0", "~")
 
         if isinstance(value, list):
-            require(bool(re.fullmatch(r"0|[1-9][0-9]*", key)) and int(key) < len(value), "Unresolvable judge array reference.")
+            reference_require(bool(re.fullmatch(r"0|[1-9][0-9]*", key)) and int(key) < len(value),
+                              "Unresolvable judge array reference.", "array_index", judgment_path, pointer, traversal_index)
             value = value[int(key)]
 
         else:
-            require(isinstance(value, dict) and key in value, "Unresolvable judge object reference.")
+            reference_require(isinstance(value, dict) and key in value, "Unresolvable judge object reference.",
+                              "object_key", judgment_path, pointer, traversal_index)
             value = value[key]
 
     return value
 
 
-def references(values: object, data: dict) -> None:
+def references(values: object, data: dict, judgment_path: str | None = None) -> None:
     """Validate an assessment's supporting reference list against the judge input bundle.
 
     Require one to eight distinct pointers and pass each to resolve_pointer() so
     its origin and path resolve to supplied evidence or ground truth. Allow any
     valid supplied evidence location, rather than only the answer key's exemplars.
+    Optional judgment_path locates the returned reference list; each indexed
+    reference inherits that diagnostic location without changing its evidence path.
 
     Example input (other judge-bundle fields omitted):
         values = [
@@ -155,10 +190,12 @@ def references(values: object, data: dict) -> None:
         }
     """
 
-    require(isinstance(values, list) and 1 <= len(values) <= 8, "Expected one to eight judge references.")
-    require(len({encoded(item) for item in values}) == len(values), "Duplicate judge references.")
-    for value in values:
-        resolve_pointer(value, data)
+    reference_require(isinstance(values, list) and 1 <= len(values) <= 8, "Expected one to eight judge references.",
+                      "list_cardinality", judgment_path)
+    reference_require(len({encoded(item) for item in values}) == len(values), "Duplicate judge references.",
+                      "list_uniqueness", judgment_path)
+    for index, value in enumerate(values):
+        resolve_pointer(value, data, f"{judgment_path}/{index}" if judgment_path is not None else None)
 
 
 def validate(value: dict, data: dict) -> dict:
@@ -176,17 +213,17 @@ def validate(value: dict, data: dict) -> dict:
                 and score["applicability"] == expected and text(score["justification"], 1500), "Invalid criterion assessment.")
 
         require((score["score"] is None if expected == "not_applicable" else type(score["score"]) is int and 0 <= score["score"] <= 2), "Invalid criterion score/applicability.")
-        references(score["references"], data)
+        references(score["references"], data, f"/criteria/{judgment_segment(key)}/references")
 
     finding_ids = {finding["finding_id"] for finding in case["expected_findings"]}
     require(isinstance(value["expected_findings"], dict) and set(value["expected_findings"]) == finding_ids, "Judge finding identities mismatch.")
 
-    for finding in value["expected_findings"].values():
+    for finding_id, finding in value["expected_findings"].items():
 
         require(isinstance(finding, dict) and set(finding) == {"assessment", "justification", "references"}
                 and finding["assessment"] in {"detected", "partial", "missed"} and text(finding["justification"], 1500), "Invalid finding assessment.")
 
-        references(finding["references"], data)
+        references(finding["references"], data, f"/expected_findings/{judgment_segment(finding_id)}/references")
 
     missed = value["missed_findings"]
 
@@ -209,7 +246,7 @@ def validate(value: dict, data: dict) -> dict:
             if field == "answer_quote" and item[field] not in data["observed"]["answer"]:
                 raise QuoteValidationError(f"/{name}/{index}/answer_quote", item[field], data["observed"]["answer"])
 
-            references(item["references"], data)
+            references(item["references"], data, f"/{name}/{index}/references")
 
     return value
 
@@ -228,10 +265,10 @@ def grade(session, payload: dict, data: dict, stage: dict) -> dict:
     and join all response text blocks before strict JSON, rubric and reference
     validation. Return the validated judgment without a total, raising on malformed
     or unfinished output; the caller handles eligibility, totals and stage status.
-    Only a valid-JSON exact-quote or missed-findings consistency failure preserves
-    bounded response text and parsed-but-unvalidated JSON in stage.rejected_judgment.
-    Its validation_failure identifies the quote or expected missed IDs; no rejected
-    judgment is returned as a score, and no repair or second request is attempted.
+    Only valid-JSON exact-quote, missed-findings consistency or controlled reference
+    failures preserve bounded text/parsed JSON in stage.rejected_judgment. Its
+    validation_failure identifies the quote, missed IDs or returned reference
+    location; no rejected judgment is scored, repaired or automatically regraded.
 
     Example input (payload text and reference/evidence snapshots abbreviated):
         session = boto3.Session(
@@ -330,7 +367,7 @@ def grade(session, payload: dict, data: dict, stage: dict) -> dict:
     try:
         return validate(parsed, data)
 
-    except (QuoteValidationError, MissedFindingsValidationError) as exc:
+    except (QuoteValidationError, MissedFindingsValidationError, ReferenceValidationError) as exc:
         stage["rejected_judgment"] = {"response_text": response_text, "response_text_bytes": len(response_bytes),
                                       "response_text_sha256": digest(response_bytes), "parsed_unvalidated_judgment": parsed,
                                       "validation_failure": exc.details}

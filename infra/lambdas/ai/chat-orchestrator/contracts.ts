@@ -159,6 +159,14 @@ export function tableFacts(maxQueryDays: number): string {
         response_bytes_and_latency_ms: 'Response size/timing metadata, not evidence that sensitive content was returned.',
         actor: 'Derived from session_id, not a verified user identity or unique human. Never echo actor or session values.',
       },
+      waf_events: {
+        action: 'Final WAF control action, not an attack classification: ALLOW is not proof of benignness and BLOCK is not itself proof of an attack. Neither establishes browser execution, file disclosure or absence of exploitation elsewhere.',
+        terminating_rule: 'terminating_rule_id/type preserve native terminatingRuleId/terminatingRuleType. Default_Action identifies use of the web ACL default action, not absence of earlier non-terminating matches.',
+        json_serialized_fields: ['labels', 'terminating_rule_match_details', 'non_terminating_matching_rules', 'rule_group_list', 'rate_based_rule_list', 'headers'],
+        non_terminating_and_group_matches: 'Inspect non_terminating_matching_rules and nested rule_group_list alongside labels and final action. A non-terminating COUNT match can coexist with final ALLOW; labels/matches need contextual interpretation, not automatic maliciousness.',
+        native_match_details: 'terminating_rule_match_details and supplied nested match details retain native condition types, locations and matchedData when present. Match fragments, including BODY locations, are not a full request body or proof of exploit success.',
+        request_and_impact_limits: 'method, path, query_string and headers are incoming request evidence. No full raw request/response bodies or returned HTML are retained by this normalized contract, and there is no normal body column or proof of browser execution.',
+      },
     },
     evidence_semantics: {
       source_s3_key: 'Raw source object key; use together with source_record_ref and relevant event_time to locate evidence.',
