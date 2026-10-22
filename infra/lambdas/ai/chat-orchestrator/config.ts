@@ -5,7 +5,7 @@ export const HEARTBEAT_MS = 15_000; // 15 seconds
 export const MAX_TOOL_CALLS = 8;
 export const MAX_CONTEXT_BYTES = 262_144;
 export const MAX_OUTPUT_BYTES = 32_768;
-export const MAX_OUTPUT_TOKENS = 2_048;
+export const MAX_OUTPUT_TOKENS = 4_096;
 
 export interface Configuration {
   readonly environment: 'dev' | 'demo';
