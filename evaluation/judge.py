@@ -26,6 +26,23 @@ class QuoteValidationError(EvaluationError):
                         "quote_json": json.dumps(quote, ensure_ascii=True)}
 
 
+class MissedFindingsValidationError(EvaluationError):
+    """Describe inconsistent missed IDs privately without repairing or scoring the response."""
+
+    def __init__(self, reported: object, findings: dict):
+        """Classify the first failed condition and derive expected IDs from validated assessments."""
+        super().__init__("INVALID_DATA", "Inconsistent missed findings.")
+        if not isinstance(reported, list) or not all(isinstance(item, str) for item in reported):
+            mismatch_type = "type_mismatch"
+        elif len(set(reported)) != len(reported):
+            mismatch_type = "duplicate_ids"
+        else:
+            mismatch_type = "set_mismatch"
+        self.details = {"reason": "MISSED_FINDINGS_INCONSISTENT", "judgment_path": "/missed_findings",
+                        "expected_missed_ids": sorted(key for key, finding in findings.items() if finding["assessment"] == "missed"),
+                        "mismatch_type": mismatch_type}
+
+
 def settings(model: str) -> dict:
     """Send model-specific controls only for the reviewed Sonnet 4.6 identifier."""
 
@@ -173,9 +190,10 @@ def validate(value: dict, data: dict) -> dict:
 
     missed = value["missed_findings"]
 
-    require(isinstance(missed, list) and all(isinstance(item, str) for item in missed)
+    if not (isinstance(missed, list) and all(isinstance(item, str) for item in missed)
             and len(set(missed)) == len(missed) and set(missed) == {
-                key for key, finding in value["expected_findings"].items() if finding["assessment"] == "missed"}, "Inconsistent missed findings.")
+                key for key, finding in value["expected_findings"].items() if finding["assessment"] == "missed"}):
+        raise MissedFindingsValidationError(missed, value["expected_findings"])
 
     for name in ("observed_findings", "false_positives", "unsupported_claims"):
 
@@ -210,8 +228,10 @@ def grade(session, payload: dict, data: dict, stage: dict) -> dict:
     and join all response text blocks before strict JSON, rubric and reference
     validation. Return the validated judgment without a total, raising on malformed
     or unfinished output; the caller handles eligibility, totals and stage status.
-    Only a valid-JSON exact-quote mismatch preserves the bounded response text and
-    parsed-but-unvalidated judgment in stage.rejected_judgment, never as a score.
+    Only a valid-JSON exact-quote or missed-findings consistency failure preserves
+    bounded response text and parsed-but-unvalidated JSON in stage.rejected_judgment.
+    Its validation_failure identifies the quote or expected missed IDs; no rejected
+    judgment is returned as a score, and no repair or second request is attempted.
 
     Example input (payload text and reference/evidence snapshots abbreviated):
         session = boto3.Session(
@@ -310,7 +330,7 @@ def grade(session, payload: dict, data: dict, stage: dict) -> dict:
     try:
         return validate(parsed, data)
 
-    except QuoteValidationError as exc:
+    except (QuoteValidationError, MissedFindingsValidationError) as exc:
         stage["rejected_judgment"] = {"response_text": response_text, "response_text_bytes": len(response_bytes),
                                       "response_text_sha256": digest(response_bytes), "parsed_unvalidated_judgment": parsed,
                                       "validation_failure": exc.details}

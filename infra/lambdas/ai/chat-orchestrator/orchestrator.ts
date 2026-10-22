@@ -55,11 +55,21 @@ export class Orchestrator {
     while (true) {
       this.budget.check();
       const messages = await this.context();
-      const allowTools = !this.finalizationOnly && this.toolCalls < MAX_TOOL_CALLS && this.budget.canDispatch(200_000);
+      const toolCallsUsed = this.toolCalls;
+      const finalizationOnly = this.finalizationOnly;
+      const allowTools = !finalizationOnly && toolCallsUsed < MAX_TOOL_CALLS && this.budget.canDispatch(200_000);
       this.phase = allowTools ? 'model' : 'finalization';
       await this.emit({ type: 'activity', stage: allowTools ? 'investigating' : 'finalizing' });
+      if (this.config.environment === 'dev') {
+        // Temporary metadata-only diagnosis; use the same snapshot supplied to the model below.
+        const remainingCalls = Math.max(0, MAX_TOOL_CALLS - toolCallsUsed);
+        console.info(JSON.stringify({ event: 'dev_tool_budget', conversationId: this.lease.conversationId,
+          turnId: this.lease.turnId, attemptId: this.lease.attemptId, maxToolCalls: MAX_TOOL_CALLS,
+          toolCallsUsed, remainingCalls, availableCalls: allowTools ? remainingCalls : 0,
+          allowTools, finalizationOnly, remainingMs: this.budget.remaining() }));
+      }
       const response = await this.model.respond(messages, allowTools, this.budget,
-        text => this.emit({ type: 'text_delta', text }), this.toolCalls);
+        text => this.emit({ type: 'text_delta', text }), toolCallsUsed);
       this.inputTokens += response.inputTokens;
       this.outputTokens += response.outputTokens;
       if (response.toolUses.length === 0) {

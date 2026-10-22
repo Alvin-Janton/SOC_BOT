@@ -54,6 +54,22 @@ Demo emits neither field. Idempotent replay, summaries, intermediate tool rounds
 
 This is an explicitly approved temporary privacy exception for synthetic dev validation. Synthetic evidence can still contain credential-like values, and the preview is not redacted. Prompt v4's sensitive-value prohibition does not guarantee a sensitive-value-free answer or preview. Do not enable this capture for demo or real-sensitive-data use; remove it after validation. Existing log retention is unchanged, so source removal stops future capture after deployment rather than deleting already written entries. No raw request, full response, tool payload, role-map, SDK-diagnostic or private-reasoning log is added.
 
+## Temporary dev tool-budget diagnostics
+
+Immediately before each `ModelRunner.respond()` call, including tools-disabled finalization, `Orchestrator.run()` emits one JSON `console.info` event named `dev_tool_budget` only when trusted configuration selects `dev`. This is separate from the unchanged final-response diagnostics above and from permanent stream activities. It captures the same counter and availability snapshot passed to the model, not values inferred from model prose or tool/history text:
+
+| Field | Meaning |
+| --- | --- |
+| `conversationId`, `turnId`, `attemptId` | Existing lease identifiers for correlation with durable records; use existing CloudWatch invocation metadata for the AWS request ID. |
+| `maxToolCalls` | Existing `MAX_TOOL_CALLS`, not a separately hardcoded allowance. |
+| `toolCallsUsed` | Restored/current recorded logical-call count for that invocation, including invalid/rejected/skipped blocks. |
+| `remainingCalls` | Nominal capacity, `Math.max(0, MAX_TOOL_CALLS - toolCallsUsed)`. |
+| `availableCalls` | Nominal capacity when `allowTools=true`, otherwise zero even if unused capacity remains. |
+| `allowTools`, `finalizationOnly` | The snapshotted offer-tools decision and handled-failure/forced-finalization flag used by that loop iteration. Time/call controls can also disable tools without setting `finalizationOnly`. |
+| `remainingMs` | Application deadline time remaining immediately before the model-adapter call, not an additional budget or extended deadline. |
+
+No event is emitted in demo, by summary/compaction calls, or on completed-turn replay without a model invocation. It logs no user/model text, arguments/results, system prompt, retrieved content, credentials or reasoning. No new identity plumbing, configuration switch, log group, IAM permission or stream field is added. The event records an impending adapter call, not proof that Bedrock accepted a request or that the narrated answer is correct. The model's narrated budget is not authoritative: compare this snapshot, deployed revision, durable calls and control state before assuming an enforcement defect. Remove this temporary logging after diagnosis; retention is unchanged and existing log entries are not deleted by source cleanup.
+
 ## NDJSON event contract
 
 [stream.ts](../../../../infra/lambdas/ai/chat-orchestrator/stream.ts) sets HTTP 200 with `application/x-ndjson; charset=utf-8`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. Each event is one JSON object followed by a newline. A reader should parse complete lines; a network chunk is not necessarily one complete event.
