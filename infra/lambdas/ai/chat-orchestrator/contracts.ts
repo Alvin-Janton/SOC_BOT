@@ -138,13 +138,47 @@ export function validateTool(name: string, input: unknown, config: Configuration
 }
 
 /**
- * Provides changing table facts separately from the stable prompt, without hidden labels or AWS access.
+ * Provides catalog facts and authored source/result meanings as reference data, without hidden labels or AWS access.
  *
  * Example Input: tableFacts(30)
  * Example Output (JSON text; most columns/tables abbreviated here):
- * '{"tables":{"waf_events":[["event_uid","string"], ...], ...},"utc_query_window_days":30}'
- * The real string contains all four tables and their complete configured column lists.
+ * '{"tables":{"waf_events":[["event_uid","string"], ...], ...},"utc_query_window_days":30,
+ *   "source_semantics":{"application_events":{...}},"evidence_semantics":{...},"query_result_semantics":{...}}'
+ * The real string retains all four complete column lists; descriptive metadata grants no capabilities.
  */
 export function tableFacts(maxQueryDays: number): string {
-  return JSON.stringify({ tables: TABLE_COLUMNS, utc_query_window_days: maxQueryDays });
+  return JSON.stringify({
+    tables: TABLE_COLUMNS, utc_query_window_days: maxQueryDays,
+    source_semantics: {
+      application_events: {
+        incoming_request_fields: ['method', 'path', 'raw_url', 'query_string', 'query_params', 'body', 'body_params', 'headers'],
+        json_serialized_fields: ['query_params', 'body_params', 'headers'],
+        request_not_response: 'These fields describe incoming HTTP requests, not returned HTML or response content. An errorMsg request parameter does not prove authentication failure, reflection, redirect or response-body contents. Actual response bodies are not included in this table contract.',
+        status_code: 'Recorded HTTP response code, not proof of authentication, transaction or exploit success.',
+        status: 'Normalizer label: success when status_code < 400, failure otherwise; not an authentication or transaction outcome.',
+        response_bytes_and_latency_ms: 'Response size/timing metadata, not evidence that sensitive content was returned.',
+        actor: 'Derived from session_id, not a verified user identity or unique human. Never echo actor or session values.',
+      },
+    },
+    evidence_semantics: {
+      source_s3_key: 'Raw source object key; use together with source_record_ref and relevant event_time to locate evidence.',
+      source_record_ref: 'Source-specific record reference within that object, not necessarily a unique occurrence or human identity.',
+      event_uid: 'Deterministic normalized identifier; repeated source identifiers can share it. Do not assume uniqueness or blindly deduplicate occurrences by ID alone.',
+      severity: 'Prepared severity/matches are triage aids, not independent attack proof. Informational does not override concrete contrary payload/behavior evidence.',
+    },
+    query_result_semantics: {
+      applicability: 'Completeness rules concern successful terminal data-query results containing rows, not descriptions or submitted/running/failed executions.',
+      rows: 'Returned rows: query_events projects events; aggregate_events returns grouping/metric rows, not necessarily individual events. Path/method groups are not distinct paths.',
+      result_count: 'Number of returned rows, not table size or all matching events. A count_rows metric value counts matching events under that query, not aggregate result rows or distinct entities.',
+      truncated_true: 'Matching query-result rows were omitted because of row_limit or response_size. The subset cannot establish complete coverage, an exact overall count or absence of more matches.',
+      truncation_reasons: {
+        row_limit: 'More query-result rows exist than the returned allowance.',
+        response_size: 'Complete rows were omitted to keep the serialized response within its byte cap; simply requesting more rows does not fix this.',
+      },
+      truncated_false: 'This query result is complete under its filters, time range and projection, not the whole table or every payload field. It says nothing about attack success/failure.',
+      per_query_scope: 'A truncated breakdown does not invalidate a separate complete count or complete filtered query. A complete aggregate over scoped events does not prove individual payload inspection; do not add overlapping counts.',
+      follow_up: 'If omission could change the assessment, use supported aggregates, narrower filters/time windows, fewer selected fields or a higher permitted limit suited to the truncation reason. Stay within backend budgets, disclose unresolved gaps and do not automatically fetch everything.',
+      unsupported_controls: 'No exposed pagination, HAVING or distinct-count operation. Never invent them, arbitrary SQL or additional permissions to resolve gaps.',
+    },
+  });
 }
