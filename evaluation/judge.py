@@ -6,7 +6,7 @@ import time
 
 from .common import EvaluationError, digest, encoded, integer, object_json, require, sdk_call, text
 
-PROMPT_VERSION = "investigation_judge_v2"
+PROMPT_VERSION = "investigation_judge_v3"
 PROJECTION_VERSION = "complete_terminal_pairs_v1"
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
 CRITERIA = ("detection_and_false_positives", "evidence_and_outcomes", "retrieved_and_applied_guidance",
