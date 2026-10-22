@@ -85,7 +85,7 @@ Declared query table/time checks allow alternative/corroborating tables and subw
 | Application | 60-second socket inactivity; 900-second overall transport deadline; 256 KiB/line; 1 MiB cumulative stream; 32 KiB exact answer; 1,024 activities |
 | Evidence | 60-second stage; 128 pages, 100 items/page, 10,000 records, 8 MiB decoded JSON; 96 KiB/event, 64 KiB/result, 20 KiB/arguments; nesting 24 |
 | DynamoDB request | 5-second connect / 10-second read; at most three attempts per page, with bounded transient backoff |
-| Judge | 512 KiB complete serialized Converse request; 4,096 output tokens; 64 KiB parsed response; 10-second connect / 120-second read; 400-second stage; at most three attempts |
+| Judge | 512 KiB complete serialized Converse request; 4,096 output tokens; 64 KiB combined UTF-8 response text, including surrounding whitespace/fences; 10-second connect / 120-second read; 400-second stage; at most three attempts |
 | Artifacts | 16 MiB each for complete JSON and rendered HTML |
 
 TLS verification is mandatory. Heartbeats are counted instead of individually archived; other accepted stream events and exact answer strings are preserved. The cumulative stream cap conservatively counts heartbeats too. Overflows cause a visible incomplete/error outcome, never a partial-grounding grade. DNS/socket interruption remains subject to operating-system behavior; no subsequent stage starts after an elapsed API deadline.
@@ -107,7 +107,42 @@ The judge's strict JSON fields are:
 
 References are `{ "origin": "observed" | "ground_truth", "path": "/observed/..." | "/ground_truth/..." }` resolving into the saved judge input using RFC 6901 JSON pointers. They can identify any supplied tool row, section or event reference, not just the key's small exemplar list. HTML reference links open the corresponding complete input section; use the displayed path to locate the precise item. Hidden truth is never presented as agent-retrieved evidence. Valid reference resolution proves existence, not that the judgment interpreted it correctly.
 
-All returned text blocks are joined and parsed strictly, optionally stripping one exact outer ` ```json\n...\n``` ` fence. Duplicate keys, NaN/Infinity, unknown fields/IDs, invalid applicability, boolean scores, unresolved references, fabricated quotations, non-text/tool responses and max-token truncation are errors. Short scoring explanations are required; private reasoning is neither requested nor stored. Malformed response text and SDK transport bodies are not archived.
+All returned text blocks are joined and parsed strictly, optionally stripping one exact outer ` ```json\n...\n``` ` fence. Duplicate keys, NaN/Infinity, unknown fields/IDs, invalid applicability, boolean scores, unresolved references, fabricated quotations, non-text/tool responses and max-token truncation are errors. Short scoring explanations are required; private reasoning is neither requested nor stored. Malformed JSON response text, non-text/reasoning responses and SDK transport bodies are not archived. The narrow valid-JSON quote-mismatch exception below preserves an unvalidated judgment for local diagnosis, not grading.
+
+### Rejected exact-quote diagnostics (evaluator 1.0.1)
+
+Each `answer_quote` in `false_positives` or `unsupported_claims` must remain a **case-sensitive exact substring** of the saved `judge.input.observed.answer`. There is no case folding, whitespace/Unicode normalization, fuzzy matching, Markdown removal, ellipsis expansion, quote repair, discrepancy dropping or automatic regrading. Validation stops at the first failure. Empty/whitespace-only, non-string and over-1,500-character quotes still fail the existing schema check before quote-mismatch capture.
+
+Judge prompt `investigation_judge_v2` explicitly requires short, distinctive, contiguous excerpts copied verbatim from the raw `observed.answer`, retaining Markdown markers, backticks, punctuation, whitespace and case. It forbids paraphrasing, formatting removal, inserted ellipses and rendered-answer quotations, and asks the judge to verify exact inclusion before returning. This instruction does not replace or relax the existing exact-substring validator or guarantee model compliance.
+
+When the text-only response passed normal-stop/role/block-kind and combined 64-KiB UTF-8 checks, strict JSON parsing succeeded, and an exact quote then fails, `cases[i].judge.rejected_judgment` optionally contains:
+
+| Field | Meaning |
+| --- | --- |
+| `response_text` | Exact concatenated response text before stripping whitespace or removing the optional fence; not the raw SDK/network response |
+| `response_text_bytes` | UTF-8 byte length of that exact response text |
+| `response_text_sha256` | SHA-256 digest of those same UTF-8 bytes |
+| `parsed_unvalidated_judgment` | Strictly parsed JSON from that response, **not** a validated judgment or source of scores |
+| `validation_failure` | First quote mismatch: `reason`, `comparison`, `judgment_path`, quote/answer character lengths and `quote_json` |
+
+`judgment_path` is an RFC 6901 path into `parsed_unvalidated_judgment`, **not** an `observed`/`ground_truth` evidence pointer. For example, `/false_positives/2/answer_quote` identifies the third false-positive entry. Lengths count Python string characters, not UTF-8 bytes. `quote_json` is an ASCII-escaped JSON string representation of the already bounded supplied quote; it makes newlines, whitespace characters, literal quotes and Unicode differences inspectable without printing raw controls. Escaping is a display aid only; the substring comparison uses the original strings unchanged.
+
+Synthetic illustration only: if the answer is `All clear` but the supplied quote contains a newline instead of the space, the diagnostic is:
+
+```json
+{
+  "reason": "QUOTE_NOT_IN_ANSWER",
+  "comparison": "exact_substring",
+  "judgment_path": "/unsupported_claims/0/answer_quote",
+  "quote_length": 9,
+  "answer_length": 9,
+  "quote_json": "\"All\\nclear\""
+}
+```
+
+Inspect the authoritative `results.json` in the run's authorized local output directory, or the inert **Rejected judgment - UNVALIDATED / UNSCORED** disclosure in `report.html`. The latter shows the response, parsed object and validation details using the existing escaped JSON rendering; compare them with the preserved exact application answer. Rejected criteria/discrepancies are untrusted debug output, never validated findings or summary-table grades. `judge.status` and case status remain `error`, `judge.judgment` remains absent, `total` remains unset, the case is excluded from scored aggregates, and the overall run exits `1`. A completed application answer or judge `end_turn` does not establish a valid evaluation score or the semantic correctness of a rejected discrepancy.
+
+These are backward-compatible optional fields under result schema version 1. Newly generated artifacts identify evaluator patch version `1.0.1`; adding capture did not change the judge prompt/projection versions, request/rubric semantics or SDK retry behavior. The subsequent verbatim-quote prompt clarification is independently versioned as `investigation_judge_v2`; validation, scoring and projection remain unchanged. The existing exception/finally/checkpoint flow saves the diagnostic alongside application/evidence, usage, stop reason, timings and request/input hashes. Complete JSON/HTML remain capped at 16 MiB each: no clipping or partial score is used to make diagnostics fit, and artifact-write failures remain explicit. Other validation/provider failures retain controlled errors without this payload capture. Older artifacts without the field still render; discarded judgments from previous runs cannot be reconstructed, and those runs are not rewritten. Any later reproduction requires a fresh operator-authorized paid run and may not fail identically.
 
 Python computes the unweighted earned/applicable total: 0–6 for the benign case and 0–8 otherwise. N/A is `null`, not zero or automatic full credit. Aggregate totals include **only fully scored cases** and explicitly show scored/attempted/selected counts and excluded cases. No pass/fail threshold exists. Same-family model judging remains potentially biased and nondeterministic; calibrate all four initial results manually against source truth.
 
@@ -117,4 +152,6 @@ API/evidence/judge wall times, logical tool counts and query duration/scanned by
 
 Open `report.html` manually; no browser is launched. It contains native disclosures and escaped preformatted text, no JavaScript, external resources or active Markdown. Everything from answers, evidence and judge output is untrusted. `results.json` preserves exact strings, while HTML escapes them. Reports contain private evaluator truth and security evidence. Git ignore is not access control: protect the local directory, choose retention deliberately, and manually delete only a reviewed run directory when no longer needed. Never upload reports/keys into runtime corpora, public hosting, playbooks or deployment assets. No S3 archival is implemented.
 
-Offline verification for this slice covers syntax/imports, help, strict cases/config preflight, and bounded in-memory serialization/rendering. It adds no tests, mock servers, recorded traces or fixtures. **Do not run a valid CLI invocation as an offline check**: it intentionally makes a paid application request followed by authorized DynamoDB and Bedrock calls. No AWS calls, live baseline or deployment are part of implementation verification.
+The rejected-judgment capture is a narrowly scoped **private artifact** exception: it can repeat credentials, security evidence, hidden evaluator material or malicious text. Keep it within the same local output protections; never put it into Git, CI/console logs, S3 corpora, public hosting, runtime assets or application prompts. No raw response content enters progress/error messages. Escaping prevents active HTML/controls in the display, not disclosure to someone who can read the report. Git ignore is not access control.
+
+Offline verification for this slice covers syntax/imports, help, strict cases/config preflight and source/diff review; it does not dynamically exercise the rejection/checkpoint/report path. No tests, fixtures, recorded responses, mock servers, harnesses or permanent diagnostic utilities are added or changed. **Do not run a valid CLI invocation as an offline check**: it intentionally makes a paid application request followed by authorized DynamoDB and Bedrock calls. No AWS calls, live baseline or deployment are part of implementation verification. Source review does not establish live reproduction or semantic judge compliance.

@@ -1,17 +1,29 @@
 """Independent bounded Bedrock judge; no tools, repair loop or model-owned totals."""
 
+import json
 import re
 import time
 
-from .common import encoded, integer, object_json, require, sdk_call, text
+from .common import EvaluationError, digest, encoded, integer, object_json, require, sdk_call, text
 
-PROMPT_VERSION = "investigation_judge_v1"
+PROMPT_VERSION = "investigation_judge_v2"
 PROJECTION_VERSION = "complete_terminal_pairs_v1"
 DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-6"
 CRITERIA = ("detection_and_false_positives", "evidence_and_outcomes", "retrieved_and_applied_guidance",
             "accuracy_grounding_usefulness_and_uncertainty")
 LIMITS = {"request_bytes": 524288, "response_bytes": 65536, "max_tokens": 4096,
           "connect_seconds": 10, "read_seconds": 120, "deadline_seconds": 400, "attempts": 3}
+
+
+class QuoteValidationError(EvaluationError):
+    """Carry private quote diagnostics while keeping the public error text controlled."""
+
+    def __init__(self, judgment_path: str, quote: str, answer: str):
+        """Describe the first bounded mismatch without placing model text in exception args."""
+        super().__init__("INVALID_DATA", "Discrepancy quote is not in the exact answer.")
+        self.details = {"reason": "QUOTE_NOT_IN_ANSWER", "comparison": "exact_substring",
+                        "judgment_path": judgment_path, "quote_length": len(quote), "answer_length": len(answer),
+                        "quote_json": json.dumps(quote, ensure_ascii=True)}
 
 
 def settings(model: str) -> dict:
@@ -170,14 +182,14 @@ def validate(value: dict, data: dict) -> dict:
         items = value[name]
         require(isinstance(items, list) and len(items) <= 16, "Judge finding/discrepancy array exceeds cap.")
 
-        for item in items:
+        for index, item in enumerate(items):
 
             field = "description" if name == "observed_findings" else "answer_quote"
             require(isinstance(item, dict) and set(item) == {field, "justification", "references"}
                     and text(item[field], 1500) and text(item["justification"], 1500), "Invalid finding/discrepancy description.")
 
-            if field == "answer_quote":
-                require(item[field] in data["observed"]["answer"], "Discrepancy quote is not in the exact answer.")
+            if field == "answer_quote" and item[field] not in data["observed"]["answer"]:
+                raise QuoteValidationError(f"/{name}/{index}/answer_quote", item[field], data["observed"]["answer"])
 
             references(item["references"], data)
 
@@ -198,6 +210,8 @@ def grade(session, payload: dict, data: dict, stage: dict) -> dict:
     and join all response text blocks before strict JSON, rubric and reference
     validation. Return the validated judgment without a total, raising on malformed
     or unfinished output; the caller handles eligibility, totals and stage status.
+    Only a valid-JSON exact-quote mismatch preserves the bounded response text and
+    parsed-but-unvalidated judgment in stage.rejected_judgment, never as a score.
 
     Example input (payload text and reference/evidence snapshots abbreviated):
         session = boto3.Session(
@@ -284,10 +298,20 @@ def grade(session, payload: dict, data: dict, stage: dict) -> dict:
     blocks = message.get("content")
     require(message.get("role") == "assistant" and isinstance(blocks, list) and 1 <= len(blocks) <= 128, "Invalid judge message.")
     require(all(isinstance(block, dict) and set(block) == {"text"} and text(block["text"], 65536, empty=True) for block in blocks), "Judge returned non-text/tool/reasoning content.", "JUDGE_RESPONSE")
-    output = "".join(block["text"] for block in blocks).strip()
-    require(len(output.encode("utf-8")) <= LIMITS["response_bytes"], "Judge response exceeds cap.", "JUDGE_RESPONSE")
+    response_text = "".join(block["text"] for block in blocks)
+    response_bytes = response_text.encode("utf-8")
+    require(len(response_bytes) <= LIMITS["response_bytes"], "Judge response exceeds cap.", "JUDGE_RESPONSE")
+    output = response_text.strip()
 
     if output.startswith("```json\n") and output.endswith("\n```"):
         output = output[len("```json\n"):-len("\n```")]
 
-    return validate(object_json(output.encode("utf-8")), data)
+    parsed = object_json(output.encode("utf-8"))
+    try:
+        return validate(parsed, data)
+
+    except QuoteValidationError as exc:
+        stage["rejected_judgment"] = {"response_text": response_text, "response_text_bytes": len(response_bytes),
+                                      "response_text_sha256": digest(response_bytes), "parsed_unvalidated_judgment": parsed,
+                                      "validation_failure": exc.details}
+        raise

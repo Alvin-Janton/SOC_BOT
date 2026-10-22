@@ -105,6 +105,9 @@ def render(run: dict) -> bytes:
 
             pieces.append(detail('Expected versus observed findings and missed findings', {key: judgment[key] for key in ('expected_findings', 'observed_findings', 'missed_findings')}))
 
+        if case["judge"].get("rejected_judgment") is not None:
+            pieces.append(detail('Rejected judgment - UNVALIDATED / UNSCORED (untrusted diagnostic only)', case["judge"]["rejected_judgment"]))
+
         pairs = case["evidence"].get("data", {}).get("pairs", [])
         guidance = [pair for pair in pairs if pair["tool_name"] == "retrieve_sections"]
 
@@ -113,7 +116,7 @@ def render(run: dict) -> bytes:
                        detail('Durable selected pairs, checkpoints, attempt references and stage diagnostics', case["evidence"]),
                        detail('Execution checks, declared scope coverage and available agent/query usage', case.get("execution_checks")),
                        detail('Stream events, omissions, identifiers and API timing', case["application"]),
-                       detail('Judge settings, usage, timing, validation errors and result', {key: value for key, value in case["judge"].items() if key != "input"}),
+                       detail('Judge settings, usage, timing, validation errors and result', {key: value for key, value in case["judge"].items() if key not in {"input", "rejected_judgment"}}),
                        detail('Reference key snapshot (never sent to the application)', case["reference_key"]),
                        '</section>'])
 
