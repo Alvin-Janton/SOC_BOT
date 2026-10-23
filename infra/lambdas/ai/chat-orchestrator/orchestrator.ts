@@ -2,11 +2,12 @@ import { Message } from '@aws-sdk/client-bedrock-runtime';
 import { randomUUID } from 'node:crypto';
 import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { buildContext, planCompaction } from './context';
-import { ToolRequest, isRagRequest, validateTool } from './contracts';
+import { ToolInputError, ToolRequest, isRagRequest, validateTool } from './contracts';
+import { ToolValidation } from '../../../lib/shared/tool-validation';
 import { ModelResponse, ModelRunner } from './model';
 import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError, ToolRejectionCode, isToolRejectionCode } from './store';
 import { StreamEvent } from './stream';
-import { isConfirmedQueryFailure, rejectedToolActivity, ToolExecutor } from './tools';
+import { isConfirmedQueryFailure, rejectedToolActivity, rejectedToolOutput, reportRejectedToolInput, ToolExecutor } from './tools';
 
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
 interface PreparedCall { call: ToolCall; request?: ToolRequest; rejection?: ToolRejectionCode }
@@ -128,6 +129,7 @@ export class Orchestrator {
       this.toolCalls++;
       let request: ToolRequest | undefined;
       let rejection: ToolRejectionCode | undefined;
+      let validation: ToolValidation | undefined;
       if (this.toolCalls > MAX_TOOL_CALLS) rejection = 'TOOL_LIMIT_REACHED';
       else if (!this.budget.canDispatch(200_000)) rejection = 'FINALIZATION_REQUIRED';
       else {
@@ -135,13 +137,15 @@ export class Orchestrator {
         catch (error) {
           if (!(error instanceof ChatError) || !isToolRejectionCode(error.code)) throw error;
           rejection = error.code;
+          if (error instanceof ToolInputError && rejection === 'INVALID_TOOL_INPUT') validation = error.validation;
         }
       }
       // Invalid inputs are not copied into audit history; the bounded rejection still counts as a call.
       const args = request ? Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'operation')) as JsonObject : {};
       const event = await this.store.append(this.lease, { entity_type: 'TOOL_CALL', assistant_message_id: assistantMessageId,
         content_block_index: tool.index, tool_use_id: tool.id, tool_name: tool.name, arguments: args,
-        preparation: rejection ? { status: 'rejected', code: rejection } : { status: 'approved' } });
+        preparation: rejection === 'INVALID_TOOL_INPUT' ? { status: 'rejected', code: rejection, ...(validation ? { validation } : {}) }
+          : rejection ? { status: 'rejected', code: rejection } : { status: 'approved' } });
       if (event.entity_type !== 'TOOL_CALL') throw new ChatError('STORAGE_ERROR', 'Conversation state could not be saved.');
       prepared.push({ call: event, request, rejection });
     }
@@ -160,8 +164,8 @@ export class Orchestrator {
    */
   private async rejected(call: ToolCall, code: ToolRejectionCode | 'NOT_EXECUTED'): Promise<void> {
     await this.store.append(this.lease, { entity_type: 'TOOL_RESULT', tool_use_id: call.tool_use_id,
-      tool_name: call.tool_name, status: 'error', output: { ok: false, error: { code,
-        message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } } });
+      tool_name: call.tool_name, status: 'error', output: rejectedToolOutput(call, code) });
+    reportRejectedToolInput(call, code, this.config, this.lease);
     await this.emit(rejectedToolActivity(call, code));
   }
 

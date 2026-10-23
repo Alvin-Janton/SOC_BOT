@@ -1,6 +1,7 @@
 import { InvokeCommand, InvokeCommandOutput, LambdaClient } from '@aws-sdk/client-lambda';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_RESPONSE_BYTES, QUERY_DEADLINE_SECONDS } from '../../../lib/stacks/ai/query-contract';
+import { validToolValidation } from '../../../lib/shared/tool-validation';
 import { ErrorCode as RagErrorCode, RagRequest, RagResponse } from '../rag-tool/contracts';
 import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
 import { isTerminalToolResult, selectToolResult } from './context';
@@ -40,6 +41,29 @@ function toolActivity(call: ToolCall, stage: FailureStage | 'tool_request_reject
 export function rejectedToolActivity(call: ToolCall, code: ToolRejectionCode | 'NOT_EXECUTED'): StreamEvent {
   return toolActivity(call, code === 'INVALID_TOOL' || code === 'INVALID_TOOL_INPUT'
     ? 'tool_request_rejected' : 'tool_not_executed', code);
+}
+
+/** Reconstructs only a saved, safe rejection; sanitized arguments are never revalidated or dispatched. */
+export function rejectedToolOutput(call: ToolCall, code: ToolRejectionCode | 'NOT_EXECUTED'): JsonObject {
+  const validation = code === 'INVALID_TOOL_INPUT' && call.preparation?.status === 'rejected'
+    && call.preparation.code === 'INVALID_TOOL_INPUT' ? call.preparation.validation : undefined;
+  if (validation !== undefined && !validToolValidation(validation)) {
+    throw new ChatError('STORAGE_ERROR', 'Conversation state could not be safely read.');
+  }
+  return { ok: false, error: { code,
+    message: 'This tool block was not executed. Use existing evidence or correct the approved input.',
+    ...(validation ? { validation } : {}) } };
+}
+
+/** Temporarily logs only durable dev invalid-input hints and correlation IDs, never raw inputs/errors. */
+export function reportRejectedToolInput(call: ToolCall, code: ToolRejectionCode | 'NOT_EXECUTED', config: Configuration, lease: Lease): void {
+  if (config.environment !== 'dev' || code !== 'INVALID_TOOL_INPUT' || !Object.hasOwn(toolSchemas, call.tool_name)) return;
+  const output = rejectedToolOutput(call, code);
+  const error = output.error as JsonObject;
+  if (error.validation === undefined) return; // Legacy decisions have no hints to report.
+  console.info(JSON.stringify({ event: 'dev_tool_input_rejected', conversationId: lease.conversationId,
+    turnId: lease.turnId, attemptId: lease.attemptId, toolUseId: call.tool_use_id, toolName: call.tool_name,
+    code, validation: error.validation }));
 }
 
 /** Recognizes only the query backend's application-owned error codes, not arbitrary returned text. */
@@ -535,24 +559,26 @@ export class ToolExecutor {
         throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A halted tool group contains inconsistent dispatch evidence.', 409, false);
       }
       if (!latest && queuedAfterHalt) {
-        await this.terminal(call, { ok: false, error: { code: 'NOT_EXECUTED',
-          message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+        await this.terminal(call, rejectedToolOutput(call, 'NOT_EXECUTED'), 'error');
         await this.emit(rejectedToolActivity(call, 'NOT_EXECUTED'));
         continue;
       }
       if (call.preparation?.status === 'rejected') {
         const code = call.preparation.code;
+        const expectedError = rejectedToolOutput(call, code).error as JsonObject;
         if (results.some(result => {
           const error = result.output.error;
           return result.status !== 'error' || result.output.ok !== false || result.output.query_execution_id !== undefined
             || !error || typeof error !== 'object' || Array.isArray(error)
-            || (error.code !== code && error.code !== 'NOT_EXECUTED');
+            || (error.code !== code && error.code !== 'NOT_EXECUTED')
+            || (error.code === code && canonicalJson({ validation: error.validation ?? null })
+              !== canonicalJson({ validation: expectedError.validation ?? null }));
         })) {
           throw new ChatError('UNKNOWN_TOOL_DISPATCH', 'A rejected tool call contains inconsistent dispatch evidence.', 409, false);
         }
         if (!latest) {
-          await this.terminal(call, { ok: false, error: { code,
-            message: 'This tool block was not executed. Use existing evidence or correct the approved input.' } }, 'error');
+          await this.terminal(call, rejectedToolOutput(call, code), 'error');
+          reportRejectedToolInput(call, code, this.config, this.lease);
           await this.emit(rejectedToolActivity(call, code));
         }
         const savedError = latest?.output.error;

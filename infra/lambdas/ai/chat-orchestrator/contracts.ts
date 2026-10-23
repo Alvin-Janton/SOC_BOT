@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { Tool } from '@aws-sdk/client-bedrock-runtime';
-import { compileQuery, ContractError, QueryToolRequest } from '../../../lib/stacks/ai/query-contract';
-import { TABLE_COLUMNS } from '../../../lib/shared/catalog-schema';
+import { compileQuery, ContractError, groupingFields, QueryToolRequest } from '../../../lib/stacks/ai/query-contract';
+import { TABLE_COLUMNS, TableName } from '../../../lib/shared/catalog-schema';
+import { ToolValidation, toolValidation } from '../../../lib/shared/tool-validation';
 import { RagError, RagOperation, RagRequest, describeDocumentRequestSchema, describeDocumentsRequestSchema,
   parseRequest as parseRagRequest, retrieveSectionsRequestSchema } from '../rag-tool/contracts';
 import { ChatError, Configuration } from './config';
@@ -47,6 +48,22 @@ export const toolSchemas = {
 export type ToolName = keyof typeof toolSchemas;
 export type LogicalQuery = Exclude<QueryToolRequest, { operation: 'query_status' | 'cancel_query' }>;
 export type ToolRequest = LogicalQuery | RagRequest;
+
+/** Carries only authored, bounded correction metadata for the existing invalid-input rejection. */
+export class ToolInputError extends ChatError {
+  public constructor(message: string, public readonly validation: ToolValidation) {
+    super('INVALID_TOOL_INPUT', message, 400, false);
+    this.name = 'ToolInputError';
+  }
+}
+
+/** Translates approved Zod codes/paths only; messages, values and unknown-key lists never escape. */
+function schemaValidation(error: z.ZodError): ToolValidation {
+  const codes: Readonly<Record<string, string>> = { invalid_type: 'TYPE', invalid_value: 'CHOICE', too_small: 'MINIMUM',
+    too_big: 'MAXIMUM', invalid_format: 'FORMAT', unrecognized_keys: 'KEYS', invalid_union: 'SHAPE', custom: 'CONSTRAINT' };
+  return toolValidation('schema', error.issues.map(issue => ({ path: issue.path,
+    code: Object.hasOwn(codes, issue.code) ? codes[issue.code] : 'UNSUPPORTED' })));
+}
 
 /** Recognizes only the three declared document tools, including when inspecting durable call names. */
 export function isRagToolName(name: string): name is RagOperation { return Object.hasOwn(ragToolSchemas, name); }
@@ -130,8 +147,11 @@ export function validateTool(name: string, input: unknown, config: Configuration
     return request;
   } catch (error) {
     if (error instanceof ContractError || error instanceof z.ZodError || error instanceof RagError) {
-      throw new ChatError('INVALID_TOOL_INPUT', isRagToolName(name)
-        ? 'Tool input does not match the approved playbook contract.' : 'Tool input does not match the approved query contract.', 400, false);
+      const validation = error instanceof z.ZodError ? schemaValidation(error)
+        : error instanceof ContractError ? toolValidation('query_contract', error.hint ? [error.hint] : [])
+          : toolValidation('tool_contract');
+      throw new ToolInputError(isRagToolName(name)
+        ? 'Tool input does not match the approved playbook contract.' : 'Tool input does not match the approved query contract.', validation);
     }
     throw error;
   }
@@ -167,6 +187,22 @@ export function tableFacts(maxQueryDays: number): string {
         native_match_details: 'terminating_rule_match_details and supplied nested match details retain native condition types, locations and matchedData when present. Match fragments, including BODY locations, are not a full request body or proof of exploit success.',
         request_and_impact_limits: 'method, path, query_string and headers are incoming request evidence. No full raw request/response bodies or returned HTML are retained by this normalized contract, and there is no normal body column or proof of browser execution.',
       },
+      cloudtrail_events: {
+        identity_user_name: 'Only native userIdentity.userName, not an inferred universal identity. It can be NULL for AssumedRole, service, federation or incomplete identity records. A missing username is neither missing activity nor an attack verdict.',
+        actor: 'Native userIdentity.arn, then userIdentity.userName, otherwise NULL. This can identify a role session or other principal, not necessarily a human or unique occurrence. Correlate identity_type, actor, src_ip, resource and event provenance; principalId is not a top-level normalized column.',
+        status: 'failure when errorCode or errorMessage is nonempty, or responseElements.ConsoleLogin is Failure; success otherwise. This source-derived status is not proof of legitimate authorization, compromise or intent. AccessDenied can occur in routine activity.',
+        bytes_transferred_out: 'Source-supplied additionalEventData.bytesTransferredOut; NULL is unknown, never an inferred zero. GetObject download bytes differ from listing-response bytes. Repeated reads of one object are not distinct files; recorded transfer alone establishes neither sensitivity nor unauthorized exfiltration.',
+        api_outcomes: 'Successful enumeration/object reads differ from denied attempts but do not alone prove theft or benignness. LookupEvents reads audit history, not log deletion. PutObject records a write, not proof of overwrite or malicious tampering without supporting evidence.',
+      },
+    },
+    filter_semantics: {
+      conjunction: 'All supplied filters are AND-only. No OR expressions, arbitrary SQL or pagination are exposed.',
+      nulls: 'ne compiles to SQL <> and excludes NULL, as do eq, in and ordered comparisons. is_null and is_not_null explicitly select missing/present fields and must omit value entirely.',
+      coverage: 'Excluding names on optional identity_user_name does not retrieve all remaining principals. Missing-value populations can require a separate bounded is_null query or supported identity_type/actor/event dimensions. Scope absent/NULL claims to the retrieved population and fields.',
+      operations: 'describe_table exposes selectable columns, not every allowed grouping or comparison. Ordered comparisons require numeric/timestamp columns; text matching requires string columns; numeric aggregates require int/bigint columns.',
+    },
+    operation_semantics: {
+      aggregate_group_by: Object.fromEntries((Object.keys(TABLE_COLUMNS) as TableName[]).map(name => [name, groupingFields(name)])),
     },
     evidence_semantics: {
       source_s3_key: 'Raw source object key; use together with source_record_ref and relevant event_time to locate evidence.',

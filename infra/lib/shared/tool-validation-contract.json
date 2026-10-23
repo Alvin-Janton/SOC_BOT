@@ -1,0 +1,52 @@
+{
+  "max_bytes": 2048,
+  "max_issues": 3,
+  "max_index": 127,
+  "path_shapes": [
+    [], ["table"], ["start_time"], ["end_time"], ["limit"],
+    ["fields"], ["fields", "#"], ["sort"], ["sort", "field"], ["sort", "direction"],
+    ["filters"], ["filters", "#"], ["filters", "#", "field"],
+    ["filters", "#", "operator"], ["filters", "#", "value"], ["filters", "#", "value", "#"],
+    ["group_by"], ["group_by", "#"], ["metrics"], ["metrics", "#"],
+    ["metrics", "#", "function"], ["metrics", "#", "field"],
+    ["document_id"], ["section_ids"], ["section_ids", "#"]
+  ],
+  "stages": {
+    "schema": {
+      "GENERIC": "Use the approved tool input shape and constraints.",
+      "TYPE": "Provide the type required by the tool schema at this location.",
+      "CHOICE": "Choose a value declared in the tool schema at this location.",
+      "MINIMUM": "Provide the required nonempty value or minimum-sized collection.",
+      "MAXIMUM": "Reduce this value or collection to the tool schema limit.",
+      "FORMAT": "Use the format declared in the tool schema at this location.",
+      "KEYS": "Remove undeclared fields; use only the tool schema keys.",
+      "SHAPE": "Use one of the complete object or value shapes declared in the tool schema.",
+      "CONSTRAINT": "Follow the tool schema constraint at this location."
+    },
+    "query_contract": {
+      "GENERIC": "Use the approved query contract; no SQL or undeclared controls are accepted.",
+      "COLUMN": "Choose a selectable column from the configured table contract.",
+      "TIME_FORMAT": "Use a real UTC ISO-8601 timestamp ending in Z, with at most millisecond precision.",
+      "INTEGER": "Use an in-range integer; large bigint values may use the approved decimal-string form.",
+      "FILTER_STRING": "Use a bounded string without control characters for this filter value.",
+      "FILTER_LIMIT": "Reduce the filters collection to the approved query limit.",
+      "NULL_VALUE": "Omit value entirely for is_null and is_not_null.",
+      "IN_VALUES": "Provide a nonempty IN collection within the approved query limit.",
+      "OPERATOR_TYPE": "Use ordered comparisons only on numeric or timestamp columns.",
+      "OPERATOR": "Use an approved operator for this column type; text matching requires a string column.",
+      "TIME_WINDOW": "Use a positive start-inclusive, end-exclusive range within utc_query_window_days.",
+      "CATALOG_DATES": "Keep both time bounds within the catalog date projection range.",
+      "RESULT_LIMIT": "Use an integer result limit within the approved query maximum.",
+      "PROJECTION": "Provide a nonempty projection within the approved query field limit.",
+      "SORT_DIRECTION": "Use asc or desc for the sort direction.",
+      "GROUP_BY": "Choose distinct fields from this table's aggregate_group_by reference, within the grouping limit.",
+      "METRICS": "Provide a nonempty metrics collection within the approved query limit.",
+      "METRIC_FUNCTION": "Use an approved aggregate function; count takes no field.",
+      "METRIC_TYPE": "Choose an int or bigint column for this aggregate metric.",
+      "DUPLICATE_METRICS": "Choose groups and metrics with distinct output names."
+    },
+    "tool_contract": {
+      "GENERIC": "Use the approved tool contract and its bounded fields; this request was not executed."
+    }
+  }
+}

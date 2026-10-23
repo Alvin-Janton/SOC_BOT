@@ -1,4 +1,5 @@
 import { CatalogColumnType, TABLE_COLUMNS, TableName } from '../../shared/catalog-schema';
+import type { ValidationSeed } from '../../shared/tool-validation';
 
 export const DEFAULT_RESULT_LIMIT = 25;
 export const MAX_RESULT_LIMIT = 100;
@@ -56,8 +57,11 @@ const GROUP_FIELDS: Record<TableName, readonly string[]> = {
 
 /** Signals a safe, caller-correctable contract violation without echoing input values. */
 export class ContractError extends Error {
-  public constructor(message: string) { super(message); this.name = 'ContractError'; }
+  public constructor(message: string, public readonly hint?: ValidationSeed) { super(message); this.name = 'ContractError'; }
 }
+
+/** Exposes a copy of the compiler's existing grouping restrictions without adding another allowlist. */
+export function groupingFields(table: TableName): readonly string[] { return [...GROUP_FIELDS[table]]; }
 
 /** Accepts plain JSON objects only; arrays, nulls and class instances are not requests. */
 export function object(value: unknown): Record<string, unknown> {
@@ -84,20 +88,20 @@ export function tableColumns(table: TableName): readonly ResultColumn[] {
 }
 
 /** Resolves a column by exact name instead of accepting caller-authored identifiers. */
-function column(table: TableName, value: unknown): ResultColumn {
+function column(table: TableName, value: unknown, path: readonly PropertyKey[] = []): ResultColumn {
   const found = tableColumns(table).find((entry) => entry.name === value);
-  if (!found) throw new ContractError('Unsupported column for this table.');
+  if (!found) throw new ContractError('Unsupported column for this table.', { path, code: 'COLUMN' });
   return found;
 }
 
 /** Parses a real UTC instant at millisecond precision without permissive date rollover. */
-function utcTime(value: unknown): Date {
+function utcTime(value: unknown, path: readonly PropertyKey[] = []): Date {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)) {
-    throw new ContractError('Times must be UTC ISO-8601 strings ending in Z.');
+    throw new ContractError('Times must be UTC ISO-8601 strings ending in Z.', { path, code: 'TIME_FORMAT' });
   }
   const date = new Date(value);
   const canonical = value.replace(/(?:\.(\d{1,3}))?Z$/, (_, fraction: string | undefined) => `.${(fraction ?? '').padEnd(3, '0')}Z`);
-  if (!Number.isFinite(date.getTime()) || date.toISOString() !== canonical) throw new ContractError('Invalid UTC timestamp.');
+  if (!Number.isFinite(date.getTime()) || date.toISOString() !== canonical) throw new ContractError('Invalid UTC timestamp.', { path, code: 'TIME_FORMAT' });
   return date;
 }
 
@@ -105,13 +109,13 @@ function utcTime(value: unknown): Date {
 function stringLiteral(value: string): string { return `'${value.replace(/'/g, "''")}'`; }
 
 /** Produces a type-checked literal; integers larger than JS precision must use decimal strings. */
-function literal(value: unknown, type: ResultType): string {
-  if (type === 'timestamp') return `TIMESTAMP ${stringLiteral(utcTime(value).toISOString().replace('T', ' ').replace('Z', ''))}`;
+function literal(value: unknown, type: ResultType, path: readonly PropertyKey[] = []): string {
+  if (type === 'timestamp') return `TIMESTAMP ${stringLiteral(utcTime(value, path).toISOString().replace('T', ' ').replace('Z', ''))}`;
 
   if (type === 'int' || type === 'bigint') {
 
     if (typeof value === 'number' && Number.isSafeInteger(value)) {
-      if (type === 'int' && (value < -2_147_483_648 || value > 2_147_483_647)) throw new ContractError('Integer is out of range.');
+      if (type === 'int' && (value < -2_147_483_648 || value > 2_147_483_647)) throw new ContractError('Integer is out of range.', { path, code: 'INTEGER' });
       return String(value);
     }
 
@@ -120,10 +124,10 @@ function literal(value: unknown, type: ResultType): string {
       if (integer >= -9_223_372_036_854_775_808n && integer <= 9_223_372_036_854_775_807n) return integer.toString();
     }
 
-    throw new ContractError('Expected an in-range integer.');
+    throw new ContractError('Expected an in-range integer.', { path, code: 'INTEGER' });
   }
   if (typeof value !== 'string' || value.length > 1024 || [...value].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
-    throw new ContractError('Filter strings must be at most 1024 characters without control characters.');
+    throw new ContractError('Filter strings must be at most 1024 characters without control characters.', { path, code: 'FILTER_STRING' });
   }
   return stringLiteral(value);
 }
@@ -152,37 +156,37 @@ function literal(value: unknown, type: ResultType): string {
 function filtersSql(table: TableName, value: unknown): string[] {
   if (value === undefined) return [];
 
-  if (!Array.isArray(value) || value.length > 8) throw new ContractError('At most eight filters are allowed.');
+  if (!Array.isArray(value) || value.length > 8) throw new ContractError('At most eight filters are allowed.', { path: ['filters'], code: 'FILTER_LIMIT' });
 
-  return value.map((item) => {
+  return value.map((item, index) => {
     const filter = object(item);
     onlyKeys(filter, ['field', 'operator', 'value']);
-    const field = column(table, filter.field);
+    const field = column(table, filter.field, ['filters', index, 'field']);
     const name = `"${field.name}"`;
     const operator = filter.operator;
 
     if (operator === 'is_null' || operator === 'is_not_null') {
-      if (filter.value !== undefined) throw new ContractError('Null operators do not accept a value.');
+      if (filter.value !== undefined) throw new ContractError('Null operators do not accept a value.', { path: ['filters', index, 'value'], code: 'NULL_VALUE' });
       return `${name} IS ${operator === 'is_not_null' ? 'NOT ' : ''}NULL`;
     }
 
     if (operator === 'in') {
-      if (!Array.isArray(filter.value) || !filter.value.length || filter.value.length > 10) throw new ContractError('IN requires one to ten values.');
-      return `${name} IN (${filter.value.map((entry) => literal(entry, field.type)).join(', ')})`;
+      if (!Array.isArray(filter.value) || !filter.value.length || filter.value.length > 10) throw new ContractError('IN requires one to ten values.', { path: ['filters', index, 'value'], code: 'IN_VALUES' });
+      return `${name} IN (${filter.value.map((entry, valueIndex) => literal(entry, field.type, ['filters', index, 'value', valueIndex])).join(', ')})`;
     }
 
     const comparisons: Record<string, string> = { eq: '=', ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
 
     if (typeof operator === 'string' && Object.hasOwn(comparisons, operator)) {
-      if (field.type === 'string' && operator !== 'eq' && operator !== 'ne') throw new ContractError('Ordered comparisons require numeric or timestamp columns.');
-      return `${name} ${comparisons[operator]} ${literal(filter.value, field.type)}`;
+      if (field.type === 'string' && operator !== 'eq' && operator !== 'ne') throw new ContractError('Ordered comparisons require numeric or timestamp columns.', { path: ['filters', index, 'operator'], code: 'OPERATOR_TYPE' });
+      return `${name} ${comparisons[operator]} ${literal(filter.value, field.type, ['filters', index, 'value'])}`;
     }
 
     if (field.type === 'string' && (operator === 'contains' || operator === 'starts_with')) {
-      return operator === 'contains' ? `strpos(${name}, ${literal(filter.value, 'string')}) > 0` : `starts_with(${name}, ${literal(filter.value, 'string')})`;
+      return operator === 'contains' ? `strpos(${name}, ${literal(filter.value, 'string', ['filters', index, 'value'])}) > 0` : `starts_with(${name}, ${literal(filter.value, 'string', ['filters', index, 'value'])})`;
     }
 
-    throw new ContractError('Unsupported filter operator.');
+    throw new ContractError('Unsupported filter operator.', { path: ['filters', index, 'operator'], code: 'OPERATOR' });
   });
 }
 
@@ -218,14 +222,14 @@ function filtersSql(table: TableName, value: unknown): string[] {
  * narrow which events it returns. compileQuery joins these conditions with AND.
  */
 function timeSql(request: Record<string, unknown>, maxDays: number): string[] {
-  const start = utcTime(request.start_time);
-  const end = utcTime(request.end_time);
+  const start = utcTime(request.start_time, ['start_time']);
+  const end = utcTime(request.end_time, ['end_time']);
   const span = end.getTime() - start.getTime();
 
-  if (span <= 0 || span > maxDays * 86_400_000) throw new ContractError(`Query window must be positive and at most ${maxDays} days.`);
+  if (span <= 0 || span > maxDays * 86_400_000) throw new ContractError(`Query window must be positive and at most ${maxDays} days.`, { path: [], code: 'TIME_WINDOW' });
 
   // The projected catalog currently supports only 2026 through 2036.
-  if (start.getUTCFullYear() < 2026 || new Date(end.getTime() - 1).getUTCFullYear() > 2036) throw new ContractError('Query dates are outside the catalog projection range.');
+  if (start.getUTCFullYear() < 2026 || new Date(end.getTime() - 1).getUTCFullYear() > 2036) throw new ContractError('Query dates are outside the catalog projection range.', { path: [], code: 'CATALOG_DATES' });
 
   const dates: string[] = [];
 
@@ -313,7 +317,7 @@ export function compileQuery(value: unknown, database: string, maxDays: number):
   const table = tableName(request.table);
   const limit = request.limit ?? DEFAULT_RESULT_LIMIT;
 
-  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_RESULT_LIMIT) throw new ContractError('Result limit must be an integer from 1 to 100.');
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_RESULT_LIMIT) throw new ContractError('Result limit must be an integer from 1 to 100.', { path: ['limit'], code: 'RESULT_LIMIT' });
 
   const where = [...timeSql(request, queryWindowDays(maxDays)), ...filtersSql(table, request.filters)].join(' AND ');
 
@@ -324,14 +328,14 @@ export function compileQuery(value: unknown, database: string, maxDays: number):
   if (operation === 'query_events') {
     const fields = request.fields ?? DEFAULT_FIELDS;
 
-    if (!Array.isArray(fields) || !fields.length || fields.length > 20) throw new ContractError('Projection requires one to twenty fields.');
+    if (!Array.isArray(fields) || !fields.length || fields.length > 20) throw new ContractError('Projection requires one to twenty fields.', { path: ['fields'], code: 'PROJECTION' });
 
-    columns = [...new Set([...fields.map((field) => column(table, field).name), ...PROVENANCE_FIELDS])].map((field) => column(table, field));
+    columns = [...new Set([...fields.map((field, index) => column(table, field, ['fields', index]).name), ...PROVENANCE_FIELDS])].map((field) => column(table, field));
     select = columns.map((field) => `"${field.name}"`).join(', ');
     const sort = request.sort === undefined ? { field: 'event_time', direction: 'asc' } : object(request.sort);
     onlyKeys(sort, ['field', 'direction']);
-    const sortField = column(table, sort.field);
-    if (sort.direction !== 'asc' && sort.direction !== 'desc') throw new ContractError('Sort direction must be asc or desc.');
+    const sortField = column(table, sort.field, ['sort', 'field']);
+    if (sort.direction !== 'asc' && sort.direction !== 'desc') throw new ContractError('Sort direction must be asc or desc.', { path: ['sort', 'direction'], code: 'SORT_DIRECTION' });
     suffix = `ORDER BY "${sortField.name}" ${sort.direction.toUpperCase()} NULLS LAST, "event_uid" ASC, "source_s3_key" ASC, "source_record_ref" ASC`;
   }
 
@@ -339,17 +343,17 @@ export function compileQuery(value: unknown, database: string, maxDays: number):
     const groups = request.group_by ?? [];
 
     if (!Array.isArray(groups) || groups.length > 3 || groups.some((field) => typeof field !== 'string' || !GROUP_FIELDS[table].includes(field)) || new Set(groups).size !== groups.length) {
-      throw new ContractError('Select at most three distinct approved grouping fields.');
+      throw new ContractError('Select at most three distinct approved grouping fields.', { path: ['group_by'], code: 'GROUP_BY' });
     }
 
     const metrics = request.metrics ?? [{ function: 'count' }];
 
-    if (!Array.isArray(metrics) || !metrics.length || metrics.length > 5) throw new ContractError('Select one to five metrics.');
+    if (!Array.isArray(metrics) || !metrics.length || metrics.length > 5) throw new ContractError('Select one to five metrics.', { path: ['metrics'], code: 'METRICS' });
 
     columns = groups.map((field) => column(table, field));
     const expressions = columns.map((field) => `"${field.name}"`);
 
-    for (const item of metrics) {
+    for (const [index, item] of metrics.entries()) {
       const metric = object(item);
       onlyKeys(metric, ['function', 'field']);
 
@@ -359,16 +363,16 @@ export function compileQuery(value: unknown, database: string, maxDays: number):
       }
 
       else {
-        if (typeof metric.function !== 'string' || !['sum', 'avg', 'min', 'max'].includes(metric.function)) throw new ContractError('Unsupported aggregation function.');
-        const field = column(table, metric.field);
-        if (field.type !== 'int' && field.type !== 'bigint') throw new ContractError('Aggregates require numeric columns.');
+        if (typeof metric.function !== 'string' || !['sum', 'avg', 'min', 'max'].includes(metric.function)) throw new ContractError('Unsupported aggregation function.', { path: ['metrics', index, 'function'], code: 'METRIC_FUNCTION' });
+        const field = column(table, metric.field, ['metrics', index, 'field']);
+        if (field.type !== 'int' && field.type !== 'bigint') throw new ContractError('Aggregates require numeric columns.', { path: ['metrics', index, 'field'], code: 'METRIC_TYPE' });
         const name = `${metric.function}_${field.name}`;
         columns.push({ name, type: metric.function === 'avg' ? 'decimal' : metric.function === 'sum' ? 'bigint' : field.type });
         expressions.push(`${metric.function.toUpperCase()}("${field.name}") AS "${name}"`);
       }
     }
 
-    if (new Set(columns.map((field) => field.name)).size !== columns.length) throw new ContractError('Duplicate aggregate output names.');
+    if (new Set(columns.map((field) => field.name)).size !== columns.length) throw new ContractError('Duplicate aggregate output names.', { path: ['metrics'], code: 'DUPLICATE_METRICS' });
     select = expressions.join(', ');
     suffix = `${groups.length ? `GROUP BY ${groups.map((field) => `"${field}"`).join(', ')} ` : ''}ORDER BY "${columns[groups.length].name}" DESC NULLS LAST${groups.map((field) => `, "${field}" ASC NULLS LAST`).join('')}`;
   }

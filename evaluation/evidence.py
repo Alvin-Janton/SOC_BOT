@@ -1,10 +1,11 @@
 """Read only the exact conversation's base-table events and select causal evidence."""
 
 from decimal import Decimal
+from pathlib import Path
 import re
 import time
 
-from .common import encoded, integer, require, sdk_call, text, utc
+from .common import encoded, integer, object_json, require, sdk_call, text, utc
 
 LIMITS = {"pages": 128, "records": 10000, "decoded_bytes": 8388608, "deadline_seconds": 60,
           "record_bytes": 98304, "connect_seconds": 5, "read_seconds": 10, "page_limit": 100}
@@ -18,6 +19,40 @@ VARIANTS = {
     "TOOL_RESULT": {"tool_use_id", "tool_name", "status", "output"},
     "TURN_OUTCOME": {"outcome", "retryable", "failure_phase", "error_code"},
 }
+VALIDATION_CONTRACT = object_json((Path(__file__).resolve().parents[1]
+                                 / "infra/lib/shared/tool-validation-contract.json").read_bytes())
+
+
+def valid_tool_validation(value: object) -> bool:
+    """Validate correction metadata using the runtime's shared fields, messages, paths and limits.
+
+    This accepts no raw tool values or free-form messages. It does not make a
+    rejected call successful evidence or relax any dispatch/pairing check.
+    """
+    if (not isinstance(value, dict) or not {"stage", "issues"} <= set(value)
+            or not set(value) <= {"stage", "issues", "omitted"}
+            or ("omitted" in value and value["omitted"] is not True)
+            or not isinstance(value["stage"], str) or value["stage"] not in VALIDATION_CONTRACT["stages"]
+            or not isinstance(value["issues"], list)
+            or not 1 <= len(value["issues"]) <= VALIDATION_CONTRACT["max_issues"]):
+        return False
+
+    messages = VALIDATION_CONTRACT["stages"][value["stage"]]
+
+    for issue in value["issues"]:
+
+        if (not isinstance(issue, dict) or set(issue) != {"path", "code", "message"}
+                or not isinstance(issue["code"], str) or issue["code"] not in messages
+                or issue["message"] != messages[issue["code"]] or not isinstance(issue["path"], list)):
+            return False
+
+        if not any(len(shape) == len(issue["path"]) and all(
+                (type(part) is int and 0 <= part <= VALIDATION_CONTRACT["max_index"])
+                if segment == "#" else (isinstance(part, str) and part == segment)
+                for segment, part in zip(shape, issue["path"])) for shape in VALIDATION_CONTRACT["path_shapes"]):
+            return False
+            
+    return len(encoded(value)) <= VALIDATION_CONTRACT["max_bytes"]
 
 
 def decoded(value, depth: int = 0):
@@ -186,14 +221,22 @@ def validate_event(event: dict, conversation_id: str) -> None:
             preparation = event.get("preparation")
 
             require(preparation is None or preparation == {"status": "approved"} or (
-                isinstance(preparation, dict) and set(preparation) == {"status", "code"}
+                isinstance(preparation, dict) and {"status", "code"} <= set(preparation)
+                and set(preparation) <= {"status", "code", "validation"}
                 and preparation["status"] == "rejected" and preparation["code"] in {
                     "INVALID_TOOL", "INVALID_TOOL_INPUT", "TOOL_LIMIT_REACHED", "FINALIZATION_REQUIRED"}
+                and ("validation" not in preparation or (preparation["code"] == "INVALID_TOOL_INPUT"
+                     and valid_tool_validation(preparation["validation"])))
                 and event["arguments"] == {}), "Invalid durable preparation.")
 
         else:
             require(event.get("status") in {"success", "error"} and isinstance(event.get("output"), dict)
                     and len(encoded(event["output"])) <= 65536, "Invalid tool result.")
+            error = event["output"].get("error")
+            if isinstance(error, dict) and "validation" in error:
+                require(event["status"] == "error" and event["output"].get("ok") is False
+                        and error.get("code") == "INVALID_TOOL_INPUT" and valid_tool_validation(error["validation"]),
+                        "Invalid tool correction metadata.")
 
     else:
         require(event.get("outcome") in {"failed", "timed_out", "cancelled", "abandoned"}
@@ -361,6 +404,8 @@ def select(records: list[dict], case: dict, application: dict) -> dict:
             error = result["output"].get("error")
             require(result["status"] == "error" and isinstance(error, dict)
                     and error.get("code") in {preparation["code"], "NOT_EXECUTED"}, "Rejected preparation has an incompatible terminal result.")
+            if error["code"] == preparation["code"]:
+                require(error.get("validation") == preparation.get("validation"), "Rejected correction metadata disagrees with preparation.")
 
         pairs.append({"tool_use_id": call["tool_use_id"], "tool_name": call["tool_name"], "arguments": call["arguments"],
                       "preparation": call.get("preparation"), "assistant_message_id": call["assistant_message_id"],

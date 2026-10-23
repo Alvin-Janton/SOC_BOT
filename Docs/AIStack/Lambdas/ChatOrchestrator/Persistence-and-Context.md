@@ -24,6 +24,8 @@ Event variants are:
 - `ASSISTANT_MESSAGE`: completed public answer, model ID, stop reason, and role; one full response, not token fragments.
 - `TURN_OUTCOME`: failed/timed-out attempt metadata, retryability, phase, and safe error code. The schema also supports cancelled/abandoned variants, but the current handler emits failed/timed-out outcomes, not an authenticated Stop or abandonment workflow.
 
+Only a rejected `INVALID_TOOL_INPUT` preparation may optionally include `validation`, with the [shared bounded contract](../../../../infra/lib/shared/tool-validation-contract.json) enforced on writes and reads. It contains a fixed stage and up to three authored path/code/message issues, capped at 2 KiB, plus only the optional fixed `omitted: true` indicator. Rejected arguments stay exactly `{}`. Approved/other rejected decisions cannot carry hints or unknown preparation keys. Legacy decisions without hints remain valid; no table/key/item/version migration occurs.
+
 `turn_id` identifies the logical submission, `attempt_id` identifies an execution/retry, `event_id` identifies an immutable event, and `event_sequence` orders events across the conversation. `lease_version` fences writers; it is not the event counter. Numeric event sequence is authoritative even when clock changes make timestamp-first sort-key order disagree.
 
 ## Acceptance, leases, and appends
@@ -59,6 +61,8 @@ Before recovery, `Orchestrator.run()` restores `toolCalls` from all durable curr
 - A saved confirmed Athena failure keeps tools disabled. Provably later queued calls in the halted group, including RAG calls, receive missing `NOT_EXECUTED` results without duplication.
 - Unknown Athena dispatches, contradictory later activity, invalid stored requests, and persistence failures stay fatal. The RAG reread exception is not an exactly-once guarantee for external submissions. See [RAG integration](RAG-Tools.md).
 
+When interrupted between a rejected call and its result, recovery copies the saved safe hints into the new error result's `output.error.validation`; it does not rerun validation on `{}` or invoke the tool. A matching existing terminal result is reused unchanged, with hint consistency checked against preparation. Missing/invalid/contradictory metadata fails closed rather than repairing history; absent hints on legacy preparation/results remain valid. Error-status corrections are not successful investigation evidence and do not reset counters or bypass group halts/finalization. The [evaluator](../../../../evaluation/README.md#safe-tool-input-correction-metadata) accepts the same optional metadata under its existing nonexecution and unscored-error rules.
+
 If final assistant persistence might have committed but its acknowledgment is lost, the handler reports `OUTCOME_NOT_CONFIRMED` rather than appending a contradictory failed outcome. Retrying the original turn after the active lease expires checks the durable result. A transport failure alone does not undo completion or authorize a duplicate investigation.
 
 ## Reconstructing model history
@@ -75,7 +79,7 @@ Saved results from earlier attempts can complete an original group; failed-attem
 
 ## Compaction and summary checkpoints
 
-Prompt v5's policy illustrations and the expanded `tableFacts()` source/result reference live only in the existing model system blocks, not conversation events, selected tool results or evidence. Summary requests share that base policy/reference but receive no live tool allowance; examples are explicitly not observed facts or summary evidence, and public answer-format targets do not define the summary task. `SUMMARY_INSTRUCTION`, summary projection, checkpoints, compaction mechanics and all bounds below remain unchanged. A query's truncation metadata remains part of its own stored output rather than a conversation-wide completeness flag. See [source/result semantics](Agent-Loop-and-Tools.md#source-fields-and-per-query-completeness).
+Prompt v6's policy illustrations and the expanded `tableFacts()` source/result reference live only in the existing model system blocks, not conversation events, selected tool results or evidence. Summary requests share that base policy/reference but receive no live tool allowance; examples are explicitly not observed facts or summary evidence, and public answer-format targets do not define the summary task. `SUMMARY_INSTRUCTION`, summary projection, checkpoints, compaction mechanics and all bounds below remain unchanged. A query's truncation metadata remains part of its own stored output rather than a conversation-wide completeness flag. See [source/result semantics](Agent-Loop-and-Tools.md#source-fields-and-per-query-completeness).
 
 `Orchestrator.context()` runs before each main model request. It returns immediately when built messages fit the 98,304-byte (96 KiB) soft threshold. Above that threshold, or when the hard context limit prevents a build, it asks `planCompaction()` for a safe older prefix. The trigger is serialized UTF-8 message size, not model-reported input tokens.
 
@@ -95,6 +99,6 @@ When eligible history and time remain, the orchestrator emits `summarizing`, cal
 | Built model messages | 196,608 bytes (192 KiB), at most 128 messages; soft compaction trigger is 96 KiB. |
 | Complete Bedrock request | 262,144 bytes (256 KiB), including system text/facts/schemas and messages. |
 | Generated summary | 1,024 tokens / 8 KiB; `saveSummary()` separately allows text up to 16 KiB. |
-| Final model answer | 4,096 tokens / 32 KiB (existing configuration, unchanged by prompt v5). |
+| Final model answer | 4,096 tokens / 32 KiB (existing configuration, unchanged by prompt v6). |
 
 Compaction reduces provider input, not the audit-retrieval bound. Increasing the shared tool allowance to eight did not increase any limit above: eight maximum-sized results may not fit, and current-turn evidence/guidance must not be clipped or compacted across unsafe boundaries. A very long conversation can still reach storage/history limits even with small summaries. Conversation records are sensitive; bodies, Markdown, tool arguments/results and summaries are excluded from normal operational logs. The temporary synthetic-dev [response-preview exception](Request-and-Streaming.md#temporary-dev-response-diagnostics) permits only the first 100 Unicode code points of a fresh assembled final answer; it is not a new stored field or permission to log tool payloads. Authentication, explicit abandonment, retention, and incident-state expansion remain separate future slices.

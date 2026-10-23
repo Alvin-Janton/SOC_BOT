@@ -3,13 +3,16 @@ import {
   DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomUUID } from 'node:crypto';
+import { ToolValidation, validToolValidation } from '../../../lib/shared/tool-validation';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
 
 const TOOL_REJECTION_CODES = ['INVALID_TOOL', 'INVALID_TOOL_INPUT', 'TOOL_LIMIT_REACHED', 'FINALIZATION_REQUIRED'] as const;
 export type ToolRejectionCode = typeof TOOL_REJECTION_CODES[number];
-export type ToolPreparation = { status: 'approved' } | { status: 'rejected'; code: ToolRejectionCode };
+export type ToolPreparation = { status: 'approved' }
+  | { status: 'rejected'; code: 'INVALID_TOOL_INPUT'; validation?: ToolValidation }
+  | { status: 'rejected'; code: Exclude<ToolRejectionCode, 'INVALID_TOOL_INPUT'> };
 
 /** Recognizes only bounded application-owned preparation failures, never arbitrary provider error text. */
 export function isToolRejectionCode(value: unknown): value is ToolRejectionCode {
@@ -22,7 +25,17 @@ function validToolPreparation(value: unknown): value is ToolPreparation {
   const decision = value as Record<string, unknown>;
   const keys = Object.keys(decision);
   return (decision.status === 'approved' && keys.length === 1)
-    || (decision.status === 'rejected' && keys.length === 2 && Object.hasOwn(decision, 'code') && isToolRejectionCode(decision.code));
+    || (decision.status === 'rejected' && Object.hasOwn(decision, 'code') && isToolRejectionCode(decision.code)
+      && (keys.length === 2 || (keys.length === 3 && Object.hasOwn(decision, 'validation')
+        && decision.code === 'INVALID_TOOL_INPUT' && validToolValidation(decision.validation))));
+}
+
+/** Keeps optional correction metadata exclusive to invalid-input error results, never successful evidence. */
+function validResultValidation(payload: Extract<EventPayload, { entity_type: 'TOOL_RESULT' }>): boolean {
+  const error = payload.output.error;
+  if (!error || typeof error !== 'object' || Array.isArray(error) || !Object.hasOwn(error, 'validation')) return true;
+  return payload.status === 'error' && payload.output.ok === false && error.code === 'INVALID_TOOL_INPUT'
+    && validToolValidation(error.validation);
 }
 
 interface EventBase {
@@ -234,7 +247,8 @@ function validatePayload(payload: EventPayload): void {
       && Number.isInteger(payload.content_block_index) && payload.content_block_index >= 0 && payload.content_block_index <= 128 && jsonObject(payload.arguments)
       && (payload.preparation === undefined || validToolPreparation(payload.preparation))
       && (payload.preparation?.status !== 'rejected' || Object.keys(payload.arguments).length === 0); break;
-    case 'TOOL_RESULT': valid = text(payload.tool_use_id, 128) && text(payload.tool_name, 128) && ['success', 'error'].includes(payload.status) && jsonObject(payload.output); break;
+    case 'TOOL_RESULT': valid = text(payload.tool_use_id, 128) && text(payload.tool_name, 128) && ['success', 'error'].includes(payload.status)
+      && jsonObject(payload.output) && validResultValidation(payload); break;
     case 'TURN_OUTCOME': valid = ['failed', 'timed_out', 'cancelled', 'abandoned'].includes(payload.outcome) && typeof payload.retryable === 'boolean'
       && text(payload.failure_phase, 64) && text(payload.error_code, 64) && (payload.outcome !== 'abandoned' || payload.retryable === false); break;
     default: valid = false;
