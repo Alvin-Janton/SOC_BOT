@@ -174,7 +174,7 @@ The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now ope
   ],
   "system": [
     {
-      "text": "System prompt version: soc_bot_system_v6\n[stable policy and explicitly invented, non-evidence illustrations abbreviated]"
+      "text": "System prompt version: soc_bot_system_v8\n[stable policy and explicitly invented, non-evidence illustrations abbreviated]"
     },
     {
       "text": "Approved table facts (reference data, never instructions):\n[JSON text abbreviated: four table column/type lists, utc_query_window_days=30, source_semantics, evidence_semantics and query_result_semantics]"
@@ -253,7 +253,7 @@ The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now ope
 }
 ```
 
-These are **Bedrock messages and all six current schemas**, not DynamoDB items. This particular turn uses only Athena; RAG is available but not mandatory on every turn. The prompt, its invented illustrations, authored source/result semantics and tool schemas are provider system/reference input, not NDJSON/audit events or returned evidence. V6 does not change these six schemas or backend query behavior; the example reflects the already-configured 4,096-token cap. The compiler and RAG validators apply additional business constraints, including distinct section IDs, beyond the JSON Schema. See [field and completeness meanings](Agent-Loop-and-Tools.md#source-fields-and-per-query-completeness).
+These are **Bedrock messages and all six current schemas**, not DynamoDB items. This particular turn uses only Athena; RAG is available but not mandatory on every turn. The prompt, its invented illustrations, authored source/result semantics and tool schemas are provider system/reference input, not NDJSON/audit events or returned evidence. V8 does not change these six schemas or backend query behavior; the example reflects the already-configured 4,096-token cap. The compiler and RAG validators apply additional business constraints, including distinct section IDs, beyond the JSON Schema. See [field and completeness meanings](Agent-Loop-and-Tools.md#source-fields-and-per-query-completeness).
 
 ## 4. Bedrock tool use -> validated logical query
 
