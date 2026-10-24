@@ -281,6 +281,10 @@ def evaluate_case(session, args, case: dict, prompt: str, checkpoint) -> None:
         case['total'] = judge.total(judgment)
         case['status'] = 'scored'
 
+    except report.ArtifactWriteError:
+        # A failed pre-judge checkpoint is local persistence failure, not a judge response/error.
+        raise
+
     except KeyboardInterrupt:
         stage['error'] = {'code': 'INTERRUPTED', 'message': 'Judge interrupted; remote completion/billing may be unknown.'}
         raise
@@ -318,21 +322,36 @@ def main(argv: list[str] | None = None) -> int:
     owns_directory = False
 
     def checkpoint():
-        """Stop on artifact failure before any subsequent paid stage can begin."""
+        """Propagate safe typed diagnostics and halt before any subsequent paid stage can begin."""
 
         nonlocal artifact_failed
         try:
             report.save(directory, run)
 
+        except report.ArtifactWriteError:
+            artifact_failed = True
+            raise
+
         except Exception as exc:
             artifact_failed = True
-            raise EvaluationError('ARTIFACT_WRITE', 'Could not save both artifacts; prior results.json may be the latest usable snapshot. No further dispatch is allowed.') from exc
+            raise report.ArtifactWriteError('save', 'not_selected', exc) from exc
+
+    def note_artifact_failure(error: report.ArtifactWriteError, phase: str) -> None:
+        """Keep primary/final errors in order and print only the writer's content-free projection."""
+        nonlocal artifact_failed
+        artifact_failed = True
+        info = error.diagnostic()
+        run['errors'].append(info)
+        progress('Artifact failure (' + phase + '): ' + encoded(info).decode('utf-8'))
 
     exit_code = 1
 
     try:
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        directory.mkdir(exist_ok=False)
+        try:
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            directory.mkdir(exist_ok=False)
+        except OSError as exc:
+            raise report.ArtifactWriteError('directory_create', 'not_selected', exc) from exc
         owns_directory = True
         checkpoint()
 
@@ -353,35 +372,57 @@ def main(argv: list[str] | None = None) -> int:
         run['status'] = 'completed' if all(case['status'] == 'scored' for case in run['cases']) else 'incomplete'
         exit_code = 0 if run['status'] == 'completed' else 1
 
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as exc:
         exit_code = 130
         run['status'] = 'interrupted'
 
         if current and current['status'] != 'scored':
             current['status'] = 'interrupted'
 
+        if isinstance(exc.__cause__, report.ArtifactWriteError):
+            note_artifact_failure(exc.__cause__, 'interrupted_cleanup')
         run['errors'].append({'code': 'INTERRUPTED', 'message': 'Stopped locally. Closing connections does not cancel remote work; do not assume an unconfirmed attempt was free.'})
 
     except Exception as exc:
         run['status'] = 'error'
-        run['errors'].append(diagnostic(exc))
-        progress('Evaluation stopped: ' + diagnostic(exc)['message'])
+        if isinstance(exc, report.ArtifactWriteError):
+            note_artifact_failure(exc, 'checkpoint')
+        else:
+            run['errors'].append(diagnostic(exc))
+            progress('Evaluation stopped: ' + diagnostic(exc)['message'])
 
     finally:
         run['metadata']['finished_at'] = now()
+        final_saved = False
 
         try:
             if owns_directory:
                 report.save(directory, run)
+                final_saved = True
 
             else:
                 artifact_failed = True
 
-        except Exception:
+        except KeyboardInterrupt as exc:
+            exit_code = 130
+            run['status'] = 'interrupted'
             artifact_failed = True
+            if isinstance(exc.__cause__, report.ArtifactWriteError):
+                note_artifact_failure(exc.__cause__, 'final_interrupted_cleanup')
+            run['errors'].append({'code': 'INTERRUPTED', 'message': 'Final local artifact save interrupted; the prior snapshot may be the latest.'})
+            progress('Final local artifact save interrupted; snapshot persistence is not confirmed.')
+
+        except Exception as exc:
+            if run['status'] != 'interrupted':
+                run['status'] = 'error'
+            error = exc if isinstance(exc, report.ArtifactWriteError) else report.ArtifactWriteError('save', 'not_selected', exc)
+            note_artifact_failure(error, 'final_save')
 
         if artifact_failed:
-            progress('Artifact write failed: do not assume report.html is current. Inspect the last successfully saved results.json.')
+            if final_saved:
+                progress('Final diagnostic snapshot saved, but the earlier artifact failure still halts this run; evaluation was not resumed.')
+            else:
+                progress('Artifact persistence is not confirmed; saved statuses may predate this failure. results.json is authoritative and report.html may be stale. Inspect safe terminal diagnostics.')
             if exit_code != 130:
                 exit_code = 1
 

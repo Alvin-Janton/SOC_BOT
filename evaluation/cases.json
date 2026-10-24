@@ -429,7 +429,7 @@
     },
     {
       "case_id": "cloudtrail-mixed-001",
-      "question": "Review the CloudTrail logs on September 25, 2026, from 15:04:12 UTC through 18:35:28 UTC, including both endpoints. Is there any evidence of malicious activity? Identify any suspicious activity and the attack types supported by the evidence. Explain what happened and what the evidence establishes about the outcome. Include representative event references, relevant playbook guidance when warranted, and any important uncertainties. If you find no clear evidence of malicious activity, say so.",
+      "question": "Review the CloudTrail logs for September 25, 2026, from 15:04:12 through 18:35:28 UTC. Investigate both successful and denied activity across IAM users and assumed-role sessions, paying particular attention to S3 enumeration and object retrieval. Identify supported suspicious behavior, distinguish observed access from proven unauthorized activity, and explain important coverage or authorization gaps. Retrieve relevant playbook guidance where warranted.",
       "scope": {
         "environment": "dev",
         "database": "soc_bot_dev_security",
