@@ -145,7 +145,7 @@ The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now ope
 
 ```json
 {
-  "modelId": "us.anthropic.claude-sonnet-4-6",
+  "modelId": "us.anthropic.claude-sonnet-5",
   "messages": [
     {
       "role": "user",
@@ -184,8 +184,7 @@ The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now ope
     }
   ],
   "inferenceConfig": {
-    "maxTokens": 4096,
-    "temperature": 0
+    "maxTokens": 4096
   },
   "additionalModelRequestFields": {
     "thinking": {
@@ -776,7 +775,7 @@ The model adapter buffers this tool-enabled response until it knows the stop rea
 {
   "entity_type": "ASSISTANT_MESSAGE",
   "role": "assistant",
-  "model_id": "us.anthropic.claude-sonnet-4-6",
+  "model_id": "us.anthropic.claude-sonnet-5",
   "stop_reason": "end_turn",
   "content": "One blocked WAF request was returned: /login, Medium (severity_id 3), at 2026-09-11T23:45:15.000Z. Evidence: event_uid=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; source_s3_key=raw/waf/2026-9-11.jsonl; source_record_ref=88888888-8888-4888-8888-888888888888. A WAF block alone does not prove exploitation.",
   "PK": "CONV#c4e7173b-3075-47b9-9e7d-260921bbc870",

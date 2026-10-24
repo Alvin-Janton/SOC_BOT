@@ -26,6 +26,7 @@ import { chatApiAccessLogGroupName, DeploymentEnvironment, glueFileBucketName } 
 import {
   aiApplicationStatements,
   apiGatewayLoggingStatements,
+  BEDROCK_INFERENCE_PROFILE,
   dataAndAnalyticsStatements,
   deploymentStatements,
   environmentResources,
@@ -305,7 +306,7 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/raw/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-glue-files-${account}-${region}/glue/*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/evaluation/*`),
-        resource(`arn:${partition}:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6`),
+        resource(`arn:${partition}:bedrock:*::foundation-model/${BEDROCK_INFERENCE_PROFILE.foundationModelId}`),
         'Action::s3:*',
       ],
       data: [
