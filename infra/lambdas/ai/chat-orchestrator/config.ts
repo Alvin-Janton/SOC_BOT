@@ -29,7 +29,7 @@ export interface Configuration {
  *   QUERY_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-QUERY-TOOL',
  *   RAG_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-RAG-TOOL',
  *   DATABASE_NAME: 'soc_bot_dev_security', MAX_QUERY_WINDOW_DAYS: '30',
- *   BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-5', BEDROCK_REGION: 'us-east-1',
+ *   BEDROCK_MODEL_ID: 'us.anthropic.claude-sonnet-4-6', BEDROCK_REGION: 'us-east-1',
  * }
  * Example Output:
  * {
@@ -37,7 +37,7 @@ export interface Configuration {
  *   tableName: 'SOC-BOT-DEV-CHAT-HISTORY', queryFunction: 'SOC-BOT-DEV-QUERY-TOOL',
  *   ragFunction: 'SOC-BOT-DEV-RAG-TOOL',
  *   database: 'soc_bot_dev_security', maxQueryDays: 30,
- *   modelId: 'us.anthropic.claude-sonnet-5', region: 'us-east-1',
+ *   modelId: 'us.anthropic.claude-sonnet-4-6', region: 'us-east-1',
  * }
  * Invalid configuration throws ChatError rather than returning partial configuration.
  */
@@ -53,7 +53,7 @@ export function configuration(): Configuration {
     || tableName !== `SOC-BOT-${environment.toUpperCase()}-CHAT-HISTORY`
     || queryFunction !== `SOC-BOT-${environment.toUpperCase()}-QUERY-TOOL`
     || ragFunction !== `SOC-BOT-${environment.toUpperCase()}-RAG-TOOL`
-    || database !== `soc_bot_${environment}_security` || process.env.BEDROCK_MODEL_ID !== 'us.anthropic.claude-sonnet-5'
+    || database !== `soc_bot_${environment}_security` || process.env.BEDROCK_MODEL_ID !== 'us.anthropic.claude-sonnet-4-6'
     || process.env.BEDROCK_REGION !== 'us-east-1' || !Number.isInteger(maxQueryDays) || maxQueryDays < 1 || maxQueryDays > 366) {
     throw new ChatError('CONFIGURATION_ERROR', 'Chat is not available in this environment.', 503, false);
   }

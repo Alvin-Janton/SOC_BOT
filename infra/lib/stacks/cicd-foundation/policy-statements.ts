@@ -11,8 +11,8 @@ export function runtimeBoundaryArn(environment: DeploymentEnvironment, runtimeCl
 }
 
 export const BEDROCK_INFERENCE_PROFILE = {
-  profileId: 'us.anthropic.claude-sonnet-5',
-  foundationModelId: 'anthropic.claude-sonnet-5',
+  profileId: 'us.anthropic.claude-sonnet-4-6',
+  foundationModelId: 'anthropic.claude-sonnet-4-6',
   sourceRegion: 'us-east-1',
 } as const;
 
