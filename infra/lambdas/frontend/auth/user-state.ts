@@ -1,0 +1,109 @@
+import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { z } from 'zod';
+import { BffAuthConfig } from './config';
+import { BffAuthError } from './errors';
+
+export const authSubSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
+export const sessionVersionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const userStateSchema = z.strictObject({
+  PK: z.string(), entity_type: z.literal('USER_AUTH_STATE'), sub: authSubSchema,
+  session_version: sessionVersionSchema, disabled: z.boolean(),
+}).refine(value => value.PK === `USER#${value.sub}`);
+export type UserAuthState = Readonly<z.output<typeof userStateSchema>>;
+export type AuthStateClient = Pick<DynamoDBDocumentClient, 'send'>;
+const trustedSnapshot = Symbol('server-authentication-snapshot');
+
+/** A process-local, server-created pre-authentication version snapshot, never request JSON. */
+export interface TrustedAuthenticationContext {
+  readonly sub: string;
+  readonly sessionVersion: number;
+  readonly [trustedSnapshot]: true;
+}
+
+/** Rejects fabricated/serialized contexts before credentials can be verified or sessions inserted. */
+export function requireTrustedAuthenticationContext(value: TrustedAuthenticationContext): void {
+  if (!value || value[trustedSnapshot] !== true || !authSubSchema.safeParse(value.sub).success
+    || !sessionVersionSchema.safeParse(value.sessionVersion).success) throw new BffAuthError('authentication_failed');
+}
+
+export interface UserAuthStateStore {
+  initialize(sub: string): Promise<UserAuthState>;
+  read(sub: string): Promise<UserAuthState | undefined>;
+  readForAuthentication(sub: string): Promise<TrustedAuthenticationContext>;
+  incrementVersion(sub: string): Promise<UserAuthState>;
+  disable(sub: string): Promise<UserAuthState>;
+}
+
+/** Builds inactive trusted-provisioning/revocation helpers for the dedicated auth table. */
+export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?: AuthStateClient): UserAuthStateStore {
+  const client = suppliedClient ?? DynamoDBDocumentClient.from(new DynamoDBClient({ maxAttempts: 2 }));
+
+  /** Validates a trusted subject before deriving a user-state storage key. */
+  function key(sub: string): { PK: string } {
+    if (!authSubSchema.safeParse(sub).success) throw new BffAuthError('authentication_failed');
+    return { PK: `USER#${sub}` };
+  }
+
+  /** Strongly reads strict metadata; missing/malformed state never becomes an enabled default. */
+  async function read(sub: string): Promise<UserAuthState | undefined> {
+    const Key = key(sub);
+    try {
+      const result = await client.send(new GetCommand({ TableName: config.sessionTableName, Key, ConsistentRead: true }),
+        { abortSignal: AbortSignal.timeout(10_000) });
+      const state = userStateSchema.safeParse(result.Item);
+      return state.success && state.data.sub === sub ? Object.freeze(state.data) : undefined;
+    } catch {
+      throw new BffAuthError('session_unavailable');
+    }
+  }
+
+  /** Atomically increments an observed valid version, optionally disabling the account in the same write. */
+  async function changeVersion(sub: string, disable: boolean): Promise<UserAuthState> {
+    const state = await read(sub);
+    if (!state || state.session_version === Number.MAX_SAFE_INTEGER) throw new BffAuthError('authentication_failed');
+    try {
+      const result = await client.send(new UpdateCommand({
+        TableName: config.sessionTableName, Key: key(sub),
+        UpdateExpression: `${disable ? 'SET #disabled = :true ' : ''}ADD #version :one`,
+        ConditionExpression: '#type = :type AND #sub = :sub AND #version = :version AND #disabled = :disabled AND attribute_not_exists(expires_at)',
+        ExpressionAttributeNames: { '#type': 'entity_type', '#sub': 'sub', '#version': 'session_version', '#disabled': 'disabled' },
+        ExpressionAttributeValues: { ':type': 'USER_AUTH_STATE', ':sub': sub, ':version': state.session_version,
+          ':disabled': state.disabled, ':one': 1, ...(disable ? { ':true': true } : {}) },
+        ReturnValues: 'ALL_NEW',
+      }), { abortSignal: AbortSignal.timeout(10_000) });
+      const updated = userStateSchema.safeParse(result.Attributes);
+      if (!updated.success || updated.data.sub !== sub) throw new BffAuthError('session_unavailable');
+      return Object.freeze(updated.data);
+    } catch (error) {
+      if (error instanceof ConditionalCheckFailedException) throw new BffAuthError('authentication_failed');
+      throw new BffAuthError('session_unavailable');
+    }
+  }
+
+  return {
+    /** Initializes only a never-existing trusted account record; never resets an existing version or disablement. */
+    async initialize(sub: string): Promise<UserAuthState> {
+      const item: UserAuthState = { ...key(sub), entity_type: 'USER_AUTH_STATE', sub, session_version: 1, disabled: false };
+      try {
+        await client.send(new PutCommand({ TableName: config.sessionTableName, Item: item,
+          ConditionExpression: 'attribute_not_exists(PK)' }), { abortSignal: AbortSignal.timeout(10_000) });
+      } catch (error) {
+        if (error instanceof ConditionalCheckFailedException) throw new BffAuthError('authentication_failed');
+        throw new BffAuthError('session_unavailable');
+      }
+      return Object.freeze(item);
+    },
+    read,
+    /** Captures enabled, validated server state before the associated authentication attempt begins. */
+    async readForAuthentication(sub: string): Promise<TrustedAuthenticationContext> {
+      const state = await read(sub);
+      if (!state || state.disabled) throw new BffAuthError('authentication_failed');
+      return Object.freeze({ sub, sessionVersion: state.session_version, [trustedSnapshot]: true as const });
+    },
+    /** Revokes all existing sessions without scanning or extending any session. */
+    async incrementVersion(sub: string): Promise<UserAuthState> { return changeVersion(sub, false); },
+    /** Blocks new sessions and invalidates existing sessions atomically, without a Cognito-side action. */
+    async disable(sub: string): Promise<UserAuthState> { return changeVersion(sub, true); },
+  };
+}

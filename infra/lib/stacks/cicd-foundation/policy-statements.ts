@@ -1,6 +1,6 @@
 import { Aws } from 'aws-cdk-lib';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { chatApiAccessLogGroupName, dataBucketName, DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
+import { chatApiAccessLogGroupName, dataBucketName, DeploymentEnvironment, frontendApiAccessLogGroupName, frontendBucketName, glueFileBucketName } from '../../shared/environment';
 
 export const RUNTIME_CLASSES = ['application', 'query', 'glue'] as const;
 export type RuntimeClass = typeof RUNTIME_CLASSES[number];
@@ -33,7 +33,7 @@ export function environmentResources(environment: DeploymentEnvironment): Enviro
     prefix: `SOC-BOT-${upper}`,
     databasePrefix: `soc_bot_${environment}`,
     dataBucketName: dataBucketName(environment),
-    frontendBucketName: `soc-bot-${environment}-frontend-${Aws.ACCOUNT_ID}-${Aws.REGION}`,
+    frontendBucketName: frontendBucketName(environment),
     executionRoleArn: `arn:${Aws.PARTITION}:iam::${Aws.ACCOUNT_ID}:role/SOC_BOT_${upper}_CFN_EXEC`,
   };
 }
@@ -266,10 +266,79 @@ export function aiApplicationStatements(resources: EnvironmentResources): Policy
         `arn:${Aws.PARTITION}:events:${Aws.REGION}:${Aws.ACCOUNT_ID}:rule/${resources.prefix}-*`,
       ],
     }),
+    ...cognitoUserPoolStatements(resources),
   ];
 }
 
-/** Defines CloudFormation permissions for the frontend, API, and authentication resources. */
+/** Keeps Cognito lifecycle/tag permissions in the application policy to respect managed-policy size limits. */
+function cognitoUserPoolStatements(resources: EnvironmentResources): PolicyStatement[] {
+  const title = capitalize(resources.environment);
+  const userPoolArn = `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`;
+  const ownership = { Project: 'SOC_BOT', Environment: resources.environment, ManagedBy: 'CDK' };
+  const resourceTags = Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:ResourceTag/${key}`, value]));
+  const systemTagKeys = [
+    'aws:cloudformation:stack-id',
+    'aws:cloudformation:stack-name',
+    'aws:cloudformation:logical-id',
+  ];
+  const requestConditions = {
+    StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
+    'ForAllValues:StringEquals': { 'aws:TagKeys': [...Object.keys(ownership), ...systemTagKeys] },
+  };
+  return [
+    new PolicyStatement({
+      sid: `ManageTagged${title}CognitoUserPools`,
+      actions: [
+        'cognito-idp:AddCustomAttributes', 'cognito-idp:CreateUserPoolClient', 'cognito-idp:DeleteUserPool',
+        'cognito-idp:DeleteUserPoolClient', 'cognito-idp:DescribeUserPool', 'cognito-idp:DescribeUserPoolClient',
+        'cognito-idp:ListTagsForResource', 'cognito-idp:UpdateUserPool', 'cognito-idp:UpdateUserPoolClient',
+      ],
+      resources: [userPoolArn],
+      conditions: { StringEquals: resourceTags },
+    }),
+    new PolicyStatement({
+      sid: `CreateTagged${title}CognitoUserPool`,
+      actions: ['cognito-idp:CreateUserPool'], resources: ['*'],
+      conditions: { ...requestConditions,
+        StringEquals: { ...requestConditions.StringEquals, 'aws:RequestedRegion': Aws.REGION } },
+    }),
+    new PolicyStatement({
+      sid: `Tag${title}CognitoUserPools`,
+      actions: ['cognito-idp:TagResource'], resources: [userPoolArn], conditions: requestConditions,
+    }),
+    // Deny each mismatching existing ownership tag separately; absent tags must not block creation.
+    ...Object.entries(ownership).map(([key, value]) => new PolicyStatement({
+      sid: `Deny${title}Cognito${key}Retagging`,
+      effect: Effect.DENY,
+      actions: ['cognito-idp:TagResource'], resources: [userPoolArn],
+      conditions: {
+        Null: { [`aws:ResourceTag/${key}`]: 'false' },
+        StringNotEquals: { [`aws:ResourceTag/${key}`]: value },
+      },
+    })),
+    new PolicyStatement({
+      sid: `Untag${title}CognitoSystemTags`,
+      actions: ['cognito-idp:UntagResource'], resources: [userPoolArn],
+      // UntagResource supports existing resource tags and TagKeys, not request-tag values.
+      conditions: {
+        StringEquals: resourceTags,
+        'ForAllValues:StringEquals': { 'aws:TagKeys': systemTagKeys },
+        Null: { 'aws:TagKeys': 'false' },
+      },
+    }),
+    new PolicyStatement({
+      sid: `Protect${title}CognitoOwnershipTags`,
+      effect: Effect.DENY,
+      actions: ['cognito-idp:UntagResource'], resources: [userPoolArn],
+      conditions: {
+        StringEquals: resourceTags,
+        'ForAnyValue:StringEquals': { 'aws:TagKeys': Object.keys(ownership) },
+      },
+    }),
+  ];
+}
+
+/** Defines CloudFormation permissions for frontend and API resources without shared tag exceptions. */
 export function frontendApiStatements(resources: EnvironmentResources): PolicyStatement[] {
   const title = capitalize(resources.environment);
   const requiredRequestTags = {
@@ -302,7 +371,6 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
     },
   };
   const apiGatewayArn = `arn:${Aws.PARTITION}:apigateway:${Aws.REGION}::/restapis`;
-  const userPoolArn = `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`;
   const distributionArn = `arn:${Aws.PARTITION}:cloudfront::${Aws.ACCOUNT_ID}:distribution/*`;
   const devIpSetArn = `arn:${Aws.PARTITION}:wafv2:${Aws.REGION}:${Aws.ACCOUNT_ID}:regional/ipset/SOC-BOT-DEV-CHAT-CLIENTS/*`;
   const devWebAclArn = `arn:${Aws.PARTITION}:wafv2:${Aws.REGION}:${Aws.ACCOUNT_ID}:regional/webacl/SOC-BOT-DEV-CHAT-ALLOWLIST/*`;
@@ -368,28 +436,6 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       }),
     ] : []),
     new PolicyStatement({
-      sid: `ManageTagged${title}CognitoUserPools`,
-      actions: [
-        'cognito-idp:AddCustomAttributes', 'cognito-idp:CreateUserPoolClient', 'cognito-idp:DeleteUserPool',
-        'cognito-idp:DeleteUserPoolClient', 'cognito-idp:DescribeUserPool', 'cognito-idp:DescribeUserPoolClient',
-        'cognito-idp:UpdateUserPool', 'cognito-idp:UpdateUserPoolClient',
-      ],
-      resources: [userPoolArn],
-      conditions: requiredResourceTags,
-    }),
-    new PolicyStatement({
-      sid: `CreateTagged${title}CognitoUserPool`,
-      actions: ['cognito-idp:CreateUserPool'],
-      resources: ['*'],
-      conditions: requiredRequestTags,
-    }),
-    new PolicyStatement({
-      sid: `Tag${title}CognitoUserPools`,
-      actions: ['cognito-idp:TagResource'],
-      resources: [userPoolArn],
-      conditions: requiredRequestTags,
-    }),
-    new PolicyStatement({
       sid: `CreateTagged${title}CloudFrontDistribution`,
       actions: ['cloudfront:CreateDistribution', 'cloudfront:TagResource'],
       resources: ['*'],
@@ -399,7 +445,7 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
       sid: `ManageTagged${title}CloudFrontDistributions`,
       actions: [
         'cloudfront:DeleteDistribution', 'cloudfront:GetDistribution',
-        'cloudfront:GetDistributionConfig', 'cloudfront:UpdateDistribution',
+        'cloudfront:GetDistributionConfig', 'cloudfront:ListTagsForResource', 'cloudfront:UpdateDistribution',
       ],
       resources: [distributionArn],
       conditions: requiredResourceTags,
@@ -500,6 +546,7 @@ export function apiGatewayLoggingStatements(environment: DeploymentEnvironment):
   const prefix = `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:`;
   const logGroups = [
     `${prefix}${chatApiAccessLogGroupName(environment)}`,
+    `${prefix}${frontendApiAccessLogGroupName(environment)}`,
     `${prefix}API-Gateway-Execution-Logs_*/${environment}`,
   ];
   return [new PolicyStatement({

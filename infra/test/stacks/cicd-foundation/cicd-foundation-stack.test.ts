@@ -248,10 +248,11 @@ describe('CicdFoundationStack', () => {
   ])('%s frontend policy strictly isolates tagged resources', (upper, environment) => {
     const { template } = synthesize();
     const policy = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_FRONTEND_API`);
+    // Cognito shares the application policy's space budget, not other services' tag exceptions.
+    const cognitoPolicy = managedPolicyByName(template, `SOC_BOT_${upper}_CFN_AI_APPLICATION`);
     const serialized = JSON.stringify(policy);
     const createSids = [
       `CreateTagged${capitalize(environment)}ApiGateway`,
-      `CreateTagged${capitalize(environment)}CognitoUserPool`,
       `CreateTagged${capitalize(environment)}CloudFrontDistribution`,
     ];
 
@@ -284,7 +285,6 @@ describe('CicdFoundationStack', () => {
 
     for (const sid of [
       `ManageTagged${capitalize(environment)}ApiGateway`,
-      `ManageTagged${capitalize(environment)}CognitoUserPools`,
       `ManageTagged${capitalize(environment)}CloudFrontDistributions`,
     ]) {
       expect(statementBySid(policy, sid).Condition.StringEquals).toMatchObject({
@@ -304,6 +304,55 @@ describe('CicdFoundationStack', () => {
     );
     expect(createDistribution.Resource).toBe('*');
     expect(JSON.stringify(manageDistribution.Resource)).toContain(':distribution/*');
+
+    const protectedKeys = ['Project', 'Environment', 'ManagedBy'];
+    const systemKeys = [
+      'aws:cloudformation:stack-id', 'aws:cloudformation:stack-name', 'aws:cloudformation:logical-id',
+    ];
+    const ownership = {
+      'aws:ResourceTag/Project': 'SOC_BOT',
+      'aws:ResourceTag/Environment': environment,
+      'aws:ResourceTag/ManagedBy': 'CDK',
+    };
+    for (const sid of [`CreateTagged${capitalize(environment)}CognitoUserPool`, `Tag${capitalize(environment)}CognitoUserPools`]) {
+      const statement = statementBySid(cognitoPolicy, sid);
+      expect(statement.Condition).toEqual({
+        StringEquals: {
+          'aws:RequestTag/Project': 'SOC_BOT',
+          'aws:RequestTag/Environment': environment,
+          'aws:RequestTag/ManagedBy': 'CDK',
+          ...(sid === `CreateTagged${capitalize(environment)}CognitoUserPool`
+            ? { 'aws:RequestedRegion': { Ref: 'AWS::Region' } } : {}),
+        },
+        'ForAllValues:StringEquals': { 'aws:TagKeys': [...protectedKeys, ...systemKeys] },
+      });
+    }
+    const managePool = statementBySid(cognitoPolicy, `ManageTagged${capitalize(environment)}CognitoUserPools`);
+    expect(managePool.Condition).toEqual({ StringEquals: ownership });
+    expect(managePool.Action).toContain('cognito-idp:ListTagsForResource');
+    expect(managePool.Resource).toEqual({ 'Fn::Join': ['', [
+      'arn:', { Ref: 'AWS::Partition' }, ':cognito-idp:', { Ref: 'AWS::Region' }, ':',
+      { Ref: 'AWS::AccountId' }, ':userpool/*',
+    ]] });
+    const untag = statementBySid(cognitoPolicy, `Untag${capitalize(environment)}CognitoSystemTags`);
+    expect(untag.Effect).toBe('Allow');
+    expect(untag.Action).toBe('cognito-idp:UntagResource');
+    expect(untag.Resource).toEqual(managePool.Resource);
+    expect(untag.Condition).toEqual({
+      StringEquals: ownership,
+      'ForAllValues:StringEquals': { 'aws:TagKeys': systemKeys },
+      Null: { 'aws:TagKeys': 'false' },
+    });
+    const protect = statementBySid(cognitoPolicy, `Protect${capitalize(environment)}CognitoOwnershipTags`);
+    expect(protect.Effect).toBe('Deny');
+    expect(protect.Action).toBe('cognito-idp:UntagResource');
+    expect(protect.Resource).toEqual(managePool.Resource);
+    // ForAnyValue denies mixed requests too, rather than only requests consisting of protected keys.
+    expect(protect.Condition).toEqual({
+      StringEquals: ownership,
+      'ForAnyValue:StringEquals': { 'aws:TagKeys': protectedKeys },
+    });
+    expect(JSON.stringify(cognitoPolicy)).not.toContain('StringEqualsIfExists');
   });
 
   // Verifies runtime S3 listing is limited to role-specific prefixes and evaluation remains inaccessible.
