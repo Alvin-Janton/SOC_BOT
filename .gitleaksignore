@@ -1,2 +1,4 @@
 # Reviewed false positive: ordinary RAG-guide prose; this commit, rule, and line only.
 f721fcc605a7d37edeb7b695a4e8185fbb4bdeb6:Docs/AIStack/Lambdas/RAGTool/README.md:generic-api-key:70
+# Reviewed false positive: historical log prose about omitted service calls; this commit, rule, and line only.
+9b6abf1a229cbd830414f984db9d94bdc81c4c88:logs.md:generic-api-key:552

@@ -42,7 +42,7 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
   nowSeconds: () => number = () => Math.floor(Date.now() / 1_000)): AuthSessionStore {
   const client = suppliedClient ?? DynamoDBDocumentClient.from(new DynamoDBClient({ maxAttempts: 2 }));
   const users = createUserAuthStateStore(config, client);
-  
+
   return {
     /** Checks the original enabled user/version and inserts one absolute twelve-hour session atomically. */
     async create(identity: VerifiedCognitoIdentity, context: TrustedAuthenticationContext): Promise<CreatedAuthSession> {
