@@ -3,6 +3,7 @@ import { currentAuthTime, parseBffAuthConfig } from './config';
 import { clearSessionCookie, createSessionCookie, readSessionCookie } from './cookies';
 import { BffAuthError } from './errors';
 import { AuthSession, AuthSessionClient, createAuthSessionStore } from './sessions';
+import { requireTrustedAuthenticationContext, TrustedAuthenticationContext } from './user-state';
 
 export interface BffAuthDependencies {
   readonly cognitoClient?: CognitoAuthClient;
@@ -21,7 +22,7 @@ export interface LogoutResult {
 }
 
 export interface BffAuthService {
-  login(credentials: unknown): Promise<LoginResult>;
+  login(credentials: unknown, context: TrustedAuthenticationContext): Promise<LoginResult>;
   resolveSession(cookieHeader?: string): Promise<AuthSession | undefined>;
   requireSession(cookieHeader?: string): Promise<AuthSession>;
   logout(cookieHeader?: string): Promise<LogoutResult>;
@@ -42,9 +43,11 @@ export function createBffAuth(configuration: unknown, dependencies: BffAuthDepen
 
   return {
     /** Authenticates, stores a trusted identity and returns an opaque cookie without Cognito tokens. */
-    async login(credentials: unknown): Promise<LoginResult> {
+    async login(credentials: unknown, context: TrustedAuthenticationContext): Promise<LoginResult> {
+      // This server-created snapshot must precede credential verification, never come from HTTP input.
+      requireTrustedAuthenticationContext(context);
       const identity = await cognito.authenticate(credentials);
-      const session = await sessions.create(identity);
+      const session = await sessions.create(identity, context);
       const now = currentAuthTime(nowSeconds);
       if (session.expiresAt <= now) {
         await sessions.revoke(session.token);

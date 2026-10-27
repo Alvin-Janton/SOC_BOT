@@ -16,3 +16,13 @@ export function glueFileBucketName(environment: DeploymentEnvironment): string {
 export function chatApiAccessLogGroupName(environment: DeploymentEnvironment): string {
   return `/aws/apigateway/SOC-BOT-${environment.toUpperCase()}-CHAT-ACCESS`;
 }
+
+/** Names the independent frontend API access log group shared with foundation logging grants. */
+export function frontendApiAccessLogGroupName(environment: DeploymentEnvironment): string {
+  return `/aws/apigateway/SOC-BOT-${environment.toUpperCase()}-FRONTEND-ACCESS`;
+}
+
+/** Keeps private hosting bucket names aligned with foundation upload/deployment permissions. */
+export function frontendBucketName(environment: DeploymentEnvironment): string {
+  return `soc-bot-${environment}-frontend-${Aws.ACCOUNT_ID}-${Aws.REGION}`;
+}

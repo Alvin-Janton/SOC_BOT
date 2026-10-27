@@ -6,6 +6,7 @@ import { DataStack } from '../lib/stacks/data/data-stack';
 import { AiStack } from '../lib/stacks/ai/ai-stack';
 import { DEFAULT_QUERY_WINDOW_DAYS, queryWindowDays } from '../lib/stacks/ai/query-contract';
 import { devClientCidr } from '../lib/stacks/ai/chat-api';
+import { FrontendStack } from '../lib/stacks/frontend/frontend-stack';
 
 const app = new App();
 const devAllowedClientCidr = devClientCidr(app.node.tryGetContext('devAllowedClientCidr')).cidr;
@@ -46,6 +47,13 @@ for (const environment of ['dev', 'demo'] as const) {
   });
   // The Regional logging account setting is administrator-managed, never recreated by AI.
   aiStack.addStackDependency(foundation);
+  const frontendStack = new FrontendStack(app, `${environment}FrontendStack`, {
+    deploymentEnvironment: environment, stackName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND`,
+    env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
+    synthesizer: new CliCredentialsStackSynthesizer(),
+    description: `SOC Bot ${environment} private frontend, health API and inactive authentication foundation`,
+  });
+  frontendStack.addStackDependency(foundation);
 }
 
 Validations.of(app).addPlugins(new AwsSolutionsChecks(app, { verbose: true }));

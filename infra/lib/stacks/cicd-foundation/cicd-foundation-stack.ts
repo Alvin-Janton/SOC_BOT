@@ -22,7 +22,7 @@ import {
 import { Construct } from 'constructs';
 import { CfnAccount } from 'aws-cdk-lib/aws-apigateway';
 import { BlockPublicAccess, Bucket, BucketEncryption, CfnBucket } from 'aws-cdk-lib/aws-s3';
-import { chatApiAccessLogGroupName, DeploymentEnvironment, glueFileBucketName } from '../../shared/environment';
+import { chatApiAccessLogGroupName, DeploymentEnvironment, frontendApiAccessLogGroupName, glueFileBucketName } from '../../shared/environment';
 import {
   aiApplicationStatements,
   apiGatewayLoggingStatements,
@@ -73,7 +73,7 @@ export class CicdFoundationStack extends Stack {
   private createApiGatewayLogging(): void {
     const role = new Role(this, 'ApiGatewayLoggingRole', {
       roleName: 'SOC_BOT_CICD_API_GATEWAY_LOGGING',
-      description: 'Shared Regional API Gateway logging for SOC Bot dev/demo chat APIs',
+      description: 'Shared Regional API Gateway logging for SOC Bot dev/demo application APIs',
       assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
       inlinePolicies: {
         SOC_BOT_DEV_API_GATEWAY_LOGGING: new PolicyDocument({ statements: apiGatewayLoggingStatements('dev') }),
@@ -106,9 +106,10 @@ export class CicdFoundationStack extends Stack {
       'Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:/aws/apigateway/welcome:*',
       ...(['dev', 'demo'] as const).flatMap((environment) => [
         `Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:${chatApiAccessLogGroupName(environment)}:*`,
+        `Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:${frontendApiAccessLogGroupName(environment)}:*`,
         `Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:API-Gateway-Execution-Logs_*/${environment}:*`,
       ]),
-    ], 'Only API Gateway can assume this shared role. Application logs remain limited to the two chat access groups and AWS-fixed execution-log names for dev/demo stages; generated API IDs require a wildcard without a reverse AI-to-foundation reference. Initialization permits only the approved group/stream creation, stream discovery, and event read/write/filter actions within /aws/apigateway/welcome; its ARN qualifier wildcard does not authorize other group names. DescribeLogGroups alone requires Resource "*".');
+    ], 'Only API Gateway can assume this shared role. Application logs remain limited to the exact chat/frontend access groups and AWS-fixed execution-log names for dev/demo stages; generated API IDs require a wildcard without reverse application-to-foundation references. Initialization permits only the approved group/stream creation, stream discovery, and event read/write/filter actions within /aws/apigateway/welcome; its ARN qualifier wildcard does not authorize other group names. DescribeLogGroups alone requires Resource "*".');
     new CfnOutput(this, 'ApiGatewayLoggingRoleArn', { value: role.roleArn });
   }
 
@@ -162,14 +163,14 @@ export class CicdFoundationStack extends Stack {
       `SOC_BOT_${upper}_CFN_AI_APPLICATION`,
       aiApplicationStatements(resources),
       this.iamWildcardFindings('ai', environment),
-      'Application resources use the environment prefix; the shared bootstrap file bucket is restricted to read-only asset retrieval.',
+      'Application resources use the environment prefix; bootstrap assets are read-only. Cognito creation requires Resource "*" with mandatory environment ownership request tags; generated pool IDs require an account/Region-scoped wildcard. Existing mismatched ownership tags deny retagging, but pools without conflicting tags can be claimed. Only the three exact CloudFormation system tag keys may be removed; any protected ownership key is explicitly denied.',
     );
     const frontendPolicy = this.createManagedPolicy(
       `${title}FrontendApiPolicy`,
       `SOC_BOT_${upper}_CFN_FRONTEND_API`,
       frontendApiStatements(resources),
       this.iamWildcardFindings('frontend', environment),
-      'Frontend resources use environment tags and prefixes; dev WAF mutations use exact Regional chat names. Only SetWebACL on /restapis/*/stages/dev uses approved tag-optional ownership conditions for WAF association. AWS requires account/Region-scoped regional/webacl/*/* for GetWebACLForResource and its dependent GetWebACL read; no broader WAF mutation is allowed. Cognito creation and CloudFront origin access control APIs require account-scoped resources.',
+      'Frontend resources use environment tags and prefixes; dev WAF mutations use exact Regional chat names. Only SetWebACL on /restapis/*/stages/dev uses approved tag-optional ownership conditions for WAF association. AWS requires account/Region-scoped regional/webacl/*/* for GetWebACLForResource and its dependent GetWebACL read; no broader WAF mutation is allowed. CloudFront creation and origin access control APIs require Resource "*"; creation still requires ownership request tags.',
     );
     const observabilityPolicy = this.createManagedPolicy(
       `${title}ObservabilityPolicy`,
@@ -324,6 +325,8 @@ export class CicdFoundationStack extends Stack {
         'Resource::*',
       ],
       ai: [
+        'Resource::*',
+        resource(`arn:${partition}:cognito-idp:${region}:${account}:userpool/*`),
         resource(`arn:${partition}:lambda:${region}:${account}:function:SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:dynamodb:${region}:${account}:table/SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:s3:::cdk-hnb659fds-assets-${account}-${region}/*`),
@@ -338,7 +341,6 @@ export class CicdFoundationStack extends Stack {
           resource(`arn:${partition}:wafv2:${region}:${account}:regional/webacl/SOC-BOT-DEV-CHAT-ALLOWLIST/*`),
           resource(`arn:${partition}:wafv2:${region}:${account}:regional/webacl/*/*`),
         ] : []),
-        resource(`arn:${partition}:cognito-idp:${region}:${account}:userpool/*`),
         resource(`arn:${partition}:cloudfront::${account}:distribution/*`),
         'Resource::*',
       ],

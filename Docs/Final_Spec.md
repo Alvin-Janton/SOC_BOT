@@ -357,7 +357,7 @@ The MVP does not require arbitrary user file uploads. Dataset ingestion remains 
 
 - Frontend build artifacts live in a private S3 bucket.
 - CloudFront uses Origin Access Control; the bucket is not public.
-- SPA routes fall back to `index.html`.
+- Future SPA navigation may fall back to `index.html`; API failures must never be rewritten into a successful SPA response. The initial hosting foundation has no fallback or published UI assets.
 - `/api/*` uses API Gateway as a second origin with caching disabled.
 - API requests forward required headers, cookies, query strings, and response `Set-Cookie` values.
 - Using one CloudFront hostname keeps browser cookies first-party and minimizes CORS complexity.
@@ -402,16 +402,19 @@ Browser -> API Gateway -> auth Lambda -> Cognito
 Session requirements:
 
 - Cryptographically random opaque session identifier
-- Store only a hash of the session token when practical
-- `Secure`, `HttpOnly`, and an appropriate `SameSite` cookie policy
-- Short, configurable session lifetime
-- DynamoDB TTL for automatic expiration
+- Store only a SHA-256 hash of the session token in a dedicated PK-only auth table
+- Persistent `__Host-soc_bot_session` cookie with `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` and no `Domain`
+- Fixed 43,200-second application sessions independent of Cognito ID-token expiry; verify the JWT is live at login, without lengthening Cognito token validity
+- Permanent `USER#sub` enabled/version metadata and expiring `SESSION#hash` records; strongly consistent session/user reads enforce expiry, disablement and equal versions, independently of DynamoDB TTL cleanup
+- Trusted subject/version capture before credential verification and conditional session creation; never adopt a newer version after stale authentication
 - Logout deletes or revokes server-side state
 - Protected routes validate the server-side session
 - Login errors do not reveal whether a username exists
 - Rate-limit or throttle authentication attempts
 
 The MVP uses one authenticated-user role. RBAC is deferred.
+
+The [frontend foundation](FrontendStack/README.md) defines Cognito and auth storage plus inactive relocated source helpers, not callable authentication. Trusted user initialization, HTTP login/recovery/disablement coordination, exact-table runtime IAM, CSRF/origin controls and browser integration remain later slices. Version increments revoke sessions without scanning; disablement also blocks new sessions. Cognito console changes do not synchronize application state or cancel accepted requests. Custom email/password UI and Google linking with fresh proof of both methods remain planned, with MFA deferred.
 
 ---
 
@@ -551,7 +554,7 @@ The completed assistant response is persisted before emitting `complete`; token 
 
 The current CDK implementation defines streaming orchestrators and Regional, dual-stack POST `/chat` REST APIs in dev and demo using `AWS_PROXY`/`STREAM` and a 15-minute integration timeout. Dev has a default-block WAF source-IP allowlist, selected by validated `devAllowedClientCidr` context; no forwarded-IP header is trusted. Demo intentionally has no WAF. The user approved defining demo before authentication but will not deploy it until the application and its Cognito/security integration are complete. This temporary exception supersedes the previous dev-only restriction, not the completed MVP's authenticated-route requirement. Fixed server-configured `TEMPORARY_OWNER_ID=soc-bot-<environment>-analyst` means callers share environment conversation ownership; it is not authentication. No Function URL, frontend integration, auth route, or authenticated Stop/session ownership is added. Both stages use best-effort one-request/second, burst-two throttling, not a hard spending or concurrency limit.
 
-The administrator-managed `CicdFoundationStack` owns the single `us-east-1` API Gateway account logging configuration and shared `SOC_BOT_CICD_API_GATEWAY_LOGGING` role; neither environment stack creates that Regional account setting. The role trusts only API Gateway and uses custom logging policies scoped to chat access logs and AWS-fixed execution-log namespaces (generated API IDs require a reviewed wildcard); only log-group discovery is account-wide. The role has shared Project/ManagedBy tags without Environment; the account resource is not taggable. Both shared resources are retained because account-resource deletion does not reset the logging role setting. AI owns tagged seven-day access/execution groups with dev DESTROY/demo RETAIN, metadata-only access logs, ERROR execution logging, and payload tracing disabled. WAF request sampling is disabled. Apply the foundation first and confirm there is no competing account-setting owner. PR/demo/teardown synthesis uses a reserved documentation CIDR; dev deployment requires the non-secret dev Environment variable `DEV_ALLOWED_CLIENT_CIDR`. Demo-only deployment selection prevents deploying its placeholder-backed dev template. Deferred API/Cognito authorization acknowledgments are limited to each `/chat` method; absent WAF is acknowledged only on demo's stage.
+The administrator-managed `CicdFoundationStack` owns the single `us-east-1` API Gateway account logging configuration and shared `SOC_BOT_CICD_API_GATEWAY_LOGGING` role; neither environment stack creates that Regional account setting. The role trusts only API Gateway and uses custom logging policies scoped to exact chat/frontend access logs and AWS-fixed execution-log namespaces (generated API IDs require a reviewed wildcard); only log-group discovery is account-wide. The role has shared Project/ManagedBy tags without Environment; the account resource is not taggable. Both shared resources are retained because account-resource deletion does not reset the logging role setting. AI owns tagged seven-day access/execution groups with dev DESTROY/demo RETAIN, metadata-only access logs, ERROR execution logging, and payload tracing disabled. WAF request sampling is disabled. Apply the foundation first and confirm there is no competing account-setting owner. PR/demo/teardown synthesis uses a reserved documentation CIDR; dev deployment requires the non-secret dev Environment variable `DEV_ALLOWED_CLIENT_CIDR`. Demo-only deployment selection prevents deploying its placeholder-backed dev template. Within the existing AI APIs, deferred API/Cognito authorization acknowledgments remain limited to each `/chat` method and absent WAF to demo's stage. The independent frontend foundation has its own method/stage-specific acknowledgments for generic health only, with no chat or auth integration.
 
 Live API transport and WAF restrictions remain operator validation; Cognito and authenticated Stop/session ownership remain later integration. Enforce a ten-minute acceptance-to-outcome budget inside a 15-minute Lambda, four tool blocks across attempts, sequential queries with a 180-second deadline, 90-second finalization reserve, and 45-second outcome/cleanup reserve. Provider history is limited to 192 KiB/128 messages, complete model requests to 256 KiB, and answers to 2,048 tokens/32 KiB. Both APPLICATION boundaries and orchestrator roles permit `GetInferenceProfile` only on the approved profile. Only the three approved query tools are implemented; playbook retrieval remains planned.
 
@@ -1209,7 +1212,7 @@ Use AWS CDK with TypeScript. Organize resources into constructs inside three dep
 - Tool definitions and prompt assets
 - Relevant alarms and log groups
 
-#### `FrontendApiStack`
+#### `FrontendStack`
 
 - Frontend S3 bucket
 - CloudFront distribution and OAC
@@ -1227,6 +1230,8 @@ DataStack -> AiStack -> FrontendApiStack
 ```
 
 Avoid reverse references and circular stack dependencies.
+
+The current frontend foundation instantiates independent dev/demo `FrontendStack` resources with only generic `GET /api/health`, not auth handlers or AI integrations. Both frontend stacks depend on the shared logging foundation only; the illustrated AI integration dependency is a later one-way reference. Existing Data/AI paths remain unchanged. Deployment/teardown workflows still select only Data/AI; reviewed frontend selection and asset publication must precede operator rollout, with foundation permissions/logging applied first. See the [current frontend guide](FrontendStack/README.md) for exact resources, deferred controls and source-only session contracts.
 
 ### 19.3 Resource Safety
 
