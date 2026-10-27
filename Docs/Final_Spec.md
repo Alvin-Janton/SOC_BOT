@@ -1231,7 +1231,7 @@ DataStack -> AiStack -> FrontendApiStack
 
 Avoid reverse references and circular stack dependencies.
 
-The current frontend foundation instantiates independent dev/demo `FrontendStack` resources with only generic `GET /api/health`, not auth handlers or AI integrations. Both frontend stacks depend on the shared logging foundation only; the illustrated AI integration dependency is a later one-way reference. Existing Data/AI paths remain unchanged. Deployment/teardown workflows still select only Data/AI; reviewed frontend selection and asset publication must precede operator rollout, with foundation permissions/logging applied first. See the [current frontend guide](FrontendStack/README.md) for exact resources, deferred controls and source-only session contracts.
+The current frontend foundation instantiates independent dev/demo `FrontendStack` resources with only generic `GET /api/health`, not auth handlers or AI integrations. Both frontend stacks depend on the shared logging foundation only; the illustrated AI integration dependency is a later one-way reference. Existing Data/AI paths remain unchanged. Deployment workflows explicitly select matching Data/AI/Frontend stacks from the existing assembly, using `--exclusively` so administrator-managed foundation permissions/logging must be applied separately first. Manual dev teardown supports Frontend only, AI only, or all in Frontend -> AI -> Data order; it does not invent a new CDK dependency. UI assets, authentication handlers, origin protection and chat migration remain deferred. See the [current frontend guide](FrontendStack/README.md) for exact resources, confirmations, destructive consequences and activation prerequisites.
 
 ### 19.3 Resource Safety
 
@@ -1273,6 +1273,12 @@ Deployment flow:
 4. Invalidate required CloudFront paths
 5. Run smoke tests
 6. Require approval before deploying the same reviewed revision to `demo`
+
+The flow above is the intended completed product process. Current workflows deploy only infrastructure: a push to `dev` selects `devDataStack devAiStack devFrontendStack`, and a push to `main` selects their three demo equivalents. They lint/build/synthesize before OIDC role assumption, then deploy the existing assembly sequentially with dependency ordering and `--exclusively`; they do not bootstrap, update foundation, publish UI assets or invalidate CloudFront. Existing dev CIDR handling (including its `/128` suffix) and documentation-only demo synthesis context remain unchanged. **Do not merge or push this work to main until authentication/security is ready:** that branch automatically triggers demo, including the currently unauthenticated AI API without WAF. Local workflow changes do not authorize demo deployment or changes to Environment protections.
+
+Manual dev teardown validates exact confirmations before credentials: `frontend` / `DELETE SOC-BOT-DEV-FRONTEND`, `ai` (default) / `DELETE SOC-BOT-DEV-AI`, or `all` / `DELETE ALL SOC-BOT-DEV-STACKS`. Single-stack scopes leave other application stacks untouched. All uses separate awaited Frontend -> AI -> Data commands, stopping immediately on failure before any subsequent deletion. Future frontend imports that prevent AI-only removal require an explicitly reviewed broader teardown or dependency change. Dev frontend teardown deletes Cognito users and auth/session state as well as hosting. Data-only, foundation and demo teardown remain excluded, and nonempty frontend/Data buckets are never automatically emptied.
+
+Deploy/destroy retain shared `soc-bot-dev-data` concurrency; demo retains `soc-bot-demo-data`, all with cancellation disabled and 30-minute job timeouts. CloudFront operations can take several minutes, and a workflow timeout does not prove CloudFormation has stopped. After a later authorized dev deployment, `/api/health` is the intended check; the empty website root may fail until assets are published. Operator recovery and live validation are separate from offline workflow checks.
 
 ### 20.3 Rollback
 

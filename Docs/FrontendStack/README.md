@@ -169,13 +169,54 @@ sessions or cancel accepted in-flight requests. Safe backend failures remain
 distinct from unauthenticated state. Future runtime logging must exclude message
 bodies, credentials, cookies, tokens, auth records and provider diagnostics.
 
-## Deferred activation and operator gates
+## Deployment, teardown and deferred activation
 
-The current deployment and destroy workflows still select only Data/AI; **they
-do not deploy or destroy frontend**. Follow-up workflow selection, teardown
-design and frontend asset publication must be reviewed before operator rollout.
-Do not work around this gap with manual frontend deployment. Deploy the reviewed
-administrator-managed foundation changes first when rollout is authorized.
+The [dev workflow](../../.github/workflows/deploy-dev.yml) now explicitly deploys
+`devDataStack devAiStack devFrontendStack`; the
+[demo workflow](../../.github/workflows/deploy-demo.yml) selects the three matching
+demo IDs. They use the already synthesized assembly, matching Environment/OIDC
+and execution roles, and sequential dependency-aware CDK deployment. They never
+select foundation. Apply the reviewed administrator-managed foundation IAM and
+shared logging changes separately first: `--exclusively` intentionally excludes
+dependencies from deployment. Frontend still depends only on foundation; no
+artificial AI/Data dependency is added.
+
+Infrastructure deployment does not publish UI assets, invalidate CloudFront,
+activate auth handlers, protect the API origin or migrate chat. After a later
+authorized dev deployment, use the output health URL (`/api/health`); the empty
+website root may fail until assets are published. CloudFront operations may take
+several minutes; existing 30-minute workflow timeouts are unchanged. A timeout
+does not prove CloudFormation has stopped; inspect live state separately before
+recovery. Dev deployment/destruction share `soc-bot-dev-data`, while demo uses
+`soc-bot-demo-data`, all without cancelling an in-progress run. Existing dev
+CIDR handling, including the `/128` suffix, remains unchanged; demo synthesis
+uses a documentation-only CIDR and selects only demo stacks for deployment.
+
+The [manual dev destroy workflow](../../.github/workflows/destroy-dev.yml) runs
+only on `dev` in the `dev` Environment. It validates these exact confirmations
+before requesting AWS credentials, with `ai` still the default:
+
+| Scope | Confirmation | Targets |
+| --- | --- | --- |
+| `frontend` | `DELETE SOC-BOT-DEV-FRONTEND` | Frontend only; AI/Data untouched. |
+| `ai` | `DELETE SOC-BOT-DEV-AI` | AI only; Frontend/Data untouched. |
+| `all` | `DELETE ALL SOC-BOT-DEV-STACKS` | Frontend -> AI -> Data, separate awaited commands. |
+
+Frontend failure prevents AI/Data deletion; AI failure prevents Data deletion.
+No failed operation is automatically retried or interpreted as an absent stack.
+If future frontend imports prevent AI-only deletion, review an explicit broader
+teardown or remove the dependency; the workflow does not expand scope. Data-only,
+foundation and demo destruction remain excluded. **Dev frontend teardown deletes
+the Cognito pool and its users plus the auth/session table**, not just the empty
+website. Buckets are never automatically emptied. Nonempty frontend/Data buckets
+require deliberate operator cleanup before retrying; other resources may already
+be gone after a partial failure.
+
+**Do not merge or push to `main` until authentication and application security
+are complete.** Main still automatically deploys demo, including its existing
+unauthenticated AI API without WAF. The frontend resources do not secure that
+endpoint. Local workflow edits are not permission to launch demo or change
+GitHub Environment protection settings.
 
 Stack outputs contain only the CloudFront hostname/distribution ID, bucket/API
 IDs, health URL, pool/client IDs and auth-table name. They do not expose tokens,
