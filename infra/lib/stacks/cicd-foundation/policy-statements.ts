@@ -1,6 +1,6 @@
 import { Aws } from 'aws-cdk-lib';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { chatApiAccessLogGroupName, dataBucketName, DeploymentEnvironment, frontendApiAccessLogGroupName, frontendBucketName, glueFileBucketName } from '../../shared/environment';
+import { chatApiAccessLogGroupName, dataBucketName, DeploymentEnvironment, frontendApiAccessLogGroupName, frontendBucketName, frontendOriginSecretArn, glueFileBucketName } from '../../shared/environment';
 
 export const RUNTIME_CLASSES = ['application', 'query', 'glue'] as const;
 export type RuntimeClass = typeof RUNTIME_CLASSES[number];
@@ -462,6 +462,62 @@ export function frontendApiStatements(resources: EnvironmentResources): PolicySt
   ];
 }
 
+/** Limits new global WAF access to the dev frontend names, without altering Regional chat permissions. */
+export function frontendWafStatements(resources: EnvironmentResources): PolicyStatement[] {
+  if (resources.environment !== 'dev') return [];
+  const ipSet = `arn:${Aws.PARTITION}:wafv2:us-east-1:${Aws.ACCOUNT_ID}:global/ipset/SOC-BOT-DEV-FRONTEND-CLIENTS/*`;
+  const webAcl = `arn:${Aws.PARTITION}:wafv2:us-east-1:${Aws.ACCOUNT_ID}:global/webacl/SOC-BOT-DEV-FRONTEND-ALLOWLIST/*`;
+  const ownership = { Project: 'SOC_BOT', Environment: 'dev', ManagedBy: 'CDK' };
+  const resourceTags = { StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:ResourceTag/${key}`, value])) };
+  const requestTags = {
+    StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
+    'ForAllValues:StringEquals': { 'aws:TagKeys': [
+      ...Object.keys(ownership), 'aws:cloudformation:stack-id', 'aws:cloudformation:stack-name', 'aws:cloudformation:logical-id',
+    ] },
+  };
+  return [
+    new PolicyStatement({ sid: 'CreateTaggedDevFrontendWaf', actions: ['wafv2:CreateIPSet', 'wafv2:CreateWebACL'],
+      resources: [ipSet, webAcl], conditions: requestTags }),
+    new PolicyStatement({ sid: 'ManageTaggedDevFrontendIpSet',
+      actions: ['wafv2:CreateWebACL', 'wafv2:DeleteIPSet', 'wafv2:UpdateIPSet'], resources: [ipSet], conditions: resourceTags }),
+    new PolicyStatement({ sid: 'ManageTaggedDevFrontendWebAcl',
+      actions: ['wafv2:DeleteWebACL', 'wafv2:UpdateWebACL'], resources: [webAcl, ipSet], conditions: resourceTags }),
+    new PolicyStatement({ sid: 'TagDevFrontendWaf', actions: ['wafv2:TagResource'], resources: [ipSet, webAcl], conditions: requestTags }),
+    new PolicyStatement({ sid: 'ReadDevFrontendWaf', actions: ['wafv2:GetIPSet', 'wafv2:GetWebACL', 'wafv2:ListTagsForResource'],
+      resources: [ipSet, webAcl] }),
+  ];
+}
+
+/** Grants only the frontend origin-secret lifecycle, preserving demo retention and protected ownership tags. */
+export function frontendOriginSecretStatements(resources: EnvironmentResources): PolicyStatement[] {
+  const title = capitalize(resources.environment);
+  const secretArn = frontendOriginSecretArn(resources.environment);
+  const ownership = { Project: 'SOC_BOT', Environment: resources.environment, ManagedBy: 'CDK' };
+  const resourceTags = { StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:ResourceTag/${key}`, value])) };
+  const systemKeys = ['aws:cloudformation:stack-id', 'aws:cloudformation:stack-name', 'aws:cloudformation:logical-id'];
+  return [
+    new PolicyStatement({ sid: `CreateTag${title}FrontendOriginSecret`, actions: ['secretsmanager:CreateSecret', 'secretsmanager:TagResource'],
+      resources: [secretArn], conditions: {
+        StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
+        'ForAllValues:StringEquals': { 'aws:TagKeys': [...Object.keys(ownership), ...systemKeys] },
+      } }),
+    new PolicyStatement({ sid: `Read${title}FrontendOriginSecret`,
+      actions: ['secretsmanager:DescribeSecret', 'secretsmanager:GetSecretValue'], resources: [secretArn] }),
+    new PolicyStatement({ sid: `Update${title}FrontendOriginSecret`,
+      actions: ['secretsmanager:PutSecretValue', 'secretsmanager:UpdateSecret',
+        ...(resources.environment === 'dev' ? ['secretsmanager:DeleteSecret'] : [])],
+      resources: [secretArn], conditions: resourceTags }),
+    new PolicyStatement({ sid: `Untag${title}FrontendOriginSystemTags`, actions: ['secretsmanager:UntagResource'],
+      resources: [secretArn], conditions: { ...resourceTags,
+        'ForAllValues:StringEquals': { 'aws:TagKeys': systemKeys }, Null: { 'aws:TagKeys': 'false' },
+      } }),
+    new PolicyStatement({ sid: `Protect${title}FrontendOriginTags`, effect: Effect.DENY, actions: ['secretsmanager:UntagResource'],
+      resources: [secretArn], conditions: { 'ForAnyValue:StringEquals': { 'aws:TagKeys': Object.keys(ownership) } } }),
+    new PolicyStatement({ sid: `Generate${title}FrontendOriginToken`, actions: ['secretsmanager:GetRandomPassword'],
+      resources: ['*'], conditions: { StringEquals: { 'aws:RequestedRegion': Aws.REGION } } }),
+  ];
+}
+
 /** Defines CloudFormation permissions for environment-scoped logs, alarms, and budgets. */
 export function observabilityStatements(resources: EnvironmentResources): PolicyStatement[] {
   const executionLogGroupArn = `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:API-Gateway-Execution-Logs_*/${resources.environment}`;
@@ -677,6 +733,10 @@ export function runtimeBoundaryStatements(
       resources: [
         `arn:${Aws.PARTITION}:dynamodb:${Aws.REGION}:${Aws.ACCOUNT_ID}:table/${resources.prefix}-*`,
       ],
+    }),
+    new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}FrontendOriginSecret`,
+      actions: ['secretsmanager:GetSecretValue'], resources: [frontendOriginSecretArn(resources.environment)],
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApprovedBedrockInferenceProfile`,

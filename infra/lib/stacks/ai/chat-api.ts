@@ -1,6 +1,6 @@
 import { Aws, CfnOutput, Duration, RemovalPolicy, Tags, Validations } from 'aws-cdk-lib';
 import {
-  AccessLogFormat, AuthorizationType, EndpointType, IpAddressType, JsonSchemaType,
+  AccessLogFormat, AuthorizationType, CfnRestApi, EndpointType, IpAddressType, JsonSchemaType,
   JsonSchemaVersion, LambdaIntegration, LogGroupLogDestination, MethodLoggingLevel,
   ResponseTransferMode, RestApi,
 } from 'aws-cdk-lib/aws-apigateway';
@@ -65,6 +65,11 @@ export class ChatApi extends Construct {
         throttlingBurstLimit: 2,
       },
     });
+    const transport = { securityPolicy: 'SecurityPolicy_TLS13_1_2_2021_06', endpointAccessMode: 'BASIC' };
+    const apiResource = this.api.node.defaultChild as CfnRestApi;
+    apiResource.securityPolicy = transport.securityPolicy;
+    apiResource.endpointAccessMode = transport.endpointAccessMode;
+    this.api.latestDeployment!.addToLogicalId(transport);
     // API Gateway fixes this name; create/tag/retain the group before the stage can write logs.
     const executionLogs = new LogGroup(this, 'ExecutionLogs', {
       logGroupName: `API-Gateway-Execution-Logs_${this.api.restApiId}/${environment}`,

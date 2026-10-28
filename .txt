@@ -1,0 +1,108 @@
+Title: Email/Password Authentication and Session Routes
+Date: 2026-10-28
+Repo: C:\Users\alvin\OneDrive\Desktop\GitHub_Repos\SOC_BOT
+Branch inspected: feature/BFF
+
+Goal:
+- Activate one frontend-owned auth Lambda and three explicit routes: POST /api/auth/login, GET /api/auth/me, and POST /api/auth/logout.
+- Reuse Cognito, the existing auth table, fixed twelve-hour session helpers, and the preceding slice's origin protection. Add only necessary IAM permissions.
+- Implement locally only. No deployment, AWS account calls, workflow execution, commits/pushes, new tests, UI, or chat identity cutover.
+
+Plan:
+1) Establish the prerequisite and keep the slice bounded.
+   - Finish and review the frontend entry-point hardening slice before implementing this plan. It is currently being edited; do not treat partial files as the final baseline or overwrite that work.
+   - Inspect AGENTS.md, the completed frontend constructs, infra/lambdas/frontend/auth/, the origin authorizer/guard, foundation policies, and Docs/FrontendStack/README.md.
+   - Preserve TLS settings, dev-only IPv4 CloudFront WAF, secret-origin verification, logging safeguards, logical IDs, stateful resources, and the two-CIDR workflow configuration.
+   - Extend the existing auth helpers rather than create a second authentication/session implementation. Use focused handler.ts, http.ts/contracts.ts, and login orchestration modules only where responsibilities justify them.
+   - This slice does not implement signup, confirmation/resend, password change/reset, Google login/linking, MFA challenges, renewal, all-device logout, account-disable APIs, or any orchestrator/session identity integration.
+
+2) Define and enforce the three HTTP contracts.
+   - POST /api/auth/login: application/json body exactly {"email":"analyst@example.com","password":"example-only"}. Return 200 with {"userId":"<verified-cognito-sub>","expiresAt":"<UTC-ISO-8601>"} and the opaque Set-Cookie header only after confirmed session persistence.
+   - GET /api/auth/me: no body/query parameters; cookie is the only session input. Return the same 200 userId/expiresAt shape for a valid session. Do not return a raw token, session hash, email/profile data, or session version.
+   - POST /api/auth/logout: no query parameters and either an empty body or {}. Require application/json for this POST even when its body is empty. Return 204 with an empty body and a clearing Set-Cookie header only after confirmed current-session deletion, or when no usable cookie exists.
+   - Validate REST API proxy event shape, expected API/stage/account, supported exact method/resource pairs, JSON object shape, content type, and bounded decoded body size (8 KiB). Reject unknown fields such as userId, sub, version, or lifetime. Parse base64 safely if present; do not accept forms or credentials in URLs.
+   - Validate email consistently with the existing Cognito username limit (128 characters), normalize its surrounding whitespace/case for the case-insensitive pool, and never trim/normalize the password. Preserve the existing 256-character password-input bound; do not impose new-password complexity rules on login.
+   - Use safe errors with a stable shape such as {"error":{"code":"AUTHENTICATION_FAILED","message":"Email or password is incorrect."},"requestId":"<request-id>"}.
+   - Status mapping: 400 malformed input; 413 oversized body; 415 unsupported media type; 401 denied credentials or absent/invalid/revoked session; 403 invalid origin or unconfirmed account (ACCOUNT_NOT_CONFIRMED); 429 throttling; 503 backend/configuration unavailability. Distinguish unsupported authentication challenges safely without returning Cognito challenge sessions. Never expose raw SDK/JWT errors.
+   - Responses, including errors and logout, use Cache-Control: no-store and appropriate safe JSON headers. Never include credentials, cookies, Cognito JWTs/refresh tokens, or raw provider details in JSON.
+
+3) Preserve origin protection and add browser-origin/CSRF checks.
+   - Extend the preceding slice's REQUEST authorizer exact allowlist to the existing GET /api/health plus precisely these three routes. Keep authorization-result TTL zero and return permission for only the validated incoming method ARN, not a wildcard.
+   - Keep secret fetching/comparison in that authorizer/shared origin guard. The auth Lambda must verify trusted API Gateway authorization context, but needs no additional Secrets Manager grant or duplicate secret fetch.
+   - The verified origin principal is not a user identity. Login remains accessible without a session; me/logout resolve the opaque cookie internally. Do not trust a caller-supplied principal/userId or make login require an existing session.
+   - Configure the exact allowed browser origin as https://<this-environment-distribution-hostname> using a CDK reference, not viewer Host, X-Forwarded-Host, arbitrary request headers, a wildcard, or the execute-api hostname.
+   - Before POST login/logout performs any work, require one unambiguous Origin equal to that configured origin. Reject missing, null, cross-origin, or conflicting values. Require JSON, reject Sec-Fetch-Site: cross-site when supplied, and do not add permissive CORS or Referer fallback. Protect login as well as logout against CSRF.
+   - GET me can omit Origin for same-origin GET/manual clients; reject an explicit mismatched/null/ambiguous Origin or cross-site Fetch Metadata. It must not mutate or renew session state.
+   - Handle equivalent single/multivalue API Gateway headers correctly while rejecting actual ambiguous duplicates. Preserve strict cookie parsing.
+   - Keep CloudFront /api/* cookie/header forwarding and caching disabled, API Gateway response caching off, and no SPA error rewrite. Ensure auth errors are not edge-cached (honor no-store; use zero minimum error TTL for relevant CloudFront-cached API error statuses if necessary, without response remapping).
+   - Missing/bad origin-secret requests remain denied before the auth integration. No auth route may be created with AuthorizationType.NONE as a shortcut.
+
+4) Implement trusted login orchestration and narrowly scoped first-login metadata provisioning.
+   - Use AdminGetUser against the configured pool with the email alias to obtain the canonical Cognito Username, sub, Enabled flag, and account status. Do not use ListUsers, client-supplied subjects, or a JWT decoded without verification.
+   - Only enabled, confirmed local password accounts may proceed. Map absent/disabled users to the same safe credential failure; unconfirmed accounts use the agreed safe 403 code. Temporary-password, reset-required, MFA, or other unsupported challenge states fail closed without implementing those flows.
+   - Make trusted first-login provisioning explicit: after the server's canonical account lookup, distinguish genuinely absent USER#sub metadata from existing malformed metadata. Only an absent record can be conditionally initialized to version 1 / disabled false, before password authentication starts.
+   - Reuse the existing conditional initialize helper; never replace/reset existing metadata, clear disabled, or adopt defaults for malformed state. If concurrent initialization wins, permit one bounded strong reread before authentication and require valid enabled state. Preserve no-TTL user metadata. Do not initialize state during me/cookie resolution.
+   - Capture the process-local TrustedAuthenticationContext through readForAuthentication BEFORE verifying credentials. Authenticate using the canonical server-resolved username with the existing USER_PASSWORD_AUTH adapter, then verify the ID JWT signature, issuer, client, token use, live expiry, and equality of the verified sub to the snapshot.
+   - Keep the verified identity and Cognito tokens internal; discard all provider tokens after verification. Refine the adapter's current blanket error handling so transient service/JWKS outages are safe 503s, throttling is 429, and credential failures remain generic, without logging raw causes.
+   - Transactionally check the original enabled metadata/version while inserting a freshly generated session. Never reread and adopt a newer version after credential verification or retry the authentication transaction as a fresh snapshot.
+   - Keep one stable transaction idempotency token and the same generated session record throughout SDK retries. On an ambiguous persistence result, do not return success or mint another session inside an outer retry loop; an unconfirmed committed session can expire naturally.
+   - A submitted cookie never selects the login identity. Mint a fresh opaque token on every successful login; do not globally revoke other device sessions or erase an existing cookie merely because a login attempt failed.
+   - This provisioning is a defined first-login path, not proof of the password and not automatic recovery from deleted user state. Document that losing/deleting revocation metadata is an operator recovery issue.
+
+5) Implement me/logout using the existing durable session contract.
+   - Keep the existing item shapes: permanent USER#<sub> with entity_type/sub/session_version/disabled; SESSION#<SHA-256-token-hash> with entity_type/sub/session_version/created_at/expires_at. Do not add a GSI, token storage, sliding expiration, profile cache, or a new table.
+   - Keep random 32-byte opaque tokens, hash-only DynamoDB keys, and absolute 43,200-second expiry independent of Cognito token expiry. Preserve __Host-soc_bot_session, Secure, HttpOnly, SameSite=Lax, Path=/, no Domain, and persistent Max-Age/Expires aligned to server expiry.
+   - me uses strongly consistent session and user-state reads on every request, with schema/key/sub/expiry/disabled/version checks and no authorization cache or Cognito round trip. Invalid/missing sessions return 401; a present invalid cookie may be cleared. Storage failure returns 503, never authenticated or merely logged out.
+   - Logout deletes only the cookie-selected SESSION key, then clears the cookie. Missing/malformed cookies clear idempotently; a deletion failure returns 503 without claiming logout succeeded or clearing a usable cookie. Do not increment session_version, call Cognito GlobalSignOut, or require successful me resolution before deleting an expired/revoked session.
+   - Reuse AWS SDK retries (maxAttempts 2) with bounded request cancellation and a handler-wide deadline. No Tenacity-style package or outer retry framework. Do not retry denied credentials, validation failures, or conditional-version failures.
+   - Bound the complete handler to approximately 20 seconds of work with a 25-second Lambda timeout, reserving time for a safe response. Clamp SDK/JWKS work to the remaining deadline rather than allowing each existing 10-second helper timeout to accumulate beyond it. Use supported verifier/network settings; preserve cryptographic verification.
+   - Do not create global recovery/revocation workers or synchronization with out-of-band Cognito console actions. Document that later password/admin flows must update DynamoDB versions to invalidate already established sessions.
+
+6) Add the frontend-owned construct and narrowly scoped IAM.
+   - Add infra/lib/stacks/frontend/frontend-auth.ts owning one Node.js 22 NodejsFunction named SOC-BOT-<ENV>-FRONTEND-AUTH, 256 MB memory, 25-second timeout, its own seven-day log group, and role SOC_BOT_<ENV>_RUNTIME_APPLICATION_FRONTEND_AUTH with the existing APPLICATION boundary and standard ownership/access-class tags.
+   - Reuse existing local bundling/dependency conventions and the already installed Cognito/DynamoDB/JWT/Zod libraries. No layer, new package, function URL, VPC, queue, or broad AWS-managed runtime policy.
+   - Pass pool/client IDs, exact auth table name, environment, expected API/stage/account information, and canonical browser origin through trusted CDK references. No passwords, JWTs, cookie values, or resolved origin secret in configuration.
+   - Add three explicit Lambda proxy integrations on the frontend API, with source-account/API/method-scoped invocation permissions. Reuse existing API/root resources and origin authorizer; do not add ANY or a proxy catch-all.
+   - Avoid cycles: keep the base REST API independent of integration Lambdas; CloudFront depends on its ID/hostname, not stage/deployment URL. Create/wire auth integrations after hosting is available so the auth Lambda can reference the distribution hostname without CloudFront depending on the stage.
+   - Runtime identity grants: exact auth-table GetItem, PutItem, DeleteItem, ConditionCheckItem; exact own log-stream writes; exact pool AdminGetUser. No UpdateItem until a future revocation API requires it, no Scan/Query/batch/table-wide grant helper, no S3/Bedrock/tool/Google/admin-mutation permissions.
+   - In foundation policy-statements.ts, add APPLICATION-boundary ConditionCheckItem only on the environment's exact AUTH-SESSIONS table ARN. Add AdminGetUser ceiling on the current account/Region pools with supported existing ownership-tag conditions, since foundation cannot reference frontend-owned pool IDs. Runtime identity remains exact-pool scoped. QUERY/GLUE boundaries and other runtime identities remain untouched.
+   - Keep USER_PASSWORD_AUTH through InitiateAuth: AWS does not evaluate IAM for that API, so do not add an ineffective InitiateAuth IAM permission or switch to AdminInitiateAuth merely to fit the existing boundary.
+   - Existing foundation Lambda/log/API/runtime-role lifecycle permissions should cover the new named resources; confirm and change only any proven gaps. Preserve protected tags, permission-boundary enforcement, policy attachment counts, and managed-policy size quotas. No frontend-to-foundation resource reference or broad cognito-idp:* grant.
+   - Preserve current API throttling (1 request/second, burst 2), authorizer cache zero, metadata-only API logs, and disabled data tracing. Safe Lambda logs may include request ID, route label, outcome code, and duration, never body/email/sub/password/cookie/session hash/provider error or full event. This is not comprehensive public authentication abuse protection.
+
+7) Update focused documentation, without expanding workflows or product scope.
+   - Update Docs/FrontendStack/README.md, infra/lambdas/frontend/auth/README.md, relevant root setup instructions, and logs.md. Replace source-only statements for the newly activated paths and document payloads/statuses, expiry/logout behavior, first-login provisioning, CSRF/origin requirements, and IAM sequencing.
+   - Document secure operator-created-account prerequisites for later manual validation: confirmed/enabled local Cognito account with a permanent password. The developer must not create a live user, seed live table records, suppress confirmation, or embed credentials in CDK/docs.
+   - Show later manual examples through the CloudFront hostname with a private cookie jar and matching Origin header on POSTs. Never use the secret origin header in client examples or credentials/cookies in command-line literals, committed files, or logs.
+   - Explain that the frontend UI/chat integration, signup/recovery, Google/linking, Cognito-console revocation synchronization, and public-demo abuse/email readiness are still deferred. me establishes session identity but does not change the orchestrator's temporary identity.
+   - Existing workflows already deploy frontend; no new workflow/variable is needed for the dynamic CloudFront origin or these routes. Preserve the previous hardening slice's workflow changes. Document authorized operator foundation-first deployment later; do not deploy or dispatch anything now.
+   - Update only resource-specific cdk-nag acknowledgments that became inaccurate; origin authorization is not Cognito API authorization. Never add a broad suppression or remove a security check.
+
+8) Verify locally and report limitations.
+   - Run existing Node.js 22 lint/build/tests and offline full-app synthesis with the preceding slice's two reserved CIDR contexts, no account lookups or AWS metadata discovery. Use existing offline policy validation without Access Analyzer.
+   - Inspect the assembled dev/demo templates for exactly one new auth Lambda per environment, three exact origin-protected routes, bounded configuration, invocation scopes, exact runtime grants/boundary ceilings, stable stateful/API/distribution logical IDs, correct dependencies, and no cycles.
+   - Review cache/Set-Cookie forwarding, error handling/redaction, pre-auth version ordering, conditional initialization, transaction retry identity, session resolution, and deletion-before-cookie-clear behavior from source. Do not claim this static review proves live authentication/browser behavior.
+   - Check policy size/attachment limits and git diff --check; compare Data/AI templates and frontend hardening settings to the completed prerequisite baseline.
+   - Do not create/expand/rewrite/delete tests, fixtures, mock servers, scripts, harnesses, or fault-injection checks. If an existing test/assertion conflicts, pause for explicit user approval rather than weakening it.
+   - No AWS CLI/MCP service calls, cdk diff using live change sets, deployments, user creation, uploads, paid calls, workflow runs, commits, or pushes. Report every check run, failures, prerequisite conflicts, and deferred live checks.
+
+Risks/Notes:
+- Implement only after the preceding hardening slice is complete and reviewed; its in-progress code must be preserved.
+- Origin-secret verification and browser Origin validation solve different problems. The CloudFront-added header alone does not prevent CSRF.
+- Distinct unconfirmed-account handling is an intentional limited account-existence disclosure retained from the agreed contract. Other account/credential failures stay generic; no artificial constant-time claim.
+- AdminGetUser contributes to Cognito MAU usage. API throttles are best effort, not per-account brute-force prevention or a hard cost cap. Public demo launch remains deferred.
+- Metadata initialization never resets a prior version. Missing/malformed state during session resolution fails closed; deleting/restoring permanent auth state requires reviewed operator recovery.
+- A fixed application session can remain valid after Cognito token expiry or out-of-band console sign-out/disablement unless DynamoDB state is also revoked. This slice does not pretend to provide that synchronization.
+- Old AI chat identity and its API/WAF remain unchanged. No automatic route cutover, public-demo release, or unrelated model/evaluation changes.
+
+Tests/Verification:
+- Planning: inspected current helpers, API/hosting/identity/storage constructs, IAM boundary definitions, docs, and official references. No tests or AWS calls performed.
+- Later developer: existing offline checks only, as above. No new tests are authorized.
+- Later operator, after separate deployment authorization: login/cookie/me/logout; 401 after logout; invalid credentials; unconfirmed account; missing/cross-site Origin rejection; direct API denial; multiple device sessions; expiry/version invalidation using deliberate trusted operator actions. Never perform these live checks as part of implementation.
+
+References:
+- AdminGetUser lookup, IAM, canonical identity, and MAU: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminGetUser.html
+- InitiateAuth flow and non-IAM authorization: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_InitiateAuth.html
+- DynamoDB transactional action permissions: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html
+- REST Lambda proxy events/responses: https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-proxy-integrations.html
+- CSRF, login CSRF, origin validation, and simple content types: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
