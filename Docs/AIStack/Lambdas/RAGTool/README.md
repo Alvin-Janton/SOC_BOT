@@ -190,7 +190,7 @@ npm run lint
 npm run build
 npm test
 npm run playbooks:validate -- --index playbooks/index.json
-npm run synth --workspace @soc-bot/infra -- devAiStack demoAiStack --exclusively --lookups=false -c devAllowedClientCidr=2001:db8::1/128 --output cdk.out-rag-offline
+npm run synth --workspace @soc-bot/infra -- devAiStack demoAiStack --exclusively --lookups=false -c devAllowedClientCidr=2001:db8::1/128 -c devFrontendAllowedClientCidr=203.0.113.1/32 --output cdk.out-rag-offline
 ```
 
 For explicitly offline synthesis, set `CDK_DEFAULT_ACCOUNT` to a synthetic account, disable EC2 metadata discovery and CLI telemetry, and point AWS configuration/credentials paths to nonexistent local files. The reserved CIDR is for synthesis only, not deployment. Generated assembly/bundles under `infra/cdk.out-rag-offline/` remain ignored. These checks compile, validate the local corpus, run unchanged infrastructure tests, and synthesize/cdk-nag the stacks; they do not invoke the RAG handler, mock S3, validate live read permissions, or prove runtime error/deadline behavior.

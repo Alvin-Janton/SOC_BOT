@@ -9,16 +9,18 @@ finished login system. The [CDK entry point](../../infra/bin/soc-bot.ts) registe
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
 resources. Account/Region values are CDK tokens, not committed account IDs.
 
-No frontend UI/assets, auth Lambda/authorizer, signup/login/recovery route, Google
+No frontend UI/assets, user-authentication handler, signup/login/recovery route, Google
 provider/domain/credentials, identity pool, user, account-linking flow, chat
-integration, DNS, certificate or new WAF resource is created. The existing dev
+integration, DNS or custom certificate is created. Frontend owns a generated
+origin token and REQUEST authorizer in both environments, plus a dev-only
+CloudFront IPv4 WAF. The existing dev
 WAF-gated `/chat` remains the only working chat endpoint. Demo release stays
 deferred until authentication and abuse controls are complete.
 
 ## Constructs and resources
 
-[FrontendStack](../../infra/lib/stacks/frontend/frontend-stack.ts) exposes its
-four focused constructs:
+[FrontendStack](../../infra/lib/stacks/frontend/frontend-stack.ts) organizes the
+following focused constructs; the original four public properties remain:
 
 | Construct | Resource contract |
 | --- | --- |
@@ -26,6 +28,8 @@ four focused constructs:
 | [FrontendIdentity](../../infra/lib/stacks/frontend/frontend-identity.ts) | `SOC-BOT-<ENV>-USERS` user pool and `SOC-BOT-<ENV>-WEB` no-secret app client. |
 | [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, only `GET /api/health` using MOCK. |
 | [FrontendHosting](../../infra/lib/stacks/frontend/frontend-hosting.ts) | Private `soc-bot-<environment>-frontend-<account>-<region>` bucket, named OAC and CloudFront distribution with its generated hostname. |
+| [FrontendWaf](../../infra/lib/stacks/frontend/frontend-waf.ts) | Dev-only `SOC-BOT-DEV-FRONTEND-CLIENTS` and `SOC-BOT-DEV-FRONTEND-ALLOWLIST`, CLOUDFRONT scope in `us-east-1`; one IPv4 `/32`, default BLOCK, metrics enabled and sampling disabled. |
+| [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads only its exact secret and writes its own logs. |
 
 Cognito permits self-service signup and case-insensitive email sign-in, requires
 email, automatically verifies it using a code, and uses email-only recovery. No
@@ -51,9 +55,11 @@ revocation semantics.
 
 `https://<distribution-hostname>/api/health` forwards to the API's generated
 hostname with origin path `/dev` or `/demo`, retaining `/api/health`. It returns
-only `{"status":"ok"}`: no backend/AWS lookup or authentication diagnostic.
-API Gateway has no proxy/catch-all, POST/chat route, Lambda invocation permission
-or authorizer. Both request-validation flags are enabled; this no-input MOCK
+only `{"status":"ok"}` after origin verification. The REQUEST authorizer can read
+Secrets Manager; the health MOCK response exposes no authentication diagnostic.
+API Gateway has no proxy/catch-all or POST/chat route. Its Lambda invocation
+permission targets only this API's authorizer and source account. Both
+request-validation flags are enabled; this no-input MOCK
 does not define a body schema.
 
 The `/api/*` CloudFront behavior uses HTTPS to the origin, disabled caching, and
@@ -62,6 +68,15 @@ cookies, query strings and viewer headers without sending the viewer Host to API
 Gateway. It allows all API methods for later integration, but only the explicit
 GET health method exists now. Future Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
+
+Both frontend and legacy chat Regional APIs use
+`SecurityPolicy_TLS13_1_2_2021_06` with endpoint access mode `BASIC`, allowing TLS
+1.2/1.3. Their deployment hashes include both properties so stages redeploy on
+transport changes while REST API logical IDs stay stable. CloudFront's API origin
+uses HTTPS_ONLY and explicitly TLS 1.2. This enhanced policy avoids the unsupported
+legacy `TLS_1_0` -> `TLS_1_2` update. Propagation can take about fifteen minutes;
+STRICT mode needs separate traffic validation. See the
+[API security policy migration guidance](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-security-policies.html).
 
 The default S3 behavior allows GET/HEAD, redirects viewers to HTTPS and forwards
 no cookies. The private bucket blocks public access, uses SSE-S3, enforces TLS and
@@ -76,10 +91,56 @@ access-log destination is added. CloudFront's default certificate fixes its
 security policy at TLSv1; it does not enforce a TLS 1.2 minimum. No ineffective
 minimum-protocol setting or unapproved custom certificate is added. HTTPS origin
 traffic to the API separately requires TLS 1.2.
-Resource-specific cdk-nag acknowledgments record those omissions, health-only
-public authorization, no new WAF/geography restriction, Cognito MFA/paid Plus
+Resource-specific cdk-nag acknowledgments record those omissions, origin-only
+health authorization, demo's absent viewer WAF, Cognito MFA/paid Plus
 tier/composition choices and disabled table PITR; they are not public-release
 approval. API access/execution logging remains enabled.
+
+## Origin verification and dev viewer access
+
+Dev's CloudFront distribution disables viewer IPv6 and attaches its frontend
+WebACL ARN directly through `WebACLId`, without a WebACLAssociation resource.
+One allow rule checks the actual viewer IPv4 address, without forwarded-header
+trust. Demo keeps viewer IPv6 enabled and has no frontend WAF. The legacy chat
+Regional WAF, its address family and its configured address remain independent.
+
+The origin secret is generated during deployment as 64 alphanumeric characters,
+using the AWS-managed Secrets Manager key. Dev destroys it; demo retains it.
+Only the API origin injects `X-Soc-Bot-Origin`, using a CloudFormation dynamic
+reference. Synthesis and Lambda configuration contain its ARN/reference, never
+the value. It is absent from outputs, context and GitHub variables. CloudFront
+[overwrites a viewer-supplied value](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/add-origin-custom-headers.html).
+Authorized administrators can read the resolved header in distribution
+configuration, so restrict that configuration's read access. Someone who obtains
+the token can call the public API directly; this is origin verification, not
+user authentication or a network-private API.
+
+The [authorizer](../../infra/lambdas/frontend/origin-authorizer/handler.ts) uses
+Node.js 22, 128 MiB, a ten-second timeout and seven-day logs. Its APPLICATION role
+has only its exact secret's AWSCURRENT read and log-stream/event writes in its
+own group. The [shared guard](../../infra/lambdas/frontend/shared/origin-guard.ts)
+keeps one validated token in memory for at most 300 seconds, with at most two SDK
+attempts and a bounded request deadline. Expired-cache refresh failures deny
+access; stale values are never used as an outage fallback. Header names are
+case-insensitive; normal equivalent single/multivalue representations agree,
+while missing, malformed, repeated or conflicting values are rejected. Fixed
+64-byte buffers are compared with `timingSafeEqual`. No event/header/secret or SDK
+response is logged.
+
+API authorization caching is disabled (TTL zero). Only the configured
+account/Region/API/stage GET `/api/health` method can receive an Allow policy;
+the principal is `cloudfront-origin`, without a Cognito user identity. Invalid
+tokens receive a generic denial; configuration/secret failures fail closed
+without diagnostics. Future frontend routes must retain origin verification
+alongside their own authentication requirements.
+
+Rotation requires a deliberate coordinated update of Secrets Manager and the
+CloudFront origin configuration. A
+[secret-value change alone does not refresh a dynamic reference](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html).
+Allow for distribution propagation and the bounded cache; only AWSCURRENT is
+accepted, with no previous-secret fallback or promise of seamless rotation.
+No rotation resources, replicas, custom key, secret resource policy or new
+GitHub origin-secret setting is introduced.
 
 ## Logging, ownership and dependencies
 
@@ -105,7 +166,7 @@ policy dependency. Dependencies order resources; they cannot repair cycles. See
 
 ### Execution-policy changes
 
-No auth runtime identity or grant is introduced. Existing environment-specific
+No user-authentication runtime identity or grant is introduced. Existing environment-specific
 CloudFormation permissions cover S3, DynamoDB and API Gateway. The shared logging
 role gains the exact frontend access groups, and CloudFront's existing scoped
 lifecycle statement gains `ListTagsForResource`.
@@ -136,8 +197,25 @@ Cognito statements now reside in the existing `CFN_AI_APPLICATION` policy rather
 than `CFN_FRONTEND_API`. Both remain attached to the same execution role; this
 retains exactly five execution policies and does not grant runtime access.
 Existing CloudFront OAC `Resource:"*"` and tag-constrained creation exceptions are
-not broadened. Bedrock, runtime boundaries, evaluation-data separation and the
-working Data/AI definitions are unchanged.
+not broadened. Bedrock, evaluation-data separation and Data definitions are
+unchanged. The APPLICATION boundary now
+permits reading only its environment's origin-secret name with the generated
+six-character ARN suffix. QUERY/GLUE boundaries and other runtime identities
+receive no secret reads. AI changes only its API transport policy/deployment.
+
+The existing five execution-policy attachments are retained. New global WAF
+statements use headroom in CFN_DATA_ANALYTICS, and origin-secret lifecycle
+statements use CFN_OBSERVABILITY; role attachment count and resource scopes
+remain fixed. WAF permissions target only the two exact dev
+frontend names and require ownership tags for mutations; read checks do not
+require tags so deleted resources can be inspected. No global association or demo
+WAF permission is granted. Secret lifecycle access uses the exact environment
+name plus six generated suffix characters, with ownership request/resource
+conditions and protected-tag removal restrictions. GetRandomPassword alone
+needs `Resource:"*"`, constrained to the stack Region. CloudFormation can read
+the exact secret to resolve the origin reference; GitHub deployment identities
+do not receive secret-reading permission. Demo receives no DeleteSecret grant;
+its retained-secret rollback/recreation cleanup remains administrator work.
 
 ## Authentication state and source-only primitives
 
@@ -182,15 +260,32 @@ dependencies from deployment. Frontend still depends only on foundation; no
 artificial AI/Data dependency is added.
 
 Infrastructure deployment does not publish UI assets, invalidate CloudFront,
-activate auth handlers, protect the API origin or migrate chat. After a later
+activate user-authentication handlers or migrate chat. Origin protection is defined in frontend CDK, not implemented by publishing assets. After a later
 authorized dev deployment, use the output health URL (`/api/health`); the empty
 website root may fail until assets are published. CloudFront operations may take
 several minutes; existing 30-minute workflow timeouts are unchanged. A timeout
 does not prove CloudFormation has stopped; inspect live state separately before
 recovery. Dev deployment/destruction share `soc-bot-dev-data`, while demo uses
-`soc-bot-demo-data`, all without cancelling an in-progress run. Existing dev
-CIDR handling, including the `/128` suffix, remains unchanged; demo synthesis
-uses a documentation-only CIDR and selects only demo stacks for deployment.
+`soc-bot-demo-data`, all without cancelling an in-progress run. Dev now forwards both CIDRs unchanged; the operator must migrate the old raw
+chat IPv6 value to its equivalent `/128` and configure a separate public IPv4
+`/32` for frontend. Demo synthesis uses both documentation-only CIDRs and selects
+only demo stacks for deployment.
+
+Before enabling the updated dev workflow, migrate `DEV_ALLOWED_CLIENT_CIDR`
+from its raw IPv6 value to the identical address with `/128`, and set
+`DEV_FRONTEND_ALLOWED_CLIENT_CIDR` to the chosen public IPv4 address with `/32`.
+Both are complete CIDRs, forwarded without a forced suffix. They remain
+independent and neither is an origin-secret setting. Apply the foundation IAM
+update as an administrator before the application rollout; demo deployment is
+still deferred. Full-app local synthesis uses only reserved placeholders:
+
+```console
+npm run build
+npm run synth --workspace @soc-bot/infra -- --lookups=false -c devAllowedClientCidr=2001:db8::1/128 -c devFrontendAllowedClientCidr=203.0.113.1/32
+```
+
+Disable EC2 metadata discovery and omit live credentials for offline validation.
+These placeholders are for synthesis/PR checks, never personal deployment gates.
 
 The [manual dev destroy workflow](../../.github/workflows/destroy-dev.yml) runs
 only on `dev` in the `dev` Environment. It validates these exact confirmations

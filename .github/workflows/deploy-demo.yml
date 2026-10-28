@@ -61,7 +61,7 @@ jobs:
 
       - name: Synthesize infrastructure and run cdk-nag
         # Full-app synthesis needs dev context; --exclusively below prevents deploying its placeholder template.
-        run: npm run synth --workspace @soc-bot/infra -- -c devAllowedClientCidr=2001:db8::1/128
+        run: npm run synth --workspace @soc-bot/infra -- -c devAllowedClientCidr=2001:db8::1/128 -c devFrontendAllowedClientCidr=203.0.113.1/32
 
       - name: Assume demo deployment role through OIDC
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0

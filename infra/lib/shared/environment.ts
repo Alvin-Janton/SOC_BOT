@@ -26,3 +26,13 @@ export function frontendApiAccessLogGroupName(environment: DeploymentEnvironment
 export function frontendBucketName(environment: DeploymentEnvironment): string {
   return `soc-bot-${environment}-frontend-${Aws.ACCOUNT_ID}-${Aws.REGION}`;
 }
+
+/** Names the frontend-only origin token without exposing its generated value. */
+export function frontendOriginSecretName(environment: DeploymentEnvironment): string {
+  return `SOC-BOT-${environment.toUpperCase()}-FRONTEND-ORIGIN-TOKEN`;
+}
+
+/** Scopes foundation access to this exact secret name and Secrets Manager's six-character suffix. */
+export function frontendOriginSecretArn(environment: DeploymentEnvironment): string {
+  return `arn:${Aws.PARTITION}:secretsmanager:${Aws.REGION}:${Aws.ACCOUNT_ID}:secret:${frontendOriginSecretName(environment)}-??????`;
+}

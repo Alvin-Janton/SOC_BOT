@@ -7,9 +7,11 @@ import { AiStack } from '../lib/stacks/ai/ai-stack';
 import { DEFAULT_QUERY_WINDOW_DAYS, queryWindowDays } from '../lib/stacks/ai/query-contract';
 import { devClientCidr } from '../lib/stacks/ai/chat-api';
 import { FrontendStack } from '../lib/stacks/frontend/frontend-stack';
+import { devFrontendClientCidr } from '../lib/stacks/frontend/frontend-waf';
 
 const app = new App();
 const devAllowedClientCidr = devClientCidr(app.node.tryGetContext('devAllowedClientCidr')).cidr;
+const devFrontendAllowedClientCidr = devFrontendClientCidr(app.node.tryGetContext('devFrontendAllowedClientCidr'));
 
 const foundation = new CicdFoundationStack(app, 'CicdFoundationStack', {
   stackName: 'SOC-BOT-CICD-FOUNDATION',
@@ -49,6 +51,7 @@ for (const environment of ['dev', 'demo'] as const) {
   aiStack.addStackDependency(foundation);
   const frontendStack = new FrontendStack(app, `${environment}FrontendStack`, {
     deploymentEnvironment: environment, stackName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND`,
+    devFrontendAllowedClientCidr: environment === 'dev' ? devFrontendAllowedClientCidr : undefined,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
     synthesizer: new CliCredentialsStackSynthesizer(),
     description: `SOC Bot ${environment} private frontend, health API and inactive authentication foundation`,

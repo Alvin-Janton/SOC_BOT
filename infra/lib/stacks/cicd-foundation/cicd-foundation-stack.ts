@@ -31,6 +31,8 @@ import {
   deploymentStatements,
   environmentResources,
   frontendApiStatements,
+  frontendOriginSecretStatements,
+  frontendWafStatements,
   observabilityStatements,
   runtimeBoundaryStatements,
   RUNTIME_CLASSES,
@@ -154,9 +156,10 @@ export class CicdFoundationStack extends Stack {
     const dataPolicy = this.createManagedPolicy(
       `${title}DataAnalyticsPolicy`,
       `SOC_BOT_${upper}_CFN_DATA_ANALYTICS`,
-      dataAndAnalyticsStatements(resources),
+      // The new dev global WAF grants use existing policy headroom without another attachment.
+      [...dataAndAnalyticsStatements(resources), ...frontendWafStatements(resources)],
       this.iamWildcardFindings('data', environment),
-      'Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources.',
+      'Data resources are limited to the environment namespace; Lake Formation registration and grant APIs require account-scoped resources. New frontend WAF grants use this policy\'s headroom and target only the two exact dev global names with tagged mutations; demo receives none.',
     );
     const aiPolicy = this.createManagedPolicy(
       `${title}AiApplicationPolicy`,
@@ -175,9 +178,10 @@ export class CicdFoundationStack extends Stack {
     const observabilityPolicy = this.createManagedPolicy(
       `${title}ObservabilityPolicy`,
       `SOC_BOT_${upper}_CFN_OBSERVABILITY`,
-      observabilityStatements(resources),
+      // New frontend hardening grants use this policy's headroom; all five attachments stay unchanged.
+      [...observabilityStatements(resources), ...frontendOriginSecretStatements(resources)],
       this.iamWildcardFindings('observability', environment),
-      'Observability resources use environment-qualified names; DescribeLogGroups requires account-wide Resource "*".',
+      'Observability resources use environment-qualified names; DescribeLogGroups requires Resource "*". New origin-secret grants use this policy\'s headroom and the exact environment name plus six generated suffix characters. Only GetRandomPassword additionally requires "*", constrained to the stack Region; demo receives no secret deletion grant.',
     );
     const runtimeIamPolicy = this.createManagedPolicy(
       `${title}RuntimeIamPolicy`,
@@ -298,6 +302,7 @@ export class CicdFoundationStack extends Stack {
         resource(`arn:${partition}:lambda:${region}:${account}:function:SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-data-${account}-${region}/playbooks/*`),
         resource(`arn:${partition}:cognito-idp:${region}:${account}:userpool/*`),
+        resource(`arn:${partition}:secretsmanager:${region}:${account}:secret:SOC-BOT-${upper}-FRONTEND-ORIGIN-TOKEN-??????`),
         resource(`arn:${partition}:athena:${region}:${account}:workgroup/SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:glue:${region}:${account}:database/soc_bot_${environment}*`),
         resource(`arn:${partition}:glue:${region}:${account}:table/soc_bot_${environment}*/*`),
@@ -311,6 +316,10 @@ export class CicdFoundationStack extends Stack {
         'Action::s3:*',
       ],
       data: [
+        ...(environment === 'dev' ? [
+          resource(`arn:${partition}:wafv2:us-east-1:${account}:global/ipset/SOC-BOT-DEV-FRONTEND-CLIENTS/*`),
+          resource(`arn:${partition}:wafv2:us-east-1:${account}:global/webacl/SOC-BOT-DEV-FRONTEND-ALLOWLIST/*`),
+        ] : []),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-*`),
         resource(`arn:${partition}:s3:::soc-bot-${environment}-*/*`),
         resource(`arn:${partition}:glue:${region}:${account}:database/soc_bot_${environment}*`),
@@ -345,6 +354,7 @@ export class CicdFoundationStack extends Stack {
         'Resource::*',
       ],
       observability: [
+        resource(`arn:${partition}:secretsmanager:${region}:${account}:secret:SOC-BOT-${upper}-FRONTEND-ORIGIN-TOKEN-??????`),
         resource(`arn:${partition}:logs:${region}:${account}:log-group:*SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:logs:${region}:${account}:log-group:API-Gateway-Execution-Logs_*/${environment}`),
         resource(`arn:${partition}:logs:${region}:${account}:log-group:API-Gateway-Execution-Logs_*/${environment}:*`),
