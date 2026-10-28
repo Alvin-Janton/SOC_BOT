@@ -64,8 +64,8 @@ export function createOriginGuard(secretArn: string): (event: Record<string, unk
       }
 
       return timingSafeEqual(Buffer.from(header, 'ascii'), cache.value);
-    } 
-    
+    }
+
     catch {
       cache = undefined;
       return false;

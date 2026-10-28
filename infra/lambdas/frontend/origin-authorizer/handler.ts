@@ -58,8 +58,8 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
     return { principalId: 'cloudfront-origin', policyDocument: {
       Version: '2012-10-17', Statement: [{ Action: 'execute-api:Invoke', Effect: allowed ? 'Allow' : 'Deny', Resource: config.methodArn }],
     } };
-  } 
-  
+  }
+
   catch {
     // Never surface input, secret/configuration details, SDK responses or diagnostics.
     throw new Error('Unauthorized');
