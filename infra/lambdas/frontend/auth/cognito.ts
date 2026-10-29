@@ -39,10 +39,7 @@ export function parseLoginCredentials(value: unknown): LoginCredentials {
 
 /** Creates a deadline-bounded canonical account lookup and cryptographically verified password adapter. */
 export function createCognitoAuthenticator(config: BffAuthConfig, suppliedClient?: CognitoAuthClient, budget?: AuthRequestBudget): CognitoAuthenticator {
-  const client = suppliedClient ?? new CognitoIdentityProviderClient({
-    region: config.userPoolId.split('_')[0], maxAttempts: 2,
-    requestHandler: { connectionTimeout: 500, requestTimeout: 8_000 },
-  });
+  const client = suppliedClient ?? createCognitoClient(config);
 
   const fetcher = new SimpleFetcher();
 
@@ -117,4 +114,10 @@ export function createCognitoAuthenticator(config: BffAuthConfig, suppliedClient
       }
     },
   };
+}
+
+/** Shares the existing bounded provider-client settings across login and registration adapters. */
+export function createCognitoClient(config: BffAuthConfig): CognitoIdentityProviderClient {
+  return new CognitoIdentityProviderClient({ region: config.userPoolId.split('_')[0], maxAttempts: 2,
+    requestHandler: { connectionTimeout: 500, requestTimeout: 8_000 } });
 }

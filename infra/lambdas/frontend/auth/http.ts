@@ -1,6 +1,7 @@
 import { FRONTEND_ORIGIN_ROUTES } from '../shared/origin-routes';
 import { BffAuthConfig, parseBffAuthConfig } from './config';
-import { AuthRoute, EmailCredentials, parseEmailCredentials } from './contracts';
+import { ConfirmationResend, EmailCredentials, parseConfirmationResend, parseEmailCredentials,
+  parseSignupConfirmation, parseSignupCredentials, SignupConfirmation, SignupCredentials } from './contracts';
 import { BffAuthError } from './errors';
 
 export interface AuthHttpConfiguration {
@@ -11,12 +12,12 @@ export interface AuthHttpConfiguration {
   readonly browserOrigin: string;
 }
 
-export interface AuthHttpRequest {
-  readonly route: AuthRoute;
-  readonly credentials?: EmailCredentials;
-  readonly cookieHeader?: string;
-  readonly invalidCookie: boolean;
-}
+export type AuthHttpRequest =
+  | { readonly route: 'login'; readonly credentials: EmailCredentials }
+  | { readonly route: 'signup'; readonly input: SignupCredentials }
+  | { readonly route: 'confirm-signup'; readonly input: SignupConfirmation }
+  | { readonly route: 'resend-confirmation'; readonly input: ConfirmationResend }
+  | { readonly route: 'me' | 'logout'; readonly cookieHeader?: string; readonly invalidCookie: boolean };
 
 export interface AuthHttpResponse {
   readonly statusCode: number;
@@ -166,11 +167,18 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
     catch { throw new BffAuthError('invalid_input'); }
   }
 
-  if (selected.route === 'login') return { route: 'login', credentials: parseEmailCredentials(value), invalidCookie: false };
-
-  if (selected.route === 'logout') {
-    const body = object(value);
-    if (!body || Object.keys(body).length) throw new BffAuthError('invalid_input');
+  switch (selected.route) {
+    case 'login': return { route: 'login', credentials: parseEmailCredentials(value) };
+    case 'signup': return { route: 'signup', input: parseSignupCredentials(value) };
+    case 'confirm-signup': return { route: 'confirm-signup', input: parseSignupConfirmation(value) };
+    case 'resend-confirmation': return { route: 'resend-confirmation', input: parseConfirmationResend(value) };
+    case 'logout': {
+      const body = object(value);
+      if (!body || Object.keys(body).length) throw new BffAuthError('invalid_input');
+      break;
+    }
+    case 'me': break;
+    default: throw new BffAuthError('invalid_input');
   }
   try { return { route: selected.route, cookieHeader: header(event, 'Cookie'), invalidCookie: false }; }
   catch { return { route: selected.route, invalidCookie: true }; }

@@ -2,16 +2,17 @@
 
 ## Implemented scope
 
-The stack defines infrastructure and three email/password session routes.
-Frontend UI, signup/recovery and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
+The stack defines infrastructure and six email/password authentication routes.
+Frontend UI, password recovery and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
 resources. Account/Region values are CDK tokens, not committed account IDs.
 
-No frontend UI/assets, signup/recovery route, Google provider/domain/credentials,
+No frontend UI/assets, password-recovery route, Google provider/domain/credentials,
 identity pool, live user, account-linking flow, chat integration, DNS or custom
-certificate is created. One frontend-owned Lambda implements login, me and logout. Frontend owns a generated
+certificate is created. One frontend-owned Lambda implements login, me, logout,
+signup, code confirmation and resend. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
 CloudFront IPv4 WAF. The existing dev
 WAF-gated `/chat` remains the only working chat endpoint. Demo release stays
@@ -27,7 +28,7 @@ exposes the new authentication construct:
 | --- | --- |
 | [AuthStorage](../../infra/lib/stacks/frontend/auth-storage.ts) | `SOC-BOT-<ENV>-AUTH-SESSIONS`, string `PK` only; no sort key, GSI or stream; on-demand billing, AWS-managed DynamoDB encryption, TTL `expires_at`. |
 | [FrontendIdentity](../../infra/lib/stacks/frontend/frontend-identity.ts) | `SOC-BOT-<ENV>-USERS` user pool and `SOC-BOT-<ENV>-WEB` no-secret app client. |
-| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK plus three exact origin-protected auth routes. |
+| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK plus six exact origin-protected auth routes. |
 | [FrontendHosting](../../infra/lib/stacks/frontend/frontend-hosting.ts) | Private `soc-bot-<environment>-frontend-<account>-<region>` bucket, named OAC and CloudFront distribution with its generated hostname. |
 | [FrontendWaf](../../infra/lib/stacks/frontend/frontend-waf.ts) | Dev-only `SOC-BOT-DEV-FRONTEND-CLIENTS` and `SOC-BOT-DEV-FRONTEND-ALLOWLIST`, CLOUDFRONT scope in `us-east-1`; one IPv4 `/32`, default BLOCK, metrics enabled and sampling disabled. |
 | [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads only its exact secret and writes its own logs. |
@@ -60,7 +61,7 @@ hostname with origin path `/dev` or `/demo`, retaining `/api/health`. It returns
 only `{"status":"ok"}` after origin verification. The REQUEST authorizer can read
 Secrets Manager; the health MOCK response exposes no authentication diagnostic.
 API Gateway has no proxy/catch-all or chat route. Invocation permissions
-target only this API/source account: its authorizer and three exact
+target only this API/source account: its authorizer and six exact
 stage/method auth integrations. Both
 request-validation flags are enabled; this no-input MOCK
 does not define a body schema.
@@ -69,7 +70,7 @@ The `/api/*` CloudFront behavior uses HTTPS to the origin, disabled caching, and
 the AWS-managed `ALL_VIEWER_EXCEPT_HOST_HEADER` origin-request policy to forward
 cookies, query strings and viewer headers without sending the viewer Host to API
 Gateway. It allows all API methods for later integration, but only the explicit
-health/login/me/logout routes exist now. Set-Cookie responses are not cached. Unknown
+health and six documented auth routes exist now. Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
 
 Both frontend and legacy chat Regional APIs use
@@ -130,8 +131,8 @@ while missing, malformed, repeated or conflicting values are rejected. Fixed
 64-byte buffers are compared with `timingSafeEqual`. No event/header/secret or SDK
 response is logged.
 
-API authorization caching is disabled (TTL zero). Only the configured
-account/Region/API/stage health/login/me/logout allowlist can receive an Allow policy
+API authorization caching is disabled (TTL zero). Only health and the six auth
+routes on the configured account/Region/API/stage can receive an Allow policy
 for the single incoming method;
 the principal is `cloudfront-origin`, without a Cognito user identity. Invalid
 tokens receive a generic denial; configuration/secret failures fail closed
@@ -262,6 +263,9 @@ bodies, credentials, cookies, tokens, auth records and provider diagnostics.
 | POST `/api/auth/login` | JSON with only email/password; email is trimmed/lowercased, password is unchanged. Requires exact browser Origin. | 200 with only userId/expiresAt and a fresh opaque Set-Cookie after confirmed persistence. |
 | GET `/api/auth/me` | No body/query; cookie-only session input. Origin may be absent; explicit bad Origin/cross-site Fetch Metadata is rejected. | 200 with the same userId/UTC expiry, or 401 for absent/invalid/revoked sessions; no Cognito call, initialization or renewal. |
 | POST `/api/auth/logout` | JSON content type with empty body or `{}`, exact browser Origin, no query. | 204/empty body and clearing cookie after deletion, or idempotently for missing/malformed cookies. |
+| POST `/api/auth/signup` | Only email/password; normalized email max 128, unchanged password 15-256 without whitespace. | 202 fixed generic guidance, also for duplicate signup; no automatic resend or credential replacement. |
+| POST `/api/auth/confirm-signup` | Only email/code; unchanged non-whitespace string code, 1-2048 characters with leading zeroes preserved. | 200 only after provider confirmation; separate login is required. |
+| POST `/api/auth/resend-confirmation` | Only email; the same normalization. | The same 202 body as signup for success, absent and known ineligible accounts. |
 
 The handler validates REST API/account/stage and authorizer context, exact
 method/resource, unambiguous headers and at most 8 KiB decoded UTF-8 JSON (strict
@@ -274,7 +278,7 @@ bad origin/unconfirmed account, 429 throttling and 503 backend/configuration
 unavailability. Distinct account-confirmation/challenge errors intentionally
 reveal limited account state. No provider diagnostics or Cognito tokens appear.
 
-POST login/logout require the exact HTTPS distribution Origin, and cross-site
+All five POST routes require the exact HTTPS distribution Origin, and cross-site
 Fetch Metadata is rejected when present. There is no permissive CORS or Referer
 fallback. Origin-secret verification is a separate check and cannot prevent
 login CSRF alone. API responses remain uncached, with supported CloudFront error
@@ -296,6 +300,47 @@ Logs contain only request ID, fixed route/outcome and duration; no user identity
 email, body, cookies, hashes, tokens or raw provider errors. See the
 [auth source/HTTP guide](../../infra/lambdas/frontend/auth/README.md) for module
 entry points, item shapes, ordering, errors and account-management limitations.
+
+### Registration behavior and delivery limits
+
+Signup and resend share exactly this HTTP 202 body, without Set-Cookie:
+
+```json
+{"message":"If account confirmation is needed, check your email for a confirmation code. You can request another code if needed."}
+```
+
+Duplicate signup is accepted generically without sending another code or changing
+credentials. Resend also accepts nonexistent and known ineligible accounts
+generically. An ambiguous invalid-parameter/not-authorized resend error permits
+one bounded exact-pool AdminGetUser lookup: absent/ineligible remains 202, enabled
+UNCONFIRMED remains an operational error, and lookup failures remain safe errors.
+Provider error messages are never parsed. A 202 proves neither creation nor
+delivery and is not a promise of constant-time or complete enumeration resistance;
+login's existing limited account-state disclosure is unchanged. Cognito's public
+APIs are separately callable with the public app-client ID.
+
+Successful confirmation returns 200 with only
+`{"message":"Account confirmed. Sign in to continue."}`. Wrong/expired codes,
+nonexistent users, alias conflicts and known nonconfirmable accounts share 400
+CONFIRMATION_FAILED: "The code could not be confirmed. Check it or request another
+code. If already confirmed, sign in." Unexpected provider/configuration failures
+remain 503; throttles and applicable quotas remain 429. Signup password errors
+give safe length/whitespace guidance. Signup quota/delivery failures may leave an
+unconfirmed account: wait and use resend, never delete/recreate or reset it.
+A confirmation retry after a lost success response may fail generically; login
+is the recovery path. Bounded SDK retries are not exactly-once guarantees.
+
+Cognito owns codes and email delivery, with a
+[currently 24-hour verification-code lifetime](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-email-phone-verification.html).
+There is no local code store/timer, auto-confirmation, alias migration or auto-login.
+Registration neither reads nor writes DynamoDB or modifies an existing cookie.
+Only a subsequent explicit login initializes USER metadata and creates a session.
+No pool/client setting, runtime grant or foundation boundary changes in this
+slice: these three public Cognito APIs do not use IAM; the existing AdminGetUser
+permission covers the narrow resend fallback. Default dev email capacity remains
+limited. Comprehensive signup/email-abuse controls and production delivery review
+are prerequisites for public demo, beyond best-effort API throttles/UI cooldowns.
+See the [registration adapter guide](../../infra/lambdas/frontend/auth/README.md#registration-confirmation-and-recovery).
 
 ## Deployment, teardown and deferred activation
 
@@ -369,8 +414,8 @@ credentials or actual session records. This slice's lint/build/existing-test and
 offline synthesis results do not establish live AWS, email, cookie/browser or
 authentication correctness.
 
-Later product slices must add custom email/password UI, signup/confirmation and
-recovery, Google login/linking with fresh proof of both methods, comprehensive
+Later product slices must add custom email/password UI, password recovery,
+Google login/linking with fresh proof of both methods, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
 sessions but do not change the orchestrator's temporary identity. MFA, recovery
@@ -442,3 +487,60 @@ controls and chat ownership/Stop integration remain deferred. `/api/auth/me`
 establishes only frontend session identity; it does not change the orchestrator's
 temporary owner. Existing workflows deploy these resources without a new variable
 or origin-secret setting; public demo still requires the remaining security work.
+
+## Later manual registration validation
+
+Only an operator should run this after separate deployment approval. Use a fresh
+self-service account and a real deliverable email; the existing administrator-created
+permanent-password account cannot exercise signup confirmation. These are manual
+requests through CloudFront, with the matching Origin and no private origin header.
+Keep credentials/codes in memory, not command-line literals, files or logs. Do not
+print request bodies, headers, provider responses or cookie jars, or enable verbose
+request logging. Registration sends no Set-Cookie and requires no prior session.
+
+```powershell
+$browserOrigin = 'https://<distribution-hostname>'
+$credential = Get-Credential -Message 'Fresh self-service email; new password (15-256, no whitespace)'
+$email = $credential.UserName
+$signupBody = @{
+  email = $email
+  password = $credential.GetNetworkCredential().Password
+} | ConvertTo-Json -Compress
+
+try {
+  $signup = Invoke-WebRequest -Uri "$browserOrigin/api/auth/signup" -Method Post `
+    -Headers @{ Origin = $browserOrigin } -ContentType 'application/json; charset=utf-8' `
+    -Body $signupBody -MaximumRedirection 0
+  $signup.Content
+
+  # Optional later request, only when another code is needed:
+  # $resendBody = @{ email = $email } | ConvertTo-Json -Compress
+  # $resend = Invoke-WebRequest -Uri "$browserOrigin/api/auth/resend-confirmation" -Method Post `
+  #   -Headers @{ Origin = $browserOrigin } -ContentType 'application/json; charset=utf-8' `
+  #   -Body $resendBody -MaximumRedirection 0
+  # $resend.Content
+
+  $secureCode = Read-Host -Prompt 'Email confirmation code' -AsSecureString
+  $codeText = [System.Net.NetworkCredential]::new('', $secureCode).Password
+  $confirmBody = @{ email = $email; code = $codeText } | ConvertTo-Json -Compress
+  $confirmed = Invoke-WebRequest -Uri "$browserOrigin/api/auth/confirm-signup" -Method Post `
+    -Headers @{ Origin = $browserOrigin } -ContentType 'application/json; charset=utf-8' `
+    -Body $confirmBody -MaximumRedirection 0
+  $confirmed.Content
+} finally {
+  Remove-Variable credential, email, signupBody, signup, resendBody, resend, secureCode, codeText, confirmBody, confirmed -ErrorAction SilentlyContinue
+}
+```
+
+Then perform the separate [login/me/logout procedure](#later-manual-auth-validation).
+Operator checks should cover signup, denied login before confirmation, resend,
+wrong/expired-code errors, valid confirmation, and subsequent login/me/logout.
+Duplicate signup and nonexistent/confirmed-account resend must have the same generic
+202 body. Also confirm that registration leaves an already signed-in browser's
+cookie unchanged, including on errors. Do not infer these outcomes from local
+checks or from 202 alone. Signup delivery/quota errors may already have created an
+unconfirmed account; wait and use resend rather than deleting/recreating it.
+After a lost confirmation success response, login is the recovery path; a repeated
+confirmation need not return success. Cognito controls expiry and delivery, not
+local timers. Public-demo email/abuse review, password recovery/change, Google/linking,
+UI and authenticated chat ownership remain separate work.

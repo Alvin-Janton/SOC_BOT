@@ -24,7 +24,7 @@ export interface FrontendAuthProps {
   readonly browserOrigin: string;
 }
 
-/** Owns the three explicit session routes and one exact-pool/table Lambda, without chat integration. */
+/** Owns six explicit authentication routes and one exact-pool/table Lambda, without chat integration. */
 export class FrontendAuth extends Construct {
   public readonly function: NodejsFunction;
   public readonly role: Role;
@@ -81,8 +81,11 @@ export class FrontendAuth extends Construct {
       if (permissions.length !== 1) throw new Error('Expected one invocation permission per auth method.');
       permissions[0].sourceAccount = Aws.ACCOUNT_ID;
       permissions[0].sourceArn = props.api.arnForExecuteApi(route.method, route.resource, props.environment);
+      const registration = ['signup', 'confirm-signup', 'resend-confirmation'].includes(route.route);
       Validations.of(method.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
-        reason: 'This exact route uses origin verification plus BFF password/session validation instead of a native Cognito JWT authorizer. Opaque cookies are resolved by the auth Lambda; login requires no prior session. Public-demo abuse controls remain deferred.',
+        reason: registration
+          ? 'This registration method requires CloudFront origin verification and browser Origin validation, without a prior session. Cognito owns account/code verification; explicit login is separate. Public-demo signup/email abuse controls remain deferred.'
+          : 'This exact route uses origin verification plus BFF password/session validation instead of a native Cognito JWT authorizer. Opaque cookies are resolved by the auth Lambda; login requires no prior session. Public-demo abuse controls remain deferred.',
       });
     }
     Validations.of(this.function.node.defaultChild!).acknowledge({ id: 'AwsSolutions-L1',
