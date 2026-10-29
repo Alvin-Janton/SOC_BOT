@@ -4,4 +4,7 @@ export const FRONTEND_ORIGIN_ROUTES = [
   { route: 'login', method: 'POST', resource: '/api/auth/login' },
   { route: 'me', method: 'GET', resource: '/api/auth/me' },
   { route: 'logout', method: 'POST', resource: '/api/auth/logout' },
+  { route: 'signup', method: 'POST', resource: '/api/auth/signup' },
+  { route: 'confirm-signup', method: 'POST', resource: '/api/auth/confirm-signup' },
+  { route: 'resend-confirmation', method: 'POST', resource: '/api/auth/resend-confirmation' },
 ] as const;

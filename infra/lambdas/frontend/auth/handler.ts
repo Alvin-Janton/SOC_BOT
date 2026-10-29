@@ -5,13 +5,14 @@ import { clearSessionCookie } from './cookies';
 import { BffAuthError } from './errors';
 import { authHttpConfiguration, authHttpResponse, AuthHttpRequest, AuthHttpResponse, parseAuthHttpRequest } from './http';
 import { AuthSession } from './sessions';
+import { createCognitoRegistration, REGISTRATION_ACCEPTED_RESPONSE, SIGNUP_CONFIRMED_RESPONSE } from './registration';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
   return { userId: session.sub, expiresAt: new Date(session.expiresAt * 1_000).toISOString() };
 }
 
-/** Serves the three origin-protected authentication routes under one bounded request budget. */
+/** Explicitly dispatches six origin-protected auth routes under one bounded request budget. */
 export async function handler(raw: unknown, context: { awsRequestId: string; getRemainingTimeInMillis(): number }): Promise<AuthHttpResponse> {
   const startedAt = Date.now();
 
@@ -25,24 +26,40 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     const budget = createAuthRequestBudget(context.getRemainingTimeInMillis());
     const config = authHttpConfiguration();
     request = parseAuthHttpRequest(raw, config);
-    const auth = createBffAuth(config.auth, { budget });
-
-    if (request.route === 'login') {
-      const result = await auth.loginWithEmail(request.credentials);
-      outcome = 'LOGIN_SUCCEEDED';
-      return authHttpResponse(200, publicSession(result.session), result.setCookie);
+    switch (request.route) {
+      case 'signup': {
+        await createCognitoRegistration(config.auth, undefined, budget).signup(request.input);
+        outcome = 'SIGNUP_ACCEPTED';
+        return authHttpResponse(202, REGISTRATION_ACCEPTED_RESPONSE);
+      }
+      case 'confirm-signup': {
+        await createCognitoRegistration(config.auth, undefined, budget).confirm(request.input);
+        outcome = 'SIGNUP_CONFIRMED';
+        return authHttpResponse(200, SIGNUP_CONFIRMED_RESPONSE);
+      }
+      case 'resend-confirmation': {
+        await createCognitoRegistration(config.auth, undefined, budget).resend(request.input);
+        outcome = 'CONFIRMATION_RESEND_ACCEPTED';
+        return authHttpResponse(202, REGISTRATION_ACCEPTED_RESPONSE);
+      }
+      case 'login': {
+        const result = await createBffAuth(config.auth, { budget }).loginWithEmail(request.credentials);
+        outcome = 'LOGIN_SUCCEEDED';
+        return authHttpResponse(200, publicSession(result.session), result.setCookie);
+      }
+      case 'me': {
+        if (request.invalidCookie) throw new BffAuthError('authentication_required');
+        const session = await createBffAuth(config.auth, { budget }).requireSession(request.cookieHeader);
+        outcome = 'SESSION_VALID';
+        return authHttpResponse(200, publicSession(session));
+      }
+      case 'logout': {
+        const result = await createBffAuth(config.auth, { budget }).logout(request.invalidCookie ? undefined : request.cookieHeader);
+        outcome = 'LOGOUT_SUCCEEDED';
+        return authHttpResponse(204, undefined, result.setCookie);
+      }
+      default: throw new BffAuthError('invalid_input');
     }
-
-    if (request.route === 'me') {
-      if (request.invalidCookie) throw new BffAuthError('authentication_required');
-      const session = await auth.requireSession(request.cookieHeader);
-      outcome = 'SESSION_VALID';
-      return authHttpResponse(200, publicSession(session));
-    }
-
-    const result = await auth.logout(request.invalidCookie ? undefined : request.cookieHeader);
-    outcome = 'LOGOUT_SUCCEEDED';
-    return authHttpResponse(204, undefined, result.setCookie);
   }
 
   catch (error) {

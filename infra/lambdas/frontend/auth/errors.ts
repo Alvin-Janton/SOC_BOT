@@ -1,6 +1,7 @@
 export type BffAuthErrorCode = 'invalid_configuration' | 'authentication_failed' | 'authentication_required' | 'session_unavailable'
   | 'invalid_input' | 'body_too_large' | 'unsupported_media_type' | 'invalid_origin' | 'account_not_confirmed'
-  | 'authentication_challenge' | 'throttled';
+  | 'authentication_challenge' | 'throttled' | 'invalid_signup_password' | 'confirmation_failed'
+  | 'registration_unavailable' | 'registration_throttled';
 
 const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: number }> = {
   invalid_configuration: { message: 'Authentication is not configured.', statusCode: 503 },
@@ -14,6 +15,10 @@ const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: numbe
   account_not_confirmed: { message: 'Account confirmation is required.', statusCode: 403 },
   authentication_challenge: { message: 'Additional authentication is not supported by this endpoint.', statusCode: 401 },
   throttled: { message: 'Too many authentication requests. Try again later.', statusCode: 429 },
+  invalid_signup_password: { message: 'Use a password of 15 to 256 characters without whitespace.', statusCode: 400 },
+  confirmation_failed: { message: 'The code could not be confirmed. Check it or request another code. If already confirmed, sign in.', statusCode: 400 },
+  registration_unavailable: { message: 'Account confirmation is temporarily unavailable. Wait, then request another code if needed.', statusCode: 503 },
+  registration_throttled: { message: 'Confirmation requests are temporarily limited. Wait, then request another code if needed.', statusCode: 429 },
 };
 
 /** Carries only safe public authentication details, without service errors or tokens. */
