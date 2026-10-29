@@ -95,8 +95,8 @@ export function createCognitoAuthenticator(config: BffAuthConfig, suppliedClient
           AuthFlow: 'USER_PASSWORD_AUTH',
           ClientId: config.clientId,
           AuthParameters: { USERNAME: credentials.username, PASSWORD: credentials.password },
-        }), 
-        
+        }),
+
         authRequestOptions(budget));
 
         if (result.ChallengeName || result.Session) throw new BffAuthError('authentication_challenge');
@@ -105,8 +105,8 @@ export function createCognitoAuthenticator(config: BffAuthConfig, suppliedClient
         const identity = identitySchema.safeParse({ sub: token.sub, tokenExpiresAt: token.exp });
         if (!identity.success) throw new BffAuthError('authentication_failed');
         return identity.data;
-      } 
-      
+      }
+
       catch (error) {
         if ([CognitoJwtInvalidClientIdError, CognitoJwtInvalidTokenUseError, JwtExpiredError,
           JwtInvalidAudienceError, JwtInvalidIssuerError, JwtInvalidSignatureAlgorithmError, JwtInvalidSignatureError,

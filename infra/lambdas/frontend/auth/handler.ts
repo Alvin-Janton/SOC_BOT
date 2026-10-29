@@ -43,8 +43,8 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     const result = await auth.logout(request.invalidCookie ? undefined : request.cookieHeader);
     outcome = 'LOGOUT_SUCCEEDED';
     return authHttpResponse(204, undefined, result.setCookie);
-  } 
-  
+  }
+
   catch (error) {
     const safe = error instanceof BffAuthError ? error : new BffAuthError('session_unavailable');
     outcome = safe.code.toUpperCase();

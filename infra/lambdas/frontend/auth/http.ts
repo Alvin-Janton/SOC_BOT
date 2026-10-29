@@ -115,8 +115,8 @@ function decodedBody(event: Record<string, unknown>): string {
     if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(raw)) throw new BffAuthError('invalid_input');
     bytes = Buffer.from(raw, 'base64');
     if (bytes.toString('base64') !== raw) throw new BffAuthError('invalid_input');
-  } 
-  
+  }
+
   else {
     if (Buffer.byteLength(raw, 'utf8') > 8_192) throw new BffAuthError('body_too_large');
     bytes = Buffer.from(raw, 'utf8');
@@ -159,7 +159,7 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
 
   if (selected.route === 'me') {
     if (text !== '') throw new BffAuthError('invalid_input');
-  } 
+  }
 
   else {
     try { value = selected.route === 'logout' && text === '' ? {} : JSON.parse(text); }
@@ -167,7 +167,7 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
   }
 
   if (selected.route === 'login') return { route: 'login', credentials: parseEmailCredentials(value), invalidCookie: false };
-  
+
   if (selected.route === 'logout') {
     const body = object(value);
     if (!body || Object.keys(body).length) throw new BffAuthError('invalid_input');
