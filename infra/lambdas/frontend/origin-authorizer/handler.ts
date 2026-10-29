@@ -1,4 +1,5 @@
 import { createOriginGuard, record } from '../shared/origin-guard';
+import { FRONTEND_ORIGIN_ROUTES } from '../shared/origin-routes';
 
 interface OriginConfiguration {
   readonly secretArn: string;
@@ -44,9 +45,11 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
     const config = configuration();
     const event = record(raw);
     const requestContext = record(event?.requestContext);
+    const route = FRONTEND_ORIGIN_ROUTES.find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
+    const apiArn = config.methodArn.slice(0, config.methodArn.indexOf('/'));
+    const methodArn = route ? `${apiArn}/${config.stage}/${route.method}${route.resource}` : undefined;
 
-    if (!event || event.type !== 'REQUEST' || event.methodArn !== config.methodArn || event.httpMethod !== 'GET'
-      || event.resource !== '/api/health' || requestContext?.apiId !== config.apiId
+    if (!event || !methodArn || event.type !== 'REQUEST' || event.methodArn !== methodArn || requestContext?.apiId !== config.apiId
       || requestContext.stage !== config.stage || requestContext.accountId !== config.account) throw new Error('Unauthorized');
 
     if (!guard || guardedSecretArn !== config.secretArn) {
@@ -56,7 +59,7 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
 
     const allowed = await guard(event, context.getRemainingTimeInMillis());
     return { principalId: 'cloudfront-origin', policyDocument: {
-      Version: '2012-10-17', Statement: [{ Action: 'execute-api:Invoke', Effect: allowed ? 'Allow' : 'Deny', Resource: config.methodArn }],
+      Version: '2012-10-17', Statement: [{ Action: 'execute-api:Invoke', Effect: allowed ? 'Allow' : 'Deny', Resource: methodArn }],
     } };
   }
 

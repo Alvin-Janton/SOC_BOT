@@ -1,4 +1,4 @@
-import { Aws, RemovalPolicy, Validations } from 'aws-cdk-lib';
+import { Aws, Duration, RemovalPolicy, Validations } from 'aws-cdk-lib';
 import { RestApi } from 'aws-cdk-lib/aws-apigateway';
 import { AllowedMethods, CachedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy,
   OriginSslPolicy, PriceClass, S3OriginAccessControl, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
@@ -36,6 +36,9 @@ export class FrontendHosting extends Construct {
       // The generated hostname uses CloudFront's fixed default-certificate security policy.
       priceClass: PriceClass.PRICE_CLASS_100,
       enableIpv6: environment !== 'dev', webAclId: props.webAclArn,
+      // These supported CloudFront error statuses must not impose a cache floor on no-store API responses.
+      errorResponses: [400, 403, 404, 405, 414, 500, 501, 502, 503, 504]
+        .map(httpStatus => ({ httpStatus, ttl: Duration.seconds(0) })),
       defaultBehavior: {
         origin: S3BucketOrigin.withOriginAccessControl(this.bucket, { originAccessControl: oac }),
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -59,13 +62,13 @@ export class FrontendHosting extends Construct {
     Validations.of(this.bucket.node.defaultChild!).acknowledge({ id: 'AwsSolutions-S1',
       reason: 'Access-log storage/retention is deferred in this initial private frontend bucket; no application assets or user data are published by this slice.' });
     for (const [rule, reason] of [
-      ['CFR1', 'No geography-based access assumption is approved; this distribution exposes static content and generic health only.'],
+      ['CFR1', 'No geography-based access assumption is approved; dev uses an explicit IPv4 viewer gate and auth routes independently enforce origin/session checks.'],
       ['CFR3', 'CloudFront access logging is intentionally deferred pending storage/retention and privacy review; API metadata-only logs are enabled.'],
-      ['CFR4', 'The generated hostname uses CloudFront\'s default certificate with its fixed TLSv1 security policy, not an enforced TLS 1.2 minimum. A custom domain/certificate is deferred and no auth/chat route is connected.'],
+      ['CFR4', 'The approved generated hostname retains CloudFront\'s default certificate and fixed TLSv1 viewer policy; TLS 1.2 minimum at the viewer requires a later custom domain/certificate. API-origin TLS 1.2, origin verification and secure-cookie session checks are configured; chat cutover remains deferred.'],
     ]) Validations.of(this.distribution.node.defaultChild!).acknowledge({ id: `AwsSolutions-${rule}`, reason });
     if (environment === 'demo') Validations.of(this.distribution.node.defaultChild!).acknowledge({
       id: 'AwsSolutions-CFR2',
-      reason: 'Demo intentionally has no viewer WAF. Origin verification protects only frontend health; demo rollout and user authentication/abuse controls remain deferred.',
+      reason: 'Demo intentionally has no viewer WAF. Frontend health/auth routes enforce origin verification and BFF session checks; public-demo rollout, abuse controls and chat identity cutover remain deferred.',
     });
   }
 }

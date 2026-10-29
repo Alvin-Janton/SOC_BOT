@@ -7,18 +7,20 @@ import { FrontendHosting } from './frontend-hosting';
 import { FrontendIdentity } from './frontend-identity';
 import { FrontendOriginAccess } from './frontend-origin-access';
 import { devFrontendClientCidr, FrontendWaf } from './frontend-waf';
+import { FrontendAuth } from './frontend-auth';
 
 export interface FrontendStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
   readonly devFrontendAllowedClientCidr?: string;
 }
 
-/** Owns independent frontend/auth resources; no AI reference, auth handler, assets or user is provisioned. */
+/** Owns frontend hosting and session routes without creating users, assets or an AI identity integration. */
 export class FrontendStack extends Stack {
   public readonly authStorage: AuthStorage;
   public readonly identity: FrontendIdentity;
   public readonly api: FrontendApi;
   public readonly hosting: FrontendHosting;
+  public readonly auth: FrontendAuth;
 
   public constructor(scope: Construct, id: string, props: FrontendStackProps) {
     super(scope, id, props);
@@ -31,6 +33,13 @@ export class FrontendStack extends Stack {
     this.api = new FrontendApi(this, 'FrontendApi', environment, originAccess);
     this.hosting = new FrontendHosting(this, 'Hosting', {
       environment, api: this.api.api, originAccess, webAclArn: waf?.webAcl.attrArn,
+    });
+    // Hosting references only the API ID, so the integration can safely reference its generated hostname.
+    this.auth = new FrontendAuth(this, 'Auth', {
+      environment, api: this.api.api, authorizer: this.api.originAuthorizer,
+      requestValidator: this.api.requestValidator,
+      userPool: this.identity.userPool, client: this.identity.client, table: this.authStorage.table,
+      browserOrigin: `https://${this.hosting.distribution.distributionDomainName}`,
     });
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', environment);

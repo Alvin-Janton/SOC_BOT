@@ -2,16 +2,16 @@
 
 ## Implemented scope
 
-This slice defines infrastructure and inactive authentication primitives, not a
-finished login system. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
+The stack defines infrastructure and three email/password session routes.
+Frontend UI, signup/recovery and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
 resources. Account/Region values are CDK tokens, not committed account IDs.
 
-No frontend UI/assets, user-authentication handler, signup/login/recovery route, Google
-provider/domain/credentials, identity pool, user, account-linking flow, chat
-integration, DNS or custom certificate is created. Frontend owns a generated
+No frontend UI/assets, signup/recovery route, Google provider/domain/credentials,
+identity pool, live user, account-linking flow, chat integration, DNS or custom
+certificate is created. One frontend-owned Lambda implements login, me and logout. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
 CloudFront IPv4 WAF. The existing dev
 WAF-gated `/chat` remains the only working chat endpoint. Demo release stays
@@ -20,16 +20,18 @@ deferred until authentication and abuse controls are complete.
 ## Constructs and resources
 
 [FrontendStack](../../infra/lib/stacks/frontend/frontend-stack.ts) organizes the
-following focused constructs; the original four public properties remain:
+following focused constructs; the original public properties remain and `auth`
+exposes the new authentication construct:
 
 | Construct | Resource contract |
 | --- | --- |
 | [AuthStorage](../../infra/lib/stacks/frontend/auth-storage.ts) | `SOC-BOT-<ENV>-AUTH-SESSIONS`, string `PK` only; no sort key, GSI or stream; on-demand billing, AWS-managed DynamoDB encryption, TTL `expires_at`. |
 | [FrontendIdentity](../../infra/lib/stacks/frontend/frontend-identity.ts) | `SOC-BOT-<ENV>-USERS` user pool and `SOC-BOT-<ENV>-WEB` no-secret app client. |
-| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, only `GET /api/health` using MOCK. |
+| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK plus three exact origin-protected auth routes. |
 | [FrontendHosting](../../infra/lib/stacks/frontend/frontend-hosting.ts) | Private `soc-bot-<environment>-frontend-<account>-<region>` bucket, named OAC and CloudFront distribution with its generated hostname. |
 | [FrontendWaf](../../infra/lib/stacks/frontend/frontend-waf.ts) | Dev-only `SOC-BOT-DEV-FRONTEND-CLIENTS` and `SOC-BOT-DEV-FRONTEND-ALLOWLIST`, CLOUDFRONT scope in `us-east-1`; one IPv4 `/32`, default BLOCK, metrics enabled and sampling disabled. |
 | [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads only its exact secret and writes its own logs. |
+| [FrontendAuth](../../infra/lib/stacks/frontend/frontend-auth.ts) | `SOC-BOT-<ENV>-FRONTEND-AUTH`, Node.js 22, 256 MiB, 25 seconds, seven-day logs and an exact-pool/table APPLICATION role; wired after hosting. |
 
 Cognito permits self-service signup and case-insensitive email sign-in, requires
 email, automatically verifies it using a code, and uses email-only recovery. No
@@ -57,8 +59,9 @@ revocation semantics.
 hostname with origin path `/dev` or `/demo`, retaining `/api/health`. It returns
 only `{"status":"ok"}` after origin verification. The REQUEST authorizer can read
 Secrets Manager; the health MOCK response exposes no authentication diagnostic.
-API Gateway has no proxy/catch-all or POST/chat route. Its Lambda invocation
-permission targets only this API's authorizer and source account. Both
+API Gateway has no proxy/catch-all or chat route. Invocation permissions
+target only this API/source account: its authorizer and three exact
+stage/method auth integrations. Both
 request-validation flags are enabled; this no-input MOCK
 does not define a body schema.
 
@@ -66,7 +69,7 @@ The `/api/*` CloudFront behavior uses HTTPS to the origin, disabled caching, and
 the AWS-managed `ALL_VIEWER_EXCEPT_HOST_HEADER` origin-request policy to forward
 cookies, query strings and viewer headers without sending the viewer Host to API
 Gateway. It allows all API methods for later integration, but only the explicit
-GET health method exists now. Future Set-Cookie responses are not cached. Unknown
+health/login/me/logout routes exist now. Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
 
 Both frontend and legacy chat Regional APIs use
@@ -92,7 +95,7 @@ security policy at TLSv1; it does not enforce a TLS 1.2 minimum. No ineffective
 minimum-protocol setting or unapproved custom certificate is added. HTTPS origin
 traffic to the API separately requires TLS 1.2.
 Resource-specific cdk-nag acknowledgments record those omissions, origin-only
-health authorization, demo's absent viewer WAF, Cognito MFA/paid Plus
+health authorization and BFF session authorization, demo's absent viewer WAF, Cognito MFA/paid Plus
 tier/composition choices and disabled table PITR; they are not public-release
 approval. API access/execution logging remains enabled.
 
@@ -128,7 +131,8 @@ while missing, malformed, repeated or conflicting values are rejected. Fixed
 response is logged.
 
 API authorization caching is disabled (TTL zero). Only the configured
-account/Region/API/stage GET `/api/health` method can receive an Allow policy;
+account/Region/API/stage health/login/me/logout allowlist can receive an Allow policy
+for the single incoming method;
 the principal is `cloudfront-origin`, without a Cognito user identity. Invalid
 tokens receive a generic denial; configuration/secret failures fail closed
 without diagnostics. Future frontend routes must retain origin verification
@@ -166,8 +170,8 @@ policy dependency. Dependencies order resources; they cannot repair cycles. See
 
 ### Execution-policy changes
 
-No user-authentication runtime identity or grant is introduced. Existing environment-specific
-CloudFormation permissions cover S3, DynamoDB and API Gateway. The shared logging
+The auth Lambda has the narrowly scoped runtime identity described below. Existing environment-specific
+CloudFormation permissions cover its named role, logs, Lambda, DynamoDB and API Gateway resources. The shared logging
 role gains the exact frontend access groups, and CloudFront's existing scoped
 lifecycle statement gains `ListTagsForResource`.
 
@@ -198,10 +202,10 @@ than `CFN_FRONTEND_API`. Both remain attached to the same execution role; this
 retains exactly five execution policies and does not grant runtime access.
 Existing CloudFront OAC `Resource:"*"` and tag-constrained creation exceptions are
 not broadened. Bedrock, evaluation-data separation and Data definitions are
-unchanged. The APPLICATION boundary now
+unchanged. The APPLICATION boundary's origin-secret statement
 permits reading only its environment's origin-secret name with the generated
 six-character ARN suffix. QUERY/GLUE boundaries and other runtime identities
-receive no secret reads. AI changes only its API transport policy/deployment.
+receive no secret reads. This auth slice leaves AI definitions unchanged.
 
 The existing five execution-policy attachments are retained. New global WAF
 statements use headroom in CFN_DATA_ANALYTICS, and origin-secret lifecycle
@@ -217,7 +221,7 @@ the exact secret to resolve the origin reference; GitHub deployment identities
 do not receive secret-reading permission. Demo receives no DeleteSecret grant;
 its retained-secret rollback/recreation cleanup remains administrator work.
 
-## Authentication state and source-only primitives
+## Authentication routes and durable state
 
 [Relocated helper documentation](../../infra/lambdas/frontend/auth/README.md)
 defines the full item and function contracts. `USER#<sub>` holds strict permanent
@@ -230,8 +234,11 @@ Trusted provisioning conditionally creates metadata. Before credential
 verification, server orchestration captures an enabled subject/version snapshot;
 login checks the verified Cognito subject matches it. A conditional DynamoDB
 transaction checks that original state while inserting the session, never
-adopting a newer version after stale authentication. The correct pre-auth subject
-lookup and HTTP lifecycle are later integration prerequisites. See [DynamoDB transactions](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html).
+adopting a newer version after stale authentication. AdminGetUser now resolves
+canonical identity; only genuinely missing metadata is conditionally initialized
+before password verification. Malformed existing records fail closed, and an
+initialization loser gets one bounded strong snapshot reread. This is not password
+proof or recovery from deleted revocation metadata. See [DynamoDB transactions](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html).
 
 Sessions use random 32-byte opaque tokens and fixed independent twelve-hour
 expiry, not JWT-clamped expiry. JWT signature/issuer/client/use/live expiry must
@@ -244,8 +251,51 @@ Logout deletes the current session before clearing its cookie; global revocation
 increments the user's version, while disablement increments and disables
 atomically. These do not synchronize Cognito console actions, revoke Google
 sessions or cancel accepted in-flight requests. Safe backend failures remain
-distinct from unauthenticated state. Future runtime logging must exclude message
+distinct from unauthenticated state. Runtime logging excludes message
 bodies, credentials, cookies, tokens, auth records and provider diagnostics.
+
+
+### HTTP route contract
+
+| Route | Request | Response |
+| --- | --- | --- |
+| POST `/api/auth/login` | JSON with only email/password; email is trimmed/lowercased, password is unchanged. Requires exact browser Origin. | 200 with only userId/expiresAt and a fresh opaque Set-Cookie after confirmed persistence. |
+| GET `/api/auth/me` | No body/query; cookie-only session input. Origin may be absent; explicit bad Origin/cross-site Fetch Metadata is rejected. | 200 with the same userId/UTC expiry, or 401 for absent/invalid/revoked sessions; no Cognito call, initialization or renewal. |
+| POST `/api/auth/logout` | JSON content type with empty body or `{}`, exact browser Origin, no query. | 204/empty body and clearing cookie after deletion, or idempotently for missing/malformed cookies. |
+
+The handler validates REST API/account/stage and authorizer context, exact
+method/resource, unambiguous headers and at most 8 KiB decoded UTF-8 JSON (strict
+standard-base64 support). Unknown fields and credentials in URL parameters are
+rejected. Password input remains one to 256 characters without new-password
+complexity rules. All handler responses use no-store; errors have only authored
+code/message and request ID. Statuses are 400 invalid input, 413 oversized body,
+415 media type, 401 denied credentials/session or unsupported challenge, 403
+bad origin/unconfirmed account, 429 throttling and 503 backend/configuration
+unavailability. Distinct account-confirmation/challenge errors intentionally
+reveal limited account state. No provider diagnostics or Cognito tokens appear.
+
+POST login/logout require the exact HTTPS distribution Origin, and cross-site
+Fetch Metadata is rejected when present. There is no permissive CORS or Referer
+fallback. Origin-secret verification is a separate check and cannot prevent
+login CSRF alone. API responses remain uncached, with supported CloudFront error
+minimum TTLs set to zero without response rewriting. The existing one-request/
+second, burst-two API throttling is not per-account brute-force protection.
+
+Me strongly reads both strict session/user records every time. Storage failures
+never become an authenticated or merely logged-out state. Logout deletes only
+its cookie-selected session, even if expired/revoked, before clearing the cookie;
+failed deletion returns unavailable and preserves a usable cookie. Failed login
+does not clear an existing cookie. Sessions remain fixed at twelve hours, hash-
+only in DynamoDB, with no sliding expiry or global logout. SDK retries preserve
+one transaction record and idempotency token; ambiguous writes never return a
+success cookie or mint a second session in an outer loop.
+
+The handler has at most twenty seconds of work within its 25-second Lambda
+limit. SDK/JWKS operations use remaining-deadline cancellation and bounded retries.
+Logs contain only request ID, fixed route/outcome and duration; no user identity,
+email, body, cookies, hashes, tokens or raw provider errors. See the
+[auth source/HTTP guide](../../infra/lambdas/frontend/auth/README.md) for module
+entry points, item shapes, ordering, errors and account-management limitations.
 
 ## Deployment, teardown and deferred activation
 
@@ -260,7 +310,7 @@ dependencies from deployment. Frontend still depends only on foundation; no
 artificial AI/Data dependency is added.
 
 Infrastructure deployment does not publish UI assets, invalidate CloudFront,
-activate user-authentication handlers or migrate chat. Origin protection is defined in frontend CDK, not implemented by publishing assets. After a later
+publish an authentication UI or migrate chat. It now includes the reviewed auth Lambda/routes. Origin protection is defined in frontend CDK, not implemented by publishing assets. After a later
 authorized dev deployment, use the output health URL (`/api/health`); the empty
 website root may fail until assets are published. CloudFront operations may take
 several minutes; existing 30-minute workflow timeouts are unchanged. A timeout
@@ -319,18 +369,76 @@ credentials or actual session records. This slice's lint/build/existing-test and
 offline synthesis results do not establish live AWS, email, cookie/browser or
 authentication correctness.
 
-The later product slice must add custom email/password UI, Google login and
-explicit account linking with fresh proof of both methods, trusted provisioning,
-HTTP auth/session middleware, CSRF/origin checks, throttling, exact-table IAM,
-uniform 401/startup/focus checks and frontend-owned AI integration. MFA, recovery
+Later product slices must add custom email/password UI, signup/confirmation and
+recovery, Google login/linking with fresh proof of both methods, comprehensive
+authentication abuse controls, uniform browser 401/startup/focus handling and
+frontend-owned AI integration. Current routes enforce origin/CSRF and durable
+sessions but do not change the orchestrator's temporary identity. MFA, recovery
 and administrator synchronization remain reviewed follow-ups; reset/disable
 must coordinate Cognito and DynamoDB fail-closed on partial failure. No session
 refresh/sliding expiry is implemented. Complete those security/abuse controls
 and public-demo email review before exposing user data or launching demo.
 
-One specific IAM prerequisite is the session transaction's standalone
-`dynamodb:ConditionCheckItem` authorization. The unchanged APPLICATION boundary
-does not currently allow it. The later handler slice must review a narrow
-auth-table allowance in both its identity policy and boundary, alongside the
-underlying item actions; adding an identity grant alone would not suffice. See
+The auth role now has GetItem, PutItem, DeleteItem and ConditionCheckItem on only
+its exact AUTH-SESSIONS table, AdminGetUser on only its exact pool, and its own
+log writes. No UpdateItem, Scan/Query/batch, secret, S3, Bedrock, tool or admin
+mutation grant is added. The APPLICATION boundary adds ConditionCheckItem only
+for the exact environment auth table, and AdminGetUser for account/Region pools
+with the existing ownership tags. QUERY/GLUE and other runtime identities stay
+unchanged. Apply this administrator-owned boundary update before deploying auth. See
 [DynamoDB transaction IAM](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html).
+
+## Later manual auth validation
+
+These examples are for the operator only after separately authorized foundation-
+first deployment. Use an enabled, confirmed local Cognito account with a permanent
+password, created through the approved administrator process. Temporary-password,
+reset-required and MFA flows are unsupported here. The developer does not create
+live users, suppress confirmation or seed authentication records.
+
+Use the environment's actual HTTPS CloudFront hostname. POST Origin must equal
+that origin exactly; no trailing slash is included. CloudFront supplies its
+private origin header automatically: never obtain or add it to client commands.
+The following PowerShell example prompts for credentials and uses a private,
+in-memory cookie jar; it writes no credential/session file. Do not enable verbose
+or debug request logging, print request payloads/headers or dump the cookie jar.
+
+```powershell
+$browserOrigin = 'https://<distribution-hostname>'
+$credential = Get-Credential -Message 'Confirmed local Cognito account'
+$payload = @{
+  email = $credential.UserName
+  password = $credential.GetNetworkCredential().Password
+} | ConvertTo-Json -Compress
+
+try {
+  $login = Invoke-WebRequest -Uri "$browserOrigin/api/auth/login" -Method Post `
+    -Headers @{ Origin = $browserOrigin } -ContentType 'application/json' `
+    -Body $payload -SessionVariable authJar -MaximumRedirection 0
+  $login.Content
+
+  $me = Invoke-WebRequest -Uri "$browserOrigin/api/auth/me" -Method Get `
+    -WebSession $authJar -MaximumRedirection 0
+  $me.Content
+
+  $logout = Invoke-WebRequest -Uri "$browserOrigin/api/auth/logout" -Method Post `
+    -Headers @{ Origin = $browserOrigin } -ContentType 'application/json' `
+    -Body '{}' -WebSession $authJar -MaximumRedirection 0
+  $logout.StatusCode
+} finally {
+  Remove-Variable credential, payload, login, me, logout, authJar -ErrorAction SilentlyContinue
+}
+```
+
+Later operator checks should cover login/me/logout and 401 after logout, denied
+credentials, unconfirmed accounts, CSRF/origin denial, direct API denial, multiple
+devices, expiry and deliberate trusted version invalidation. Do not infer those
+outcomes from local compilation/synthesis. First-login initialization is not
+recovery for lost revocation metadata: preserve USER records and review restoration
+before recreating them. Existing sessions can outlive Cognito token expiry and
+out-of-band console sign-out/disablement until application versions are revoked.
+Signup/confirmation/reset UI, Google/linking, comprehensive authentication abuse
+controls and chat ownership/Stop integration remain deferred. `/api/auth/me`
+establishes only frontend session identity; it does not change the orchestrator's
+temporary owner. Existing workflows deploy these resources without a new variable
+or origin-secret setting; public demo still requires the remaining security work.

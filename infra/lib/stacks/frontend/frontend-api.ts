@@ -1,14 +1,16 @@
 import { RemovalPolicy, Validations } from 'aws-cdk-lib';
 import { AccessLogFormat, AuthorizationType, EndpointType, LogGroupLogDestination, MethodLoggingLevel,
-  CfnRestApi, MockIntegration, PassthroughBehavior, RestApi } from 'aws-cdk-lib/aws-apigateway';
+  CfnRestApi, MockIntegration, PassthroughBehavior, RequestAuthorizer, RequestValidator, RestApi } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { DeploymentEnvironment, frontendApiAccessLogGroupName } from '../../shared/environment';
 import { FrontendOriginAccess } from './frontend-origin-access';
 
-/** Owns a health-only API protected by origin verification, without user authentication or AI routing. */
+/** Owns the origin-protected REST API and health route; auth integrations are attached after hosting. */
 export class FrontendApi extends Construct {
   public readonly api: RestApi;
+  public readonly originAuthorizer: RequestAuthorizer;
+  public readonly requestValidator: RequestValidator;
 
   public constructor(scope: Construct, id: string, environment: DeploymentEnvironment, originAccess: FrontendOriginAccess) {
     super(scope, id);
@@ -18,7 +20,7 @@ export class FrontendApi extends Construct {
     });
     this.api = new RestApi(this, 'Api', {
       restApiName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND-API`,
-      description: 'Independent generic health API; authentication and chat integration are not active.',
+      description: 'Origin-protected health and email/password session API; chat integration is deferred.',
       endpointConfiguration: { types: [EndpointType.REGIONAL] }, cloudWatchRole: false,
       deployOptions: {
         stageName: environment, accessLogDestination: new LogGroupLogDestination(accessLogs),
@@ -41,20 +43,23 @@ export class FrontendApi extends Construct {
       retention: RetentionDays.ONE_WEEK, removalPolicy,
     });
     this.api.deploymentStage.node.addDependency(executionLogs);
+    this.originAuthorizer = originAccess.createAuthorizer(this.api);
+    // Preserve the original automatically created validator path/ID and reuse it for all routes.
+    this.requestValidator = this.api.addRequestValidator('validator', { validateRequestParameters: true, validateRequestBody: true });
     const health = this.api.root.addResource('api').addResource('health').addMethod('GET', new MockIntegration({
       passthroughBehavior: PassthroughBehavior.NEVER,
       requestTemplates: { 'application/json': '{"statusCode":200}' },
       integrationResponses: [{ statusCode: '200', responseTemplates: { 'application/json': '{"status":"ok"}' } }],
     }), {
-      authorizationType: AuthorizationType.CUSTOM, authorizer: originAccess.createAuthorizer(this.api),
-      requestValidatorOptions: { validateRequestParameters: true, validateRequestBody: true }, methodResponses: [{ statusCode: '200' }],
+      authorizationType: AuthorizationType.CUSTOM, authorizer: this.originAuthorizer,
+      requestValidator: this.requestValidator, methodResponses: [{ statusCode: '200' }],
     });
     Validations.of(health.node.defaultChild!).acknowledge({
-      id: 'AwsSolutions-COG4', reason: 'This GET /api/health uses a zero-cache REQUEST authorizer for CloudFront origin verification. It returns only generic health; Cognito user/session authentication remains a separate slice.',
+      id: 'AwsSolutions-COG4', reason: 'This GET /api/health uses a zero-cache REQUEST authorizer for CloudFront origin verification. It returns only generic health; user/session validation belongs to the separate auth integrations.',
     });
     Validations.of(this.api.deploymentStage.node.defaultChild!).acknowledge({
       id: 'AwsSolutions-APIG3',
-      reason: 'The frontend Regional API uses an exact-method origin-secret authorizer instead of a Regional WAF association. Dev viewer filtering is owned by the CloudFront WebACL; user authentication and demo release remain deferred.',
+      reason: 'The frontend Regional API uses an exact-route origin-secret authorizer instead of a Regional WAF association. Auth integrations independently enforce browser Origin and durable sessions. Dev viewer filtering belongs to CloudFront WAF; public-demo abuse controls remain deferred.',
     });
   }
 }

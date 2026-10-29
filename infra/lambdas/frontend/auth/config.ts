@@ -13,7 +13,7 @@ const configurationSchema = z.strictObject({
 
 export type BffAuthConfig = Readonly<z.output<typeof configurationSchema>>;
 
-/** Validates explicit source-only configuration without reading deployment environment variables. */
+/** Validates trusted pool/table configuration and the fixed application-session contract. */
 export function parseBffAuthConfig(value: unknown): BffAuthConfig {
   const result = configurationSchema.safeParse(value);
   if (!result.success) throw new BffAuthError('invalid_configuration');
@@ -27,4 +27,25 @@ export function currentAuthTime(nowSeconds: () => number): number {
     throw new BffAuthError('session_unavailable');
   }
   return value;
+}
+
+export interface AuthRequestBudget {
+  readonly signal: AbortSignal;
+  remainingMs(): number;
+}
+
+/** Reserves response time and bounds the complete request to at most twenty seconds of work. */
+export function createAuthRequestBudget(lambdaRemainingMs: number): AuthRequestBudget {
+  if (!Number.isFinite(lambdaRemainingMs) || lambdaRemainingMs <= 2_000) throw new BffAuthError('session_unavailable');
+  const duration = Math.min(20_000, Math.floor(lambdaRemainingMs - 2_000));
+  const deadline = Date.now() + duration;
+  return { signal: AbortSignal.timeout(duration), remainingMs: () => Math.max(0, deadline - Date.now()) };
+}
+
+/** Clamps each SDK request to the original deadline, retaining a final response reserve. */
+export function authRequestOptions(budget?: AuthRequestBudget): { abortSignal: AbortSignal } {
+  const timeout = Math.min(10_000, Math.floor((budget?.remainingMs() ?? 10_500) - 500));
+  if (timeout <= 0 || budget?.signal.aborted) throw new BffAuthError('session_unavailable');
+  const signal = AbortSignal.timeout(timeout);
+  return { abortSignal: budget ? AbortSignal.any([budget.signal, signal]) : signal };
 }

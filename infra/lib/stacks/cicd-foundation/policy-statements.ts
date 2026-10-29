@@ -735,6 +735,11 @@ export function runtimeBoundaryStatements(
       ],
     }),
     new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}AuthSessionConditionChecks`,
+      actions: ['dynamodb:ConditionCheckItem'],
+      resources: [`arn:${Aws.PARTITION}:dynamodb:${Aws.REGION}:${Aws.ACCOUNT_ID}:table/${resources.prefix}-AUTH-SESSIONS`],
+    }),
+    new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}FrontendOriginSecret`,
       actions: ['secretsmanager:GetSecretValue'], resources: [frontendOriginSecretArn(resources.environment)],
     }),
@@ -772,7 +777,7 @@ export function runtimeBoundaryStatements(
     }),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}CognitoAuthentication`,
-      actions: ['cognito-idp:AdminInitiateAuth', 'cognito-idp:AdminRespondToAuthChallenge'],
+      actions: ['cognito-idp:AdminInitiateAuth', 'cognito-idp:AdminRespondToAuthChallenge', 'cognito-idp:AdminGetUser'],
       resources: [
         `arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`,
       ],

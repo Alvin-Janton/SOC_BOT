@@ -1,8 +1,8 @@
 import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { z } from 'zod';
-import { BffAuthConfig } from './config';
-import { BffAuthError } from './errors';
+import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from './config';
+import { BffAuthError, serviceAuthError } from './errors';
 
 export const authSubSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 export const sessionVersionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -30,13 +30,14 @@ export function requireTrustedAuthenticationContext(value: TrustedAuthentication
 export interface UserAuthStateStore {
   initialize(sub: string): Promise<UserAuthState>;
   read(sub: string): Promise<UserAuthState | undefined>;
+  readForProvisioning(sub: string): Promise<UserAuthState | undefined>;
   readForAuthentication(sub: string): Promise<TrustedAuthenticationContext>;
   incrementVersion(sub: string): Promise<UserAuthState>;
   disable(sub: string): Promise<UserAuthState>;
 }
 
-/** Builds inactive trusted-provisioning/revocation helpers for the dedicated auth table. */
-export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?: AuthStateClient): UserAuthStateStore {
+/** Builds trusted provisioning and revocation helpers without initializing during session resolution. */
+export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?: AuthStateClient, budget?: AuthRequestBudget): UserAuthStateStore {
   const client = suppliedClient ?? DynamoDBDocumentClient.from(new DynamoDBClient({ maxAttempts: 2 }));
 
   /** Validates a trusted subject before deriving a user-state storage key. */
@@ -46,15 +47,18 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
   }
 
   /** Strongly reads strict metadata; missing/malformed state never becomes an enabled default. */
-  async function read(sub: string): Promise<UserAuthState | undefined> {
+  async function read(sub: string, rejectMalformed = false): Promise<UserAuthState | undefined> {
     const Key = key(sub);
     try {
       const result = await client.send(new GetCommand({ TableName: config.sessionTableName, Key, ConsistentRead: true }),
-        { abortSignal: AbortSignal.timeout(10_000) });
+        authRequestOptions(budget));
       const state = userStateSchema.safeParse(result.Item);
+      if (rejectMalformed && result.Item !== undefined && (!state.success || state.data.sub !== sub)) {
+        throw new BffAuthError('authentication_failed');
+      }
       return state.success && state.data.sub === sub ? Object.freeze(state.data) : undefined;
-    } catch {
-      throw new BffAuthError('session_unavailable');
+    } catch (error) {
+      throw serviceAuthError(error);
     }
   }
 
@@ -71,13 +75,13 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
         ExpressionAttributeValues: { ':type': 'USER_AUTH_STATE', ':sub': sub, ':version': state.session_version,
           ':disabled': state.disabled, ':one': 1, ...(disable ? { ':true': true } : {}) },
         ReturnValues: 'ALL_NEW',
-      }), { abortSignal: AbortSignal.timeout(10_000) });
+      }), authRequestOptions(budget));
       const updated = userStateSchema.safeParse(result.Attributes);
       if (!updated.success || updated.data.sub !== sub) throw new BffAuthError('session_unavailable');
       return Object.freeze(updated.data);
     } catch (error) {
       if (error instanceof ConditionalCheckFailedException) throw new BffAuthError('authentication_failed');
-      throw new BffAuthError('session_unavailable');
+      throw serviceAuthError(error);
     }
   }
 
@@ -87,14 +91,16 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
       const item: UserAuthState = { ...key(sub), entity_type: 'USER_AUTH_STATE', sub, session_version: 1, disabled: false };
       try {
         await client.send(new PutCommand({ TableName: config.sessionTableName, Item: item,
-          ConditionExpression: 'attribute_not_exists(PK)' }), { abortSignal: AbortSignal.timeout(10_000) });
+          ConditionExpression: 'attribute_not_exists(PK)' }), authRequestOptions(budget));
       } catch (error) {
         if (error instanceof ConditionalCheckFailedException) throw new BffAuthError('authentication_failed');
-        throw new BffAuthError('session_unavailable');
+        throw serviceAuthError(error);
       }
       return Object.freeze(item);
     },
     read,
+    /** Separates a genuinely absent account from malformed existing metadata before first-login provisioning. */
+    async readForProvisioning(sub: string): Promise<UserAuthState | undefined> { return read(sub, true); },
     /** Captures enabled, validated server state before the associated authentication attempt begins. */
     async readForAuthentication(sub: string): Promise<TrustedAuthenticationContext> {
       const state = await read(sub);
