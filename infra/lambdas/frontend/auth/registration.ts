@@ -45,8 +45,8 @@ export function createCognitoRegistration(config: BffAuthConfig, suppliedClient?
         || !Object.values(UserStatusType).includes(account.UserStatus)) throw new BffAuthError('registration_unavailable');
 
       return !account.Enabled || account.UserStatus !== UserStatusType.UNCONFIRMED;
-    } 
-    
+    }
+
     catch (error) {
       if (errorName(error) === 'UserNotFoundException') return true;
       throw registrationError(error);
@@ -60,8 +60,8 @@ export function createCognitoRegistration(config: BffAuthConfig, suppliedClient?
       try {
         await client.send(new SignUpCommand({ ClientId: config.clientId, Username: email, Password: password,
           UserAttributes: [{ Name: 'email', Value: email }] }), authRequestOptions(budget));
-      } 
-      
+      }
+
       catch (error) {
         if (errorName(error) === 'UsernameExistsException') return;
         if (errorName(error) === 'InvalidPasswordException') throw new BffAuthError('invalid_signup_password');
