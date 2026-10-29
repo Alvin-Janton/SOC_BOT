@@ -4,7 +4,7 @@ import { AccountRecovery, Mfa, UserPool, UserPoolClient, UserPoolClientIdentityP
 import { Construct } from 'constructs';
 import { DeploymentEnvironment } from '../../shared/environment';
 
-/** Provisions email/password identity resources without domains, providers, users or callable auth routes. */
+/** Provisions the email/password pool/client; the auth construct owns their HTTP session routes. */
 export class FrontendIdentity extends Construct {
   public readonly userPool: UserPool;
   public readonly client: UserPoolClient;
@@ -30,7 +30,7 @@ export class FrontendIdentity extends Construct {
     this.client.applyRemovalPolicy(environment === 'dev' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN);
     for (const [rule, reason] of [
       ['COG1', 'The approved password policy requires at least 15 characters without arbitrary composition requirements; confirmation and email verification remain enabled.'],
-      ['COG2', 'MFA is explicitly deferred for this source-only authentication foundation; no auth route or public demo launch is provisioned.'],
+      ['COG2', 'MFA is explicitly deferred for the approved password/session routes; challenges fail closed. Public-demo rollout and comprehensive authentication abuse controls remain separate reviewed work.'],
       ['COG8', 'The paid Plus tier and its advanced threat protection are outside this bounded MVP foundation. Their cost/security configuration and abuse controls require review before public demo release.'],
     ]) Validations.of(this.userPool.node.defaultChild!).acknowledge({ id: `AwsSolutions-${rule}`, reason });
   }

@@ -1,11 +1,11 @@
 import { DynamoDBClient, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { BffAuthConfig, currentAuthTime } from './config';
+import { authRequestOptions, AuthRequestBudget, BffAuthConfig, currentAuthTime } from './config';
 import { VerifiedCognitoIdentity } from './cognito';
 import { isOpaqueSessionToken } from './cookies';
-import { BffAuthError } from './errors';
+import { BffAuthError, serviceAuthError } from './errors';
 import { authSubSchema, createUserAuthStateStore, requireTrustedAuthenticationContext,
   sessionVersionSchema, TrustedAuthenticationContext } from './user-state';
 
@@ -37,11 +37,11 @@ function sessionKey(token: string): { PK: string } {
   return { PK: `SESSION#${createHash('sha256').update(token, 'utf8').digest('hex')}` };
 }
 
-/** Creates inactive session primitives; account state is never initialized during cookie resolution. */
+/** Creates fixed-expiry session primitives; account state is never initialized during cookie resolution. */
 export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: AuthSessionClient,
-  nowSeconds: () => number = () => Math.floor(Date.now() / 1_000)): AuthSessionStore {
+  nowSeconds: () => number = () => Math.floor(Date.now() / 1_000), budget?: AuthRequestBudget): AuthSessionStore {
   const client = suppliedClient ?? DynamoDBDocumentClient.from(new DynamoDBClient({ maxAttempts: 2 }));
-  const users = createUserAuthStateStore(config, client);
+  const users = createUserAuthStateStore(config, client, budget);
 
   return {
     /** Checks the original enabled user/version and inserts one absolute twelve-hour session atomically. */
@@ -55,20 +55,22 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
       const record = recordSchema.safeParse({ ...sessionKey(token), entity_type: 'AUTH_SESSION', sub: context.sub,
         session_version: context.sessionVersion, created_at: now, expires_at: now + config.sessionLifetimeSeconds });
       if (!record.success) throw new BffAuthError('authentication_failed');
+      // One command, token and record are reused by SDK retries; ambiguous writes never mint a second session.
+      const clientRequestToken = randomUUID();
       try {
-        await client.send(new TransactWriteCommand({ TransactItems: [{ ConditionCheck: {
+        await client.send(new TransactWriteCommand({ ClientRequestToken: clientRequestToken, TransactItems: [{ ConditionCheck: {
           TableName: config.sessionTableName, Key: { PK: `USER#${context.sub}` },
           ConditionExpression: '#type = :type AND #sub = :sub AND #version = :version AND #disabled = :disabled AND attribute_not_exists(expires_at)',
           ExpressionAttributeNames: { '#type': 'entity_type', '#sub': 'sub', '#version': 'session_version', '#disabled': 'disabled' },
           ExpressionAttributeValues: { ':type': 'USER_AUTH_STATE', ':sub': context.sub, ':version': context.sessionVersion, ':disabled': false },
         } }, { Put: { TableName: config.sessionTableName, Item: record.data, ConditionExpression: 'attribute_not_exists(PK)' } }] }),
-        { abortSignal: AbortSignal.timeout(10_000) });
+        authRequestOptions(budget));
       } catch (error) {
         if (error instanceof TransactionCanceledException
           && error.CancellationReasons?.some(reason => reason.Code === 'ConditionalCheckFailed')) {
           throw new BffAuthError('authentication_failed');
         }
-        throw new BffAuthError('session_unavailable');
+        throw serviceAuthError(error);
       }
       return { token, sub: record.data.sub, createdAt: now, expiresAt: record.data.expires_at };
     },
@@ -80,8 +82,8 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
       let item: Record<string, unknown> | undefined;
       try {
         item = (await client.send(new GetCommand({ TableName: config.sessionTableName, Key, ConsistentRead: true }),
-          { abortSignal: AbortSignal.timeout(10_000) })).Item;
-      } catch { throw new BffAuthError('session_unavailable'); }
+          authRequestOptions(budget))).Item;
+      } catch (error) { throw serviceAuthError(error); }
       const record = recordSchema.safeParse(item);
       const now = currentAuthTime(nowSeconds);
       if (!record.success || record.data.PK !== Key.PK || record.data.created_at > now || record.data.expires_at <= now
@@ -97,8 +99,8 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
       if (!isOpaqueSessionToken(token)) return;
       try {
         await client.send(new DeleteCommand({ TableName: config.sessionTableName, Key: sessionKey(token) }),
-          { abortSignal: AbortSignal.timeout(10_000) });
-      } catch { throw new BffAuthError('session_unavailable'); }
+          authRequestOptions(budget));
+      } catch (error) { throw serviceAuthError(error); }
     },
   };
 }

@@ -51,7 +51,7 @@ def valid_tool_validation(value: object) -> bool:
                 if segment == "#" else (isinstance(part, str) and part == segment)
                 for segment, part in zip(shape, issue["path"])) for shape in VALIDATION_CONTRACT["path_shapes"]):
             return False
-            
+
     return len(encoded(value)) <= VALIDATION_CONTRACT["max_bytes"]
 
 

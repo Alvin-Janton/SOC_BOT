@@ -54,7 +54,7 @@ for (const environment of ['dev', 'demo'] as const) {
     devFrontendAllowedClientCidr: environment === 'dev' ? devFrontendAllowedClientCidr : undefined,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
     synthesizer: new CliCredentialsStackSynthesizer(),
-    description: `SOC Bot ${environment} private frontend, health API and inactive authentication foundation`,
+    description: `SOC Bot ${environment} private frontend, health API and email/password session routes`,
   });
   frontendStack.addStackDependency(foundation);
 }

@@ -178,8 +178,8 @@ function finalizationMessages(messages: Message[]): Message[] {
       else if (block.toolUse !== undefined && message.role === 'assistant') {
         pending.push(block.toolUse);
         hasToolUse = true;
-      } 
-      
+      }
+
       else if (block.toolResult !== undefined && message.role === 'user') {
         const call = pending.shift();
         const result = block.toolResult;
@@ -189,7 +189,7 @@ function finalizationMessages(messages: Message[]): Message[] {
           || !call.input || typeof call.input !== 'object' || Array.isArray(call.input)
           || (result.status !== 'success' && result.status !== 'error')
           || result.content?.length !== 1 || !output || typeof output !== 'object' || Array.isArray(output)) throw protocolError();
-          
+
         if (result.status === 'success' && ['SUBMITTED', 'QUEUED', 'RUNNING', 'UNKNOWN'].includes(String(output.state ?? ''))) {
           throw protocolError();
         }
