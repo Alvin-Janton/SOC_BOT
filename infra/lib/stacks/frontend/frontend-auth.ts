@@ -9,7 +9,7 @@ import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { FRONTEND_ORIGIN_ROUTES } from '../../../lambdas/frontend/shared/origin-routes';
+import { frontendOriginRoutes } from '../../../lambdas/frontend/shared/origin-routes';
 import { DeploymentEnvironment } from '../../shared/environment';
 import { runtimeBoundaryArn } from '../cicd-foundation/policy-statements';
 
@@ -22,9 +22,10 @@ export interface FrontendAuthProps {
   readonly client: IUserPoolClient;
   readonly table: ITable;
   readonly browserOrigin: string;
+  readonly google?: { readonly client: IUserPoolClient; readonly domain: string; readonly redirectUri: string };
 }
 
-/** Owns nine explicit authentication routes and one exact-pool/table Lambda, without chat integration. */
+/** Owns explicit authentication routes and one exact-pool/table Lambda, without chat integration. */
 export class FrontendAuth extends Construct {
   public readonly function: NodejsFunction;
   public readonly role: Role;
@@ -62,6 +63,8 @@ export class FrontendAuth extends Construct {
         DEPLOYMENT_ENVIRONMENT: props.environment, USER_POOL_ID: props.userPool.userPoolId,
         USER_POOL_CLIENT_ID: props.client.userPoolClientId, AUTH_SESSION_TABLE_NAME: props.table.tableName,
         EXPECTED_ACCOUNT_ID: Aws.ACCOUNT_ID, FRONTEND_API_ID: props.api.restApiId, BROWSER_ORIGIN: props.browserOrigin,
+        ...(props.google ? { GOOGLE_LOGIN_ENABLED: 'true', GOOGLE_USER_POOL_CLIENT_ID: props.google.client.userPoolClientId,
+          GOOGLE_COGNITO_DOMAIN: props.google.domain, GOOGLE_CALLBACK_URI: props.google.redirectUri } : {}),
       },
     });
     const policy = this.role.node.findChild('DefaultPolicy').node.defaultChild as CfnPolicy;
@@ -70,8 +73,11 @@ export class FrontendAuth extends Construct {
     const apiRoot = props.api.root.getResource('api');
     if (!apiRoot) throw new Error('The frontend API root must exist before auth routes are attached.');
     const authRoot = apiRoot.addResource('auth');
-    for (const route of FRONTEND_ORIGIN_ROUTES.filter(candidate => candidate.route !== 'health')) {
-      const method = authRoot.addResource(route.route).addMethod(route.method, new LambdaIntegration(this.function, {
+    const googleRoot = props.google ? authRoot.addResource('google') : undefined;
+    for (const route of frontendOriginRoutes(props.google !== undefined).filter(candidate => candidate.route !== 'health')) {
+      const resource = route.route === 'google-start' ? googleRoot!.addResource('start')
+        : route.route === 'google-callback' ? googleRoot!.addResource('callback') : authRoot.addResource(route.route);
+      const method = resource.addMethod(route.method, new LambdaIntegration(this.function, {
         proxy: true, allowTestInvoke: false, scopePermissionToMethod: true, timeout: Duration.seconds(25),
       }), {
         authorizationType: AuthorizationType.CUSTOM, authorizer: props.authorizer,
@@ -86,11 +92,13 @@ export class FrontendAuth extends Construct {
       Validations.of(method.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
         reason: registration
           ? 'This registration method requires CloudFront origin verification and browser Origin validation, without a prior session. Cognito owns account/code verification; explicit login is separate. Public-demo signup/email abuse controls remain deferred.'
-          : recovery
-            ? 'This recovery method requires origin verification and browser Origin validation without a prior session. Reset additionally requires Cognito recovery-code proof; only confirmed password success permits application-session revocation. Public-demo abuse controls remain deferred.'
-            : route.route === 'change-password'
-              ? 'This method requires origin verification, browser Origin validation, a valid revalidated opaque session and fresh current-password/access-token proof. A native Cognito JWT authorizer cannot validate the BFF cookie; public-demo abuse controls remain deferred.'
-              : 'This exact route uses origin verification plus BFF password/session validation instead of a native Cognito JWT authorizer. Opaque cookies are resolved by the auth Lambda; login requires no prior session. Public-demo abuse controls remain deferred.',
+          : route.route === 'google-start' || route.route === 'google-callback'
+            ? 'Dev-only Google navigation requires origin verification; callback additionally requires browser-bound one-time state, PKCE, nonce, verified Cognito identity and conditional opaque-session persistence. No prior JWT exists; public-demo Google activation remains deferred.'
+            : recovery
+              ? 'This recovery method requires origin verification and browser Origin validation without a prior session. Reset additionally requires Cognito recovery-code proof; only confirmed password success permits application-session revocation. Public-demo abuse controls remain deferred.'
+              : route.route === 'change-password'
+                ? 'This method requires origin verification, browser Origin validation, a valid revalidated opaque session and fresh current-password/access-token proof. A native Cognito JWT authorizer cannot validate the BFF cookie; public-demo abuse controls remain deferred.'
+                : 'This exact route uses origin verification plus BFF password/session validation instead of a native Cognito JWT authorizer. Opaque cookies are resolved by the auth Lambda; login requires no prior session. Public-demo abuse controls remain deferred.',
       });
     }
     Validations.of(this.function.node.defaultChild!).acknowledge({ id: 'AwsSolutions-L1',

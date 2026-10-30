@@ -1,20 +1,44 @@
-# Email/password registration, BFF and session routes
+# Email/password, dev Google login and BFF session routes
 
 The frontend stack defines one `SOC-BOT-<ENV>-FRONTEND-AUTH` Lambda for nine
-explicit REST routes. It uses the existing Cognito pool/client and dedicated
-auth table. The separate origin authorizer protects all nine routes plus
+email/password REST routes plus two explicitly activated dev Google GET routes.
+It uses the existing Cognito pool, an unchanged password client, a separate Google
+client when enabled and the dedicated auth table. The separate origin authorizer protects these routes plus
 health. The [frontend guide](../../../../Docs/FrontendStack/README.md) describes
 infrastructure, origin-secret handling, TLS and deployment prerequisites.
 
 This implements local source/CDK wiring, not a claim of successful live login.
 The AI chat still uses its temporary environment-wide owner: these session routes
 do not authenticate the orchestrator or migrate its API. Public demo remains
-deferred. Signup, confirmation, resend and password recovery/change are implemented; Google/linking,
+deferred. Signup, confirmation, resend and password recovery/change are implemented;
+dev Google is staged/opt-in, while demo Google and linking,
 MFA challenges, renewal and all-device logout/disable APIs are not implemented.
 
 ## HTTP contracts
 
-All routes reject query parameters. POSTs require `application/json` (optionally
+Enabled dev additionally exposes GET `/api/auth/google/start` and
+`/api/auth/google/callback`. Start requires a signed-out browser and no body/query;
+callback requires bounded state plus code/provider-error query fields and a
+matching ten-minute browser-bound transaction. It alone accepts the expected
+cross-site top-level navigation. Both keep exact origin-authorizer protections,
+no-store and no-referrer; callback consumes state once before exchange and never
+overwrites a valid session. HTTP 303 success issues the existing twelve-hour
+cookie plus independent OAuth-cookie clearing via multiValueHeaders, then goes
+to `/api/auth/me`. Existing single-cookie password responses remain unchanged.
+
+See [Google setup, collision justification and limits](../../../../Docs/FrontendStack/Google-Login.md)
+for staged provisioning, transaction fields and later operator validation.
+`google-login.ts` coordinates the flow, `oauth-transactions.ts` owns proof/cookie
+consumption, `google-provider.ts` verifies the dedicated Cognito identity,
+`google-config.ts` validates public configuration, and `google-pre-signup.ts` is
+the distinct exact-pool creation trigger. The latter denies collisions in every
+local-account status; only UserNotFoundException permits absence, never a lookup
+failure or malformed result. It does not initialize metadata or link accounts.
+No runtime reads Google credentials or calls ListUsers. Password's pre-password
+snapshot ordering is unchanged; Google first verifies its identity, then captures
+an enabled/version snapshot for the same conditional session insertion.
+
+The nine email/password routes reject query parameters. POSTs require `application/json` (optionally
 UTF-8 charset) and exactly one browser `Origin` equal to the configured HTTPS
 CloudFront hostname. Login does not require an existing session. Cookie values
 never select the login identity.
@@ -50,6 +74,7 @@ Errors have one safe public shape:
 | 413 | Decoded body exceeds 8 KiB. |
 | 415 | POST content type is not supported JSON. |
 | 401 | Denied credentials, absent/invalid/revoked session, or an `AUTHENTICATION_CHALLENGE` this slice cannot complete. |
+| 409 | Google start/callback sees a valid application session; sign out first. |
 | 403 | Invalid browser/trusted origin, or `ACCOUNT_NOT_CONFIRMED`. |
 | 429 | Known provider throttling. |
 | 503 | Configuration, storage, service or JWKS availability failure. |

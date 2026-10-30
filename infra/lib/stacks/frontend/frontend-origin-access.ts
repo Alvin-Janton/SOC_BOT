@@ -15,7 +15,7 @@ import { runtimeBoundaryArn } from '../cicd-foundation/policy-statements';
 export class FrontendOriginAccess extends Construct {
   public readonly secret: Secret;
 
-  public constructor(scope: Construct, id: string, private readonly environment: DeploymentEnvironment) {
+  public constructor(scope: Construct, id: string, private readonly environment: DeploymentEnvironment, private readonly googleEnabled = false) {
     super(scope, id);
     this.secret = new Secret(this, 'Secret', {
       secretName: frontendOriginSecretName(environment),
@@ -61,6 +61,7 @@ export class FrontendOriginAccess extends Construct {
       environment: {
         DEPLOYMENT_ENVIRONMENT: environment, ORIGIN_SECRET_ARN: this.secret.secretArn,
         ALLOWED_METHOD_ARN: api.arnForExecuteApi('GET', '/api/health', environment),
+        ...(this.googleEnabled ? { GOOGLE_LOGIN_ENABLED: 'true' } : {}),
       },
     });
     const policy = role.node.findChild('DefaultPolicy').node.defaultChild as CfnPolicy;

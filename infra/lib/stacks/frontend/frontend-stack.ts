@@ -8,10 +8,12 @@ import { FrontendIdentity } from './frontend-identity';
 import { FrontendOriginAccess } from './frontend-origin-access';
 import { devFrontendClientCidr, FrontendWaf } from './frontend-waf';
 import { FrontendAuth } from './frontend-auth';
+import { FrontendGoogleLogin } from './frontend-google-login';
 
 export interface FrontendStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
   readonly devFrontendAllowedClientCidr?: string;
+  readonly devGoogleLoginEnabled?: boolean;
 }
 
 /** Owns frontend hosting and session routes without creating users, assets or an AI identity integration. */
@@ -25,9 +27,11 @@ export class FrontendStack extends Stack {
   public constructor(scope: Construct, id: string, props: FrontendStackProps) {
     super(scope, id, props);
     const environment = props.deploymentEnvironment;
+    if (props.devGoogleLoginEnabled !== undefined && typeof props.devGoogleLoginEnabled !== 'boolean') throw new Error('Google activation must be boolean.');
+    if (environment !== 'dev' && props.devGoogleLoginEnabled) throw new Error('Google login is dev-only.');
     this.authStorage = new AuthStorage(this, 'AuthStorage', environment);
     this.identity = new FrontendIdentity(this, 'Identity', environment);
-    const originAccess = new FrontendOriginAccess(this, 'OriginAccess', environment);
+    const originAccess = new FrontendOriginAccess(this, 'OriginAccess', environment, props.devGoogleLoginEnabled ?? false);
     const waf = environment === 'dev'
       ? new FrontendWaf(this, 'FrontendWaf', devFrontendClientCidr(props.devFrontendAllowedClientCidr)) : undefined;
     this.api = new FrontendApi(this, 'FrontendApi', environment, originAccess);
@@ -35,11 +39,16 @@ export class FrontendStack extends Stack {
       environment, api: this.api.api, originAccess, webAclArn: waf?.webAcl.attrArn,
     });
     // Hosting references only the API ID, so the integration can safely reference its generated hostname.
+    const google = environment === 'dev' ? new FrontendGoogleLogin(this, 'GoogleLogin', {
+      userPool: this.identity.userPool, browserOrigin: `https://${this.hosting.distribution.distributionDomainName}`,
+      enabled: props.devGoogleLoginEnabled ?? false,
+    }) : undefined;
     this.auth = new FrontendAuth(this, 'Auth', {
       environment, api: this.api.api, authorizer: this.api.originAuthorizer,
       requestValidator: this.api.requestValidator,
       userPool: this.identity.userPool, client: this.identity.client, table: this.authStorage.table,
       browserOrigin: `https://${this.hosting.distribution.distributionDomainName}`,
+      google: google?.client ? { client: google.client, domain: google.domain, redirectUri: google.redirectUri } : undefined,
     });
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', environment);

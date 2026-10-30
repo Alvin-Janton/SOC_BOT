@@ -8,8 +8,10 @@ import { DEFAULT_QUERY_WINDOW_DAYS, queryWindowDays } from '../lib/stacks/ai/que
 import { devClientCidr } from '../lib/stacks/ai/chat-api';
 import { FrontendStack } from '../lib/stacks/frontend/frontend-stack';
 import { devFrontendClientCidr } from '../lib/stacks/frontend/frontend-waf';
+import { googleLoginEnabled } from '../lambdas/frontend/auth/google-config';
 
 const app = new App();
+const devGoogleLoginEnabled = googleLoginEnabled(app.node.tryGetContext('devGoogleLoginEnabled'));
 const devAllowedClientCidr = devClientCidr(app.node.tryGetContext('devAllowedClientCidr')).cidr;
 const devFrontendAllowedClientCidr = devFrontendClientCidr(app.node.tryGetContext('devFrontendAllowedClientCidr'));
 
@@ -52,6 +54,7 @@ for (const environment of ['dev', 'demo'] as const) {
   const frontendStack = new FrontendStack(app, `${environment}FrontendStack`, {
     deploymentEnvironment: environment, stackName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND`,
     devFrontendAllowedClientCidr: environment === 'dev' ? devFrontendAllowedClientCidr : undefined,
+    devGoogleLoginEnabled: environment === 'dev' ? devGoogleLoginEnabled : undefined,
     env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
     synthesizer: new CliCredentialsStackSynthesizer(),
     description: `SOC Bot ${environment} private frontend, health API and email/password session routes`,

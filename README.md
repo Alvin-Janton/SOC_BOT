@@ -158,7 +158,18 @@ The frontend and legacy chat APIs use `SecurityPolicy_TLS13_1_2_2021_06` with `B
 
 The frontend now defines one `SOC-BOT-<ENV>-FRONTEND-AUTH` Lambda (Node.js 22, 256 MiB, 25 seconds) for email/password login, cookie-only me, current-session logout, signup, code confirmation/resend and password recovery/change. POSTs require JSON plus the exact configured CloudFront browser Origin; GET me permits an absent Origin but rejects an explicit mismatch or cross-site Fetch Metadata. Requests are limited to 8 KiB decoded bodies and reject unknown fields/query parameters. Login/me responses expose only userId/UTC expiry; registration returns fixed messages or safe errors without Set-Cookie. All responses use no-store, with login/logout cookies isolated from JSON. The handler's SDK/JWKS work shares a twenty-second budget. CloudFront API caching stays disabled and supported error-cache minimum TTLs are zero.
 
-Apply the administrator-reviewed boundary update first: the auth identity has exact-table GetItem/PutItem/DeleteItem/ConditionCheckItem/UpdateItem and exact-pool AdminGetUser, without Secrets Manager or investigation permissions. Existing workflows already deploy frontend and need no new variable or secret. Later login validation can use an operator-created enabled/confirmed local account with a permanent password; temporary-password, reset and MFA challenges are unsupported. Use the [private in-memory cookie jar example](Docs/FrontendStack/README.md#later-manual-auth-validation), which prompts for credentials rather than placing them in command-line literals. The developer does not create live accounts or seed metadata. Local checks do not prove live login/browser behavior, and these routes do not change the AI chat's temporary owner.
+Apply the administrator-reviewed boundary update first: the auth identity has exact-table GetItem/PutItem/DeleteItem/ConditionCheckItem/UpdateItem and exact-pool AdminGetUser, without Secrets Manager or investigation permissions. Password workflows need no Google configuration. Later login validation can use an operator-created enabled/confirmed local account with a permanent password; temporary-password, reset and MFA challenges are unsupported. Use the [private in-memory cookie jar example](Docs/FrontendStack/README.md#later-manual-auth-validation), which prompts for credentials rather than placing them in command-line literals. The developer does not create live accounts or seed metadata. Local checks do not prove live login/browser behavior, and these routes do not change the AI chat's temporary owner.
+
+Dev now stages an empty `SOC-BOT-DEV-GOOGLE-OAUTH` secret and account/Region-qualified
+Cognito domain. Optional `devGoogleLoginEnabled` (default false), forwarded from
+the dev Environment variable `DEV_GOOGLE_LOGIN_ENABLED`, enables separate Google
+code/PKCE login without changing the password client. Foundation permissions,
+operator-provisioned credentials and Google redirect setup must precede activation.
+The exact-pool pre-signup guard fails closed on local email collisions and lookup
+errors; callback validates browser-bound one-time proof before reusing fixed
+twelve-hour opaque sessions. Demo Google/linking and chat identity integration
+remain deferred. Follow the [staged setup and limitations](Docs/FrontendStack/Google-Login.md);
+no credentials are resolved during synthesis and no deployment is implied.
 
 Signup and resend return the same fixed 202 guidance, including duplicate or known ineligible accounts; this does not prove account creation or email delivery. Confirmation returns 200 only after Cognito success and requires a subsequent login. Registration does not touch DynamoDB, create/clear cookies or change existing sessions. The existing pool/client, exact-pool AdminGetUser grant and runtime boundaries remain unchanged; signup/confirmation/resend themselves are public Cognito APIs that do not evaluate IAM.
 
