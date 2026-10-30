@@ -4,6 +4,11 @@
 
 This document records the AI-stack decisions discussed so far. `Docs/Final_Spec.md` remains the broader project specification. Where this temporary document introduces a more specific choice or a different contract, reconcile the two documents before implementation.
 
+Dev frontend also stages [opt-in Google login](FrontendStack/Google-Login.md) with
+a separate client and pre-creation collision guard. Its opaque sessions remain
+disconnected from the chat API's temporary owner; demo Google and account linking
+are deferred. This does not change AI roles, tools or conversation ownership.
+
 ## 1. Scope
 
 The AI stack provides the server-side chat, model orchestration, read-only investigation tools, playbook retrieval, and conversation persistence. Cognito authentication integration with the chat route is a separate work item. Cognito BFF code may be developed as an isolated module, but it is not wired to the chat route until that integration is implemented. The BFF module will authenticate through Cognito, validate the resulting token, derive the Cognito `sub`, and store a server-side DynamoDB session mapping from an opaque session ID to that identity. The browser sends the HttpOnly session cookie on eligible requests; the backend resolves the user from the session record without calling Cognito on every chat request. Until then, CDK supplies a fixed environment-specific `TEMPORARY_OWNER_ID`; invalid or cross-environment configuration fails closed. The approved temporary demo-definition exception supersedes the earlier dev-only restriction, not the requirement for Cognito in the completed application. Demo must not be deployed before authentication/security is ready. The AI stack must never trust identity supplied in a request body.

@@ -1,0 +1,120 @@
+Title: Explicit Google account linking for existing password users
+Date: 2026-10-30
+Repo: C:\Users\alvin\OneDrive\Desktop\GitHub_Repos\SOC_BOT
+
+Goal:
+- Let an enabled, confirmed email/password user add one Google identity after fresh password proof and a new browser-bound Google authorization.
+- Preserve the existing Cognito sub, application userId, sessions' ownership model and chat history.
+- Keep linking separate from login, fail closed on conflicts and report partial/uncertain outcomes honestly.
+
+Scope and approved defaults:
+- Code, CDK/IAM wiring and documentation only. Do not deploy, invoke AWS APIs, populate secrets, register Google callbacks, run workflows, commit or push.
+- Do not create, expand, rewrite or delete any tests, fixtures or mock harnesses. Relevant existing checks may run.
+- Dev only, following the reviewed Google-login activation setting; demo remains unchanged. Finish/review the Google-login slice before implementing on top of it; current uncommitted code is not automatically approved.
+- Only local email/password -> add Google. No Google-only -> add password, merging existing accounts, history migration, automatic email linking, identity replacement, unlinking, account deletion or MFA.
+- Require matching verified emails as a restriction, never as identity proof. Identify the external account by its verified Google sub.
+- Google may use an existing Google browser session. We require a new validated authorization transaction, not guaranteed Google-password re-entry.
+- Same identity already linked: harmless already-linked result without mutation or session changes. Different Google identity already linked: reject without replacement.
+- Newly completed linking revokes application sessions and requires login again. No new application session is issued by the linking callback.
+
+Plan:
+1) Reconcile the completed Google slice and define explicit linking contracts.
+   - Read AGENTS.md, current frontend/auth guides, google-login.ts, google-provider.ts, google-config.ts, oauth-transactions.ts, session/user-state helpers and frontend CDK/foundation wiring.
+   - Add focused google-linking.ts and google-link-provider.ts modules under infra/lambdas/frontend/auth, plus a small linking-state helper if needed. Keep the existing auth Lambda; reuse bounded HTTP, cookie, JWT-verification and DynamoDB primitives without an unrelated framework/refactor.
+   - POST /api/auth/link/google/start accepts exactly {"currentPassword":"..."}, the existing opaque session cookie and exact browser Origin. Return HTTP 200 {"authorizationUrl":"<fixed Google endpoint with this attempt's public parameters>","expiresAt":"<UTC ISO timestamp>"} plus a separate linking cookie. Returning JSON lets a later UI navigate explicitly instead of following a cross-origin redirect from a password-bearing POST.
+   - GET /api/auth/link/google/callback accepts only the bounded expected OAuth query and both required cookies. It returns a fixed success/no-op/error body; no user-selected return URL, token, provider identifier, password or email in response JSON.
+   - Use existing password-input bounds and no transformation. Derive the destination account from the authenticated session, never submitted email/sub/username/provider configuration.
+   - Keep normal Google login's signed-out requirement. Linking instead requires a signed-in user; do not reuse requireSignedOut or send linking through Cognito's collision-blocked login callback.
+
+2) Capture fresh local proof and a five-minute, session-bound linking transaction.
+   - Resolve the original cookie against strict session and USER metadata. Require an enabled canonical local CONFIRMED account with a verified email; unconfirmed/disabled/recovery-required/challenged/Google-only accounts are ineligible.
+   - Add a narrowly scoped internal session-proof accessor if necessary: the current public AuthSession exposes only sub/expiresAt, but linking needs the exact validated session key/hash, session_version and expiry. Keep public me/login contracts unchanged and never expose the bearer token or internal records.
+   - Capture the server-owned destination sub, canonical local username, normalized-email hash, original session hash/key, enabled session_version and expiry before fresh password verification.
+   - Reuse the current canonical password authenticator to prove currentPassword for that exact subject, without creating a replacement session or persisting Cognito tokens. Revalidate the original session/version afterward; do not adopt a newer version after stale proof.
+   - Create a distinct strict OAUTH_TRANSACTION variant with purpose=google_link, provider=Google, a separate key namespace such as OAUTH_LINK#<sha256(state)>, state/browser-binding/nonce hashes, PKCE verifier, Google OAuth client ID, fixed callback, captured destination/session/version/email bindings, attempt ID and created_at/expires_at.
+   - Expires_at must be no later than five minutes from this attempt's proof window and no later than the source session expiry. Enforce expiry in code. No passwords, authorization codes, raw binding-cookie values, Google ID tokens or refresh tokens in DynamoDB.
+   - Use a separate __Host-soc_bot_google_link cookie, Secure/HttpOnly/SameSite=Lax/Path=/ without Domain, with the same short expiry. Keep ordinary Google login's cookie, ten-minute lifetime and transaction shape unchanged.
+   - Reuse primitives or discriminated variants only where they preserve strict purpose isolation: a login transaction must never authorize linking, and a linking transaction must never mint a login session.
+
+3) Serialize sensitive linking operations with minimal same-table bookkeeping.
+   - Use a conditional per-destination guard, e.g. LINK_GUARD#<sub>, to prevent concurrent link attempts from both passing the empty-identities check. Store only strict operational fields: entity type, destination, attempt/owner, phase and bounded pending expiry; no browser bearer or credentials.
+   - Acquire it with the transaction and original session/USER checks atomically where practical, using existing exact-table transactional permissions. Another active attempt returns safe 409. Never steal an unexpired guard or let an old callback delete/release a newer owner's record.
+   - A pending attempt can expire/release conditionally. Before the Cognito mutation, durably mark its owned operation dispatched/in-doubt, retaining enough non-secret identity hashes for operator reconciliation. Remove automatic expiry from an in-doubt mutation marker: elapsed browser proof is not proof that a remote mutation never committed.
+   - Reserve the verified Google subject hash to the same destination in a small provider-ownership record when preparing dispatch, so an identity already claimed through this application is never reassigned to a different user. Use conditional writes; do not authorize login from this bookkeeping.
+   - Confirmed no-op/rejection/cancellation before mutation may release only that attempt's pending records. Uncertain dispatch or incomplete post-link revocation stays blocked for manual recovery; do not clear ownership merely because a read is temporarily empty.
+   - Cognito remains authoritative for identities; these records provide concurrency/recovery fencing, not an alternate user directory. No new table/GSI, background worker, queue, generalized saga or periodic cleanup service.
+   - Preserve existing USER_AUTH_STATE and AUTH_SESSION schemas. Document the extra item shapes, ownership, allowed phase transitions and cleanup rules.
+
+4) Obtain Google proof directly, without creating a new Cognito profile.
+   - Reuse the existing dev Google Web OAuth application's clientId/clientSecret from SOC-BOT-DEV-GOOGLE-OAUTH, but register a second exact callback at https://<CloudFront hostname>/api/auth/link/google/callback.
+   - Normal login still redirects Google -> Cognito /oauth2/idpresponse. Linking deliberately uses Google -> our linking callback, because the normal Cognito creation guard would reject the unlinked local-account collision before a usable application callback.
+   - Read AWSCURRENT through bounded Secrets Manager calls in this backend only; strictly validate the small credential object and use a short bounded cache if needed. Do not put the client secret into Lambda environment variables, context, templates, outputs, URLs, logs or response bodies. Pin/compare the attempt's public client ID; a rotation/configuration mismatch invalidates the attempt.
+   - Send the browser to the fixed Google authorization endpoint with response_type=code, fixed client/callback, only openid/email/profile, fresh state/nonce and S256 PKCE. Account selection is permitted; do not request offline API access or claim an account chooser/consent prompt forces Google-password entry.
+   - At callback, require the exact API/stage/method/origin authorizer, matching link cookie/state, strict purpose/configuration/session bindings, and nonexpired record. Allow the legitimate cross-site top-level GET only on this route; leave POST CSRF/Origin checks unchanged.
+   - Reconcile duplicate/conflicting query/header maps with the existing strict parser pattern. Accept bounded Google callback metadata such as scope (present in Google's documented response example); explicitly allow/ignore any supported authuser/prompt/hd fields rather than treating them as identity proof or blindly reusing Cognito's narrower callback parser. Require state plus exactly the supported code/error alternative. Consume an owned transaction atomically once before code exchange; an uncertain consume, replay, missing/mismatched cookie or stale proof never permits mutation.
+   - Cancellation/error consumes and clears only the owned linking flow and releases only its pending guard. Preserve the application session and any unrelated login flow.
+   - Exchange the code at Google's fixed token endpoint server-side using the verifier/client credentials/exact callback, with no redirect following or automatic retry of an uncertain code redemption. Bound time and response bytes within the current auth request budget.
+   - Verify the Google ID token cryptographically using the existing maintained JWT verifier dependency, fixed Google JWKS and documented issuer allowlist, exact Google client audience/authorized-party checks, live timestamps and matching nonce. Require a newly issued attempt-bound token, not a browser-submitted arbitrary token.
+   - Require email_verified=true and the normalized Google email to match both the original local-email binding and fresh canonical local verified email. Treat sub as an opaque bounded Google identifier, not a Cognito UUID. Do not authenticate by decoding unsigned claims or using email alone.
+   - Discard all Google access/refresh/ID tokens after proof. No token storage or Google API access.
+
+5) Revalidate, link the verified identity and complete revocation.
+   - Immediately before mutation, revalidate the same application session key, destination subject, session_version, enabled metadata, canonical local status/email and five-minute proof deadline. Check the owned dispatch guard and verified provider reservation. Do not refresh or substitute a different session.
+   - Read the destination's canonical Cognito identities with bounded parsing. A missing identities attribute can mean none; malformed/duplicate/ambiguous entries fail closed. Do not weaken ordinary Google login's requirement for one valid Google identity.
+   - Exactly the same Google sub already linked: return 200 {"message":"This Google account is already linked."}, clear only the linking cookie, and make no linking/version/session mutation.
+   - Another Google sub, multiple Google identities, a provider-owned profile already existing separately, or an identity owned by another destination: safe 409 and no mutation. Use canonical provider-profile lookup and existing ownership records; do not delete a federated profile, move a link or search/merge by email to work around a conflict. Return unsupported ownership assumptions to the planner.
+   - For a genuinely new link, use AdminLinkProviderForUser with the configured pool, DestinationUser.ProviderName=Cognito and canonical local username, and SourceUser.ProviderName=Google, ProviderAttributeName=Cognito_Subject, ProviderAttributeValue=<verified Google sub>. No caller-controlled destination/source IDs and no unlink/replacement API.
+   - Disable automatic retries of this mutation; maintain enough deadline reserve for post-mutation version persistence and safe response, consistent with the password slice. Do not increase Lambda/API timeouts or silently retry a consumed flow.
+   - After confirmed link success, verify the exact destination/provider association with bounded canonical reads. Complete the provider-ownership/operation bookkeeping and a fresh conditional session_version increment, preserving disabled and identity fields. Use a stable transaction token/identical request for SDK retries, not a blind ADD or inference from another operation's higher version.
+   - Reuse/generalize the existing revocation mechanics narrowly with operation-specific public errors; do not leak password-specific error codes into linking or change password behavior.
+   - Only after link and application revocation are confirmed, return 200 {"message":"Google sign-in linked. Sign in again."}, clearing the application and linking cookies as independent Set-Cookie headers. No replacement session, sub change or history move.
+   - Cognito and DynamoDB are not atomic. Rechecking session state minimizes but cannot eliminate a logout/revocation race immediately before an external API call; do not promise rollback of an already dispatched link.
+
+6) Preserve honest partial-success/uncertainty semantics and safe recovery.
+   - Pre-mutation validation/conflict/failed proof: safe 400/401/403/409 as appropriate, no usable-session clearing or version increment. Throttling/backend failures use the existing authored 429/503 pattern.
+   - Confirmed link, unconfirmed application-session revocation: 503 GOOGLE_LINKED_SESSION_REVOCATION_UNCONFIRMED with "Google sign-in was linked, but signing out existing sessions could not be confirmed. Contact the administrator." Clear the current application/linking cookies but state that other sessions may remain usable.
+   - Ambiguous Cognito dispatch or association verification: 503 GOOGLE_LINK_OUTCOME_UNCONFIRMED with fixed guidance that the account may be linked and administrator review is needed before retrying. Never claim no change, automatically unlink, adopt a different identity or release an in-doubt guard on that basis.
+   - Existing Cognito identity data can prove an exact confirmed association, not ownership of arbitrary submitted claims. Do not equate one absent/unavailable read after timeout with a confirmed noncommit or exactly-once operation.
+   - Retain safe request ID and fixed operation/phase/outcome logging only. Never log emails, subjects/provider identifiers, passwords, Google credentials/tokens, raw provider errors, query strings, codes, state/verifiers, cookies/hashes or full stored records.
+   - Use no-store and Referrer-Policy: no-referrer on all new responses, with no external resources on callback output. Expire/clear only the matching linking cookie where ownership is established; failures must not remove another tab's newer attempt.
+   - Document administrator reconciliation: independently identify the destination, verify exact Cognito identities and recorded hashes, complete required conditional session revocation/bookkeeping, then release only the matching resolved guard. Missing/malformed state requires investigation. Do not rerun linking or delete/unlink users merely to finish revocation.
+   - A failed cleanup must not conceal a successful mutation. No automatic durable recovery worker or administrative HTTP recovery endpoint is approved.
+
+7) Wire dev-only routes and minimal IAM into existing constructs.
+   - Extend frontend-google-login.ts only to expose the existing credential ARN/public linking callback configuration; preserve its resource IDs, initial empty-secret provisioning, normal login client/provider/domain and collision guard.
+   - Extend frontend-auth.ts, frontend-stack.ts, google configuration, shared origin-route selection, HTTP types/parser and explicit handler dispatch for the two nested linking paths. Activate only with reviewed dev Google login configuration; demo and disabled-mode assemblies must not gain linking routes or privileges.
+   - Maintain exact origin-authorizer routes, API/source-account/stage/method Lambda invocation permissions, strict POST Origin/Fetch Metadata/JSON/body checks, and cookie-based session checks. The linking callback is not a blanket CORS or cross-site exemption.
+   - Give the dev auth role AdminLinkProviderForUser on only its exact pool and GetSecretValue for only AWSCURRENT of its exact Google credential secret. Keep existing exact-pool AdminGetUser and exact-table state permissions; add no ListUsers/Scan, unrelated secret read, broad Cognito mutation or Google network proxy.
+   - Add matching narrow dev APPLICATION boundary ceilings in cicd-foundation/policy-statements.ts for owned dev pools and the exact dev Google secret name/suffix, retaining protected tags, environment isolation and managed-policy size/attachment limits. Do not change demo/QUERY/GLUE boundaries unnecessarily.
+   - Do not grant linking or credential access to the collision guard, origin authorizer, AI functions or GitHub deployment identities. Foundation deployment remains a later administrator action before frontend deployment.
+   - Reuse the current activation setting/workflow forwarding; do not introduce another flag/workflow merely for linking. No new infrastructure construct or function unless a current-code conflict genuinely requires approval.
+   - Output only the public additional Google callback URL. Existing secret contents are populated through the established operator process, not implementation.
+
+8) Document and verify without adding tests or deploying.
+   - Update auth/FrontendStack guides, directly affected spec summaries and logs.md with routes, five-minute transaction/state shapes, same-email restriction, local-account-only scope, one-Google/no-unlink rule, no-op behavior, direct proof vs Cognito login and recovery limitations.
+   - Document the operator-only Google change: add the deployed /api/auth/link/google/callback URL to the existing Web client's authorized redirect URIs without removing Cognito's /oauth2/idpresponse. No new Google project, credentials or scopes are required.
+   - Document manual browser initiation via an authenticated same-origin POST returning authorizationUrl; preserve the browser session/link cookie when navigating. A URL pasted into a different browser/cookie jar cannot complete linking. No UI or new manual-test script in this slice.
+   - Developer runs existing Node.js 22 lint/build/tests, offline disabled/enabled-dev synthesis and existing IAM size/namespace checks. No new/modified tests or mocks, no live AWS checks, no dependency installs, workflow runs, account changes or deployment.
+   - Inspect templates for exact routes/grants, dynamic secret handling, demo/disabled-mode stability, no circular dependencies, unchanged normal Google-login and password behavior. Review response/header/log redaction and failure paths from source without claiming that static checks establish live security.
+   - Later operator validation after separate approval: link a matching verified Google identity to a fresh local account, prove unchanged sub/history and login by both methods; replay both old private cookies and expect 401 after new linking; repeat the same link as a no-op; reject a different identity, mismatched email, separate existing Google profile and Google-only destination.
+   - Also validate wrong password, missing session, logout/reset/revocation or account switch during the flow, expired/mismatched/replayed transaction, cancellation and concurrent linking attempts. Preserve normal collision rejection for unlinked accounts and normal Google login to a linked local destination.
+   - Report all files changed, checks actually run, operational prerequisites, unresolved assumptions and unexercised partial-failure paths. Do not weaken checks, add tests or deploy to force completion.
+
+Risks/Notes:
+- Implement after Google login is reviewed and validated, not concurrently against an unstable working-tree snapshot. This plan does not review or approve its unfinished implementation.
+- This privileged flow adds a permanent authentication method; cached browser sessions, matching emails and forged ClientMetadata cannot substitute for the required proofs.
+- Small same-table operation/ownership records are approved solely to serialize linking and retain uncertainty for manual reconciliation, not to create a parallel identity system or recovery service.
+- Manually created/out-of-band links or historical inconsistent profiles require operator review; never invent a safe association from an email match or automatically repair them.
+- Existing session_version invalidation acts on subsequent protected requests, not already-authorized in-flight work or Google-wide sessions. The existing non-atomic cross-service failure model remains.
+- Public demo, unlinking/replacement, Google-first password enrollment, multi-account/history consolidation, UI and authenticated AI-stack cutover remain deferred.
+
+Tests/Verification:
+- Planning only: relevant current source and official documentation inspected. No application edits, tests, AWS calls, deployment or workflow runs performed while writing this plan.
+- All implementation checks and operator validations above remain future work.
+
+References:
+- Cognito linking API and source/destination identifiers: https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminLinkProviderForUser.html
+- Existing federated profiles and linking considerations: https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-identity-federation-consolidate-users.html
+- Google authorization and ID-token validation: https://developers.google.com/identity/openid-connect/openid-connect
+- Username attributes and supported email lookups: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#customizing-sign-in-attributes
+- Transaction idempotency: https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html

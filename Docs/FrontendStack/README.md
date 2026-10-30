@@ -2,14 +2,17 @@
 
 ## Implemented scope
 
-The stack defines infrastructure and nine email/password authentication routes.
+The stack defines infrastructure and nine email/password authentication routes,
+plus [operator-activated dev Google login](Google-Login.md).
 Frontend UI and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
 resources. Account/Region values are CDK tokens, not committed account IDs.
 
-No frontend UI/assets, Google provider/domain/credentials,
+Dev stages an empty Google credential secret and Cognito domain; explicit activation
+adds a dedicated client/provider, pre-creation guard and two Google GET routes.
+Demo Google stays disabled. No frontend UI/assets,
 identity pool, live user, account-linking flow, chat integration, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
@@ -33,6 +36,7 @@ exposes the new authentication construct:
 | [FrontendWaf](../../infra/lib/stacks/frontend/frontend-waf.ts) | Dev-only `SOC-BOT-DEV-FRONTEND-CLIENTS` and `SOC-BOT-DEV-FRONTEND-ALLOWLIST`, CLOUDFRONT scope in `us-east-1`; one IPv4 `/32`, default BLOCK, metrics enabled and sampling disabled. |
 | [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads only its exact secret and writes its own logs. |
 | [FrontendAuth](../../infra/lib/stacks/frontend/frontend-auth.ts) | `SOC-BOT-<ENV>-FRONTEND-AUTH`, Node.js 22, 256 MiB, 25 seconds, seven-day logs and an exact-pool/table APPLICATION role; wired after hosting. |
+| [FrontendGoogleLogin](../../infra/lib/stacks/frontend/frontend-google-login.ts) | Dev-only staged empty credential secret/domain; strict activation adds Google, a dedicated code/PKCE client and exact-pool pre-signup guard. See [setup and limits](Google-Login.md). |
 
 Cognito permits self-service signup and case-insensitive email sign-in, requires
 email, automatically verifies it using a code, and uses email-only recovery. No
@@ -61,8 +65,8 @@ hostname with origin path `/dev` or `/demo`, retaining `/api/health`. It returns
 only `{"status":"ok"}` after origin verification. The REQUEST authorizer can read
 Secrets Manager; the health MOCK response exposes no authentication diagnostic.
 API Gateway has no proxy/catch-all or chat route. Invocation permissions
-target only this API/source account: its authorizer and nine exact
-stage/method auth integrations. Both
+target only this API/source account: its authorizer and the exact
+stage/method auth integrations, including Google only when dev activation is enabled. Both
 request-validation flags are enabled; this no-input MOCK
 does not define a body schema.
 
@@ -70,7 +74,7 @@ The `/api/*` CloudFront behavior uses HTTPS to the origin, disabled caching, and
 the AWS-managed `ALL_VIEWER_EXCEPT_HOST_HEADER` origin-request policy to forward
 cookies, query strings and viewer headers without sending the viewer Host to API
 Gateway. It allows all API methods for later integration, but only the explicit
-health and nine documented auth routes exist now. Set-Cookie responses are not cached. Unknown
+health, nine email/password routes and optionally two dev Google routes exist now. Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
 
 Both frontend and legacy chat Regional APIs use
@@ -131,7 +135,7 @@ while missing, malformed, repeated or conflicting values are rejected. Fixed
 64-byte buffers are compared with `timingSafeEqual`. No event/header/secret or SDK
 response is logged.
 
-API authorization caching is disabled (TTL zero). Only health and the nine auth
+API authorization caching is disabled (TTL zero). Only health and the enabled auth
 routes on the configured account/Region/API/stage can receive an Allow policy
 for the single incoming method;
 the principal is `cloudfront-origin`, without a Cognito user identity. Invalid
@@ -467,13 +471,13 @@ endpoint. Local workflow edits are not permission to launch demo or change
 GitHub Environment protection settings.
 
 Stack outputs contain only the CloudFront hostname/distribution ID, bucket/API
-IDs, health URL, pool/client IDs and auth-table name. They do not expose tokens,
+IDs, health URL, pool/client IDs, auth-table name and dev Google public domain/redirect/secret ARN. They do not expose tokens,
 credentials or actual session records. This slice's lint/build/existing-test and
 offline synthesis results do not establish live AWS, email, cookie/browser or
 authentication correctness.
 
 Later product slices must add custom email/password UI,
-Google login/linking with fresh proof of both methods, comprehensive
+demo Google activation, linking with fresh proof of both methods, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
 sessions but do not change the orchestrator's temporary identity. MFA and
@@ -540,11 +544,12 @@ outcomes from local compilation/synthesis. First-login initialization is not
 recovery for lost revocation metadata: preserve USER records and review restoration
 before recreating them. Existing sessions can outlive Cognito token expiry and
 out-of-band console sign-out/disablement until application versions are revoked.
-Signup/confirmation/reset UI, Google/linking, comprehensive authentication abuse
+Signup/confirmation/reset UI, demo Google/linking, comprehensive authentication abuse
 controls and chat ownership/Stop integration remain deferred. `/api/auth/me`
 establishes only frontend session identity; it does not change the orchestrator's
-temporary owner. Existing workflows deploy these resources without a new variable
-or origin-secret setting; public demo still requires the remaining security work.
+temporary owner. Password deployment needs no Google setting; dev Google uses the
+explicit activation variable and operator-provisioned secret described above.
+Public demo still requires the remaining security work.
 
 ## Later manual registration validation
 
@@ -600,7 +605,7 @@ checks or from 202 alone. Signup delivery/quota errors may already have created 
 unconfirmed account; wait and use resend rather than deleting/recreating it.
 After a lost confirmation success response, login is the recovery path; a repeated
 confirmation need not return success. Cognito controls expiry and delivery, not
-local timers. Public-demo email/abuse review, Google/linking,
+local timers. Public-demo email/abuse review, demo Google/linking,
 UI and authenticated chat ownership remain separate work.
 
 ## Later manual password validation

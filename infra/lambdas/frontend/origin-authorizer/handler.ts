@@ -1,5 +1,6 @@
 import { createOriginGuard, record } from '../shared/origin-guard';
-import { FRONTEND_ORIGIN_ROUTES } from '../shared/origin-routes';
+import { frontendOriginRoutes } from '../shared/origin-routes';
+import { googleLoginEnabled } from '../auth/google-config';
 
 interface OriginConfiguration {
   readonly secretArn: string;
@@ -7,6 +8,7 @@ interface OriginConfiguration {
   readonly account: string;
   readonly apiId: string;
   readonly stage: 'dev' | 'demo';
+  readonly googleEnabled: boolean;
 }
 
 interface AuthorizerPolicy {
@@ -33,7 +35,9 @@ function configuration(): OriginConfiguration {
     throw new Error('Unauthorized');
   }
 
-  return { secretArn, methodArn, account: method[3], apiId: method[4], stage };
+  const googleEnabled = googleLoginEnabled(process.env.GOOGLE_LOGIN_ENABLED);
+  if (googleEnabled && stage !== 'dev') throw new Error('Unauthorized');
+  return { secretArn, methodArn, account: method[3], apiId: method[4], stage, googleEnabled };
 }
 
 let guard: ReturnType<typeof createOriginGuard> | undefined;
@@ -45,7 +49,7 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
     const config = configuration();
     const event = record(raw);
     const requestContext = record(event?.requestContext);
-    const route = FRONTEND_ORIGIN_ROUTES.find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
+    const route = frontendOriginRoutes(config.googleEnabled).find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
     const apiArn = config.methodArn.slice(0, config.methodArn.indexOf('/'));
     const methodArn = route ? `${apiArn}/${config.stage}/${route.method}${route.resource}` : undefined;
 

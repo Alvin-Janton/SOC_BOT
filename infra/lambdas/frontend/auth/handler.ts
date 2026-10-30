@@ -7,13 +7,15 @@ import { authHttpConfiguration, authHttpResponse, AuthHttpRequest, AuthHttpRespo
 import { AuthSession } from './sessions';
 import { createCognitoRegistration, REGISTRATION_ACCEPTED_RESPONSE, SIGNUP_CONFIRMED_RESPONSE } from './registration';
 import { createPasswordService, PASSWORD_RECOVERY_RESPONSE, PASSWORD_UPDATED_RESPONSE } from './passwords';
+import { createGoogleLogin } from './google-login';
+import { GoogleLoginError, oauthCookie } from './oauth-transactions';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
   return { userId: session.sub, expiresAt: new Date(session.expiresAt * 1_000).toISOString() };
 }
 
-/** Explicitly dispatches nine origin-protected auth routes under one bounded request budget. */
+/** Explicitly dispatches origin-protected auth routes under one bounded request budget. */
 export async function handler(raw: unknown, context: { awsRequestId: string; getRemainingTimeInMillis(): number }): Promise<AuthHttpResponse> {
   const startedAt = Date.now();
 
@@ -22,12 +24,24 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
 
   let request: AuthHttpRequest | undefined;
   let outcome = 'SESSION_UNAVAILABLE';
+  const googleRoute = raw !== null && typeof raw === 'object' && 'resource' in raw && typeof raw.resource === 'string'
+    && ['/api/auth/google/start', '/api/auth/google/callback'].includes(raw.resource);
 
   try {
     const budget = createAuthRequestBudget(context.getRemainingTimeInMillis());
     const config = authHttpConfiguration();
     request = parseAuthHttpRequest(raw, config);
     switch (request.route) {
+      case 'google-start': {
+        const response = await createGoogleLogin(config, budget).start(request.cookieHeader);
+        outcome = 'GOOGLE_LOGIN_STARTED';
+        return response;
+      }
+      case 'google-callback': {
+        const response = await createGoogleLogin(config, budget).callback(request.query, request.cookieHeader);
+        outcome = 'GOOGLE_LOGIN_SUCCEEDED';
+        return response;
+      }
       case 'forgot-password': {
         await createPasswordService(config.auth, budget).forgot(request.input);
         outcome = 'PASSWORD_RECOVERY_ACCEPTED';
@@ -80,14 +94,15 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
   }
 
   catch (error) {
-    const safe = error instanceof BffAuthError ? error : new BffAuthError('session_unavailable');
+    const safe = error instanceof BffAuthError ? error : googleRoute ? new GoogleLoginError() : new BffAuthError('session_unavailable');
     outcome = safe.code.toUpperCase();
     const clearInvalid = request?.route === 'me' && safe.code === 'authentication_required'
       && (request.invalidCookie || request.cookieHeader !== undefined);
     const clearPasswordPartial = (request?.route === 'reset-password' || request?.route === 'change-password')
       && safe.code === 'password_changed_session_revocation_unconfirmed';
-    return authHttpResponse(safe.statusCode, { error: { code: outcome, message: safe.message }, requestId },
-      clearInvalid || clearPasswordPartial ? clearSessionCookie('Lax') : undefined);
+    const response = authHttpResponse(safe.statusCode, { error: { code: outcome, message: safe.message }, requestId },
+      clearInvalid || clearPasswordPartial ? clearSessionCookie('Lax') : error instanceof GoogleLoginError && error.clearOAuthCookie ? oauthCookie() : undefined);
+    return googleRoute ? { ...response, headers: { ...response.headers, 'Referrer-Policy': 'no-referrer' } } : response;
   } finally {
     // Never log bodies, identities, headers, cookies, hashes, provider failures or token values.
     console.info(JSON.stringify({ event: 'frontend_auth', requestId, route: request?.route ?? 'unvalidated', outcome,

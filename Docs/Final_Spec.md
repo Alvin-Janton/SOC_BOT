@@ -412,7 +412,7 @@ Session requirements:
 - Persistent `__Host-soc_bot_session` cookie with `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` and no `Domain`
 - Fixed 43,200-second application sessions independent of Cognito ID-token expiry; verify the JWT is live at login, without lengthening Cognito token validity
 - Permanent `USER#sub` enabled/version metadata and expiring `SESSION#hash` records; strongly consistent session/user reads enforce expiry, disablement and equal versions, independently of DynamoDB TTL cleanup
-- Trusted subject/version capture before credential verification and conditional session creation; never adopt a newer version after stale authentication
+- Password login captures trusted subject/version before credential verification; Google first verifies its federated identity, then captures enabled/version state before conditional session creation. Neither adopts a newer version after an issuance conflict.
 - Logout deletes or revokes server-side state
 - Protected routes validate the server-side session
 - Credential denials stay generic; safe unconfirmed-account/unsupported-challenge codes intentionally reveal limited account state
@@ -421,6 +421,21 @@ Session requirements:
 The MVP uses one authenticated-user role. RBAC is deferred.
 
 The [frontend foundation](FrontendStack/README.md) defines Cognito/auth storage and one origin-protected Lambda for POST login, GET me, POST logout and POST signup/confirm-signup/resend-confirmation/forgot-password/reset-password/change-password. Canonical AdminGetUser lookup, conditional first-login metadata, a pre-auth version snapshot, cryptographic JWT verification and fixed twelve-hour opaque sessions are implemented in source/CDK. POSTs require the exact configured CloudFront Origin; me reads durable state without Cognito or renewal. The role has exact-pool/table permissions, with exact-auth-table ConditionCheckItem and tagged-pool AdminGetUser ceilings. Local checks are not live/browser verification. Registration uses generic signup/resend acceptance, explicit code confirmation and a separate subsequent login without session mutation or new IAM grants. Password recovery/change now uses explicit code/current-password proof and post-success application-session revocation; confirmed partial success and uncertain provider outcomes are distinct. Only exact-table UpdateItem is added, with no boundary change. Disablement HTTP flows, frontend UI and chat identity integration remain deferred. Version increments revoke sessions without scanning; disablement also blocks new sessions. Cognito console changes do not synchronize application state or cancel accepted requests. Custom email/password UI and Google linking with fresh proof of both methods remain planned, with MFA deferred.
+
+Dev now stages an empty Google credential secret and account/Region-qualified
+Cognito domain. Strict `devGoogleLoginEnabled` activation (default false; demo
+disabled) adds exact GET `/api/auth/google/start` and `/api/auth/google/callback`,
+a dedicated Google code/PKCE client and an exact-pool pre-signup collision guard.
+The password client and pool sign-in configuration remain unchanged. One-time,
+ten-minute browser-bound state, nonce and verifier proof precede callback exchange;
+verified Cognito sub and conditional fixed twelve-hour opaque-session persistence
+precede cookies. No automatic linking, ListUsers, runtime Google-secret read or
+new chat identity is introduced. Only definite UserNotFoundException permits
+absence; all local-account statuses, malformed results and lookup failures deny
+unlinked creation. AWS's email-username API contract and operator-verified pool
+settings justify the lookup; live unconfirmed-user lookup remains untested.
+See [Google setup, ownership and limits](FrontendStack/Google-Login.md) for staged
+operator provisioning, race/returning-user behavior and deferred browser validation.
 
 ---
 

@@ -11,3 +11,13 @@ export const FRONTEND_ORIGIN_ROUTES = [
   { route: 'reset-password', method: 'POST', resource: '/api/auth/reset-password' },
   { route: 'change-password', method: 'POST', resource: '/api/auth/change-password' },
 ] as const;
+
+const GOOGLE_ORIGIN_ROUTES = [
+  { route: 'google-start', method: 'GET', resource: '/api/auth/google/start' },
+  { route: 'google-callback', method: 'GET', resource: '/api/auth/google/callback' },
+] as const;
+
+/** Includes only explicitly activated Google routes; password and health routes remain unchanged. */
+export function frontendOriginRoutes(googleEnabled: boolean) {
+  return googleEnabled ? [...FRONTEND_ORIGIN_ROUTES, ...GOOGLE_ORIGIN_ROUTES] : [...FRONTEND_ORIGIN_ROUTES];
+}

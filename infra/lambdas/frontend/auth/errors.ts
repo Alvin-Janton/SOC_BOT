@@ -3,9 +3,11 @@ export type BffAuthErrorCode = 'invalid_configuration' | 'authentication_failed'
   | 'authentication_challenge' | 'throttled' | 'invalid_signup_password' | 'confirmation_failed'
   | 'registration_unavailable' | 'registration_throttled' | 'invalid_new_password' | 'password_reset_failed'
   | 'password_change_failed' | 'password_service_unavailable' | 'password_update_unconfirmed'
-  | 'password_changed_session_revocation_unconfirmed';
+  | 'password_changed_session_revocation_unconfirmed' | 'google_login_failed' | 'sign_out_required';
 
 const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: number }> = {
+  google_login_failed: { message: 'Google sign-in could not be completed. Try your existing sign-in method or account recovery.', statusCode: 401 },
+  sign_out_required: { message: 'Sign out before starting another login.', statusCode: 409 },
   invalid_configuration: { message: 'Authentication is not configured.', statusCode: 503 },
   authentication_failed: { message: 'Email or password is incorrect.', statusCode: 401 },
   authentication_required: { message: 'Authentication required.', statusCode: 401 },

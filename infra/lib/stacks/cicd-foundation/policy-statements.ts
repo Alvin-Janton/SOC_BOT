@@ -292,10 +292,19 @@ function cognitoUserPoolStatements(resources: EnvironmentResources): PolicyState
         'cognito-idp:AddCustomAttributes', 'cognito-idp:CreateUserPoolClient', 'cognito-idp:DeleteUserPool',
         'cognito-idp:DeleteUserPoolClient', 'cognito-idp:DescribeUserPool', 'cognito-idp:DescribeUserPoolClient',
         'cognito-idp:ListTagsForResource', 'cognito-idp:UpdateUserPool', 'cognito-idp:UpdateUserPoolClient',
+        ...(resources.environment === 'dev' ? [
+          'cognito-idp:CreateUserPoolDomain', 'cognito-idp:UpdateUserPoolDomain', 'cognito-idp:DeleteUserPoolDomain',
+          'cognito-idp:CreateIdentityProvider', 'cognito-idp:DescribeIdentityProvider',
+          'cognito-idp:UpdateIdentityProvider', 'cognito-idp:DeleteIdentityProvider',
+        ] : []),
       ],
       resources: [userPoolArn],
       conditions: { StringEquals: resourceTags },
     }),
+    ...(resources.environment === 'dev' ? [new PolicyStatement({
+      sid: 'DescribeDevCognitoDomain', actions: ['cognito-idp:DescribeUserPoolDomain'], resources: ['*'],
+      conditions: { StringEquals: { 'aws:RequestedRegion': Aws.REGION } },
+    })] : []),
     new PolicyStatement({
       sid: `CreateTagged${title}CognitoUserPool`,
       actions: ['cognito-idp:CreateUserPool'], resources: ['*'],
@@ -488,31 +497,32 @@ export function frontendWafStatements(resources: EnvironmentResources): PolicySt
   ];
 }
 
-/** Grants only the frontend origin-secret lifecycle, preserving demo retention and protected ownership tags. */
+/** Grants exact frontend origin/optional dev Google secret lifecycle, preserving ownership and demo retention. */
 export function frontendOriginSecretStatements(resources: EnvironmentResources): PolicyStatement[] {
   const title = capitalize(resources.environment);
-  const secretArn = frontendOriginSecretArn(resources.environment);
+  const secretArns = [frontendOriginSecretArn(resources.environment), ...(resources.environment === 'dev'
+    ? [`arn:${Aws.PARTITION}:secretsmanager:${Aws.REGION}:${Aws.ACCOUNT_ID}:secret:SOC-BOT-DEV-GOOGLE-OAUTH-??????`] : [])];
   const ownership = { Project: 'SOC_BOT', Environment: resources.environment, ManagedBy: 'CDK' };
   const resourceTags = { StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:ResourceTag/${key}`, value])) };
   const systemKeys = ['aws:cloudformation:stack-id', 'aws:cloudformation:stack-name', 'aws:cloudformation:logical-id'];
   return [
     new PolicyStatement({ sid: `CreateTag${title}FrontendOriginSecret`, actions: ['secretsmanager:CreateSecret', 'secretsmanager:TagResource'],
-      resources: [secretArn], conditions: {
+      resources: secretArns, conditions: {
         StringEquals: Object.fromEntries(Object.entries(ownership).map(([key, value]) => [`aws:RequestTag/${key}`, value])),
         'ForAllValues:StringEquals': { 'aws:TagKeys': [...Object.keys(ownership), ...systemKeys] },
       } }),
     new PolicyStatement({ sid: `Read${title}FrontendOriginSecret`,
-      actions: ['secretsmanager:DescribeSecret', 'secretsmanager:GetSecretValue'], resources: [secretArn] }),
+      actions: ['secretsmanager:DescribeSecret', 'secretsmanager:GetSecretValue'], resources: secretArns }),
     new PolicyStatement({ sid: `Update${title}FrontendOriginSecret`,
       actions: ['secretsmanager:PutSecretValue', 'secretsmanager:UpdateSecret',
         ...(resources.environment === 'dev' ? ['secretsmanager:DeleteSecret'] : [])],
-      resources: [secretArn], conditions: resourceTags }),
+      resources: secretArns, conditions: resourceTags }),
     new PolicyStatement({ sid: `Untag${title}FrontendOriginSystemTags`, actions: ['secretsmanager:UntagResource'],
-      resources: [secretArn], conditions: { ...resourceTags,
+      resources: secretArns, conditions: { ...resourceTags,
         'ForAllValues:StringEquals': { 'aws:TagKeys': systemKeys }, Null: { 'aws:TagKeys': 'false' },
       } }),
     new PolicyStatement({ sid: `Protect${title}FrontendOriginTags`, effect: Effect.DENY, actions: ['secretsmanager:UntagResource'],
-      resources: [secretArn], conditions: { 'ForAnyValue:StringEquals': { 'aws:TagKeys': Object.keys(ownership) } } }),
+      resources: secretArns, conditions: { 'ForAnyValue:StringEquals': { 'aws:TagKeys': Object.keys(ownership) } } }),
     new PolicyStatement({ sid: `Generate${title}FrontendOriginToken`, actions: ['secretsmanager:GetRandomPassword'],
       resources: ['*'], conditions: { StringEquals: { 'aws:RequestedRegion': Aws.REGION } } }),
   ];

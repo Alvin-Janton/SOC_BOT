@@ -166,7 +166,7 @@ export class CicdFoundationStack extends Stack {
       `SOC_BOT_${upper}_CFN_AI_APPLICATION`,
       aiApplicationStatements(resources),
       this.iamWildcardFindings('ai', environment),
-      'Application resources use the environment prefix; bootstrap assets are read-only. Cognito creation requires Resource "*" with mandatory environment ownership request tags; generated pool IDs require an account/Region-scoped wildcard. Existing mismatched ownership tags deny retagging, but pools without conflicting tags can be claimed. Only the three exact CloudFormation system tag keys may be removed; any protected ownership key is explicitly denied.',
+      'Application resources use the environment prefix; bootstrap assets are read-only. Cognito creation requires Resource "*" with mandatory ownership request tags; generated pool IDs require account/Region-scoped wildcards. Dev domain/provider lifecycle uses these owned pools. Only dev DescribeUserPoolDomain additionally requires "*" because AWS supports no resource-level permission, constrained to the stack Region. Mismatched ownership tags deny retagging, but untagged pools can be claimed. Protected tag removal remains denied.',
     );
     const frontendPolicy = this.createManagedPolicy(
       `${title}FrontendApiPolicy`,
@@ -181,7 +181,7 @@ export class CicdFoundationStack extends Stack {
       // New frontend hardening grants use this policy's headroom; all five attachments stay unchanged.
       [...observabilityStatements(resources), ...frontendOriginSecretStatements(resources)],
       this.iamWildcardFindings('observability', environment),
-      'Observability resources use environment-qualified names; DescribeLogGroups requires Resource "*". New origin-secret grants use this policy\'s headroom and the exact environment name plus six generated suffix characters. Only GetRandomPassword additionally requires "*", constrained to the stack Region; demo receives no secret deletion grant.',
+      'Observability resources use environment-qualified names; DescribeLogGroups requires Resource "*". Origin secrets and the dev-only GOOGLE-OAUTH credential container use exact names plus six generated suffix characters. Credential reads belong only to CloudFormation dynamic-reference resolution, never GitHub deployment/runtime roles. Only GetRandomPassword additionally requires "*", constrained to the stack Region; demo receives no Google access or secret deletion.',
     );
     const runtimeIamPolicy = this.createManagedPolicy(
       `${title}RuntimeIamPolicy`,
@@ -354,6 +354,7 @@ export class CicdFoundationStack extends Stack {
         'Resource::*',
       ],
       observability: [
+        ...(environment === 'dev' ? [resource(`arn:${partition}:secretsmanager:${region}:${account}:secret:SOC-BOT-DEV-GOOGLE-OAUTH-??????`)] : []),
         resource(`arn:${partition}:secretsmanager:${region}:${account}:secret:SOC-BOT-${upper}-FRONTEND-ORIGIN-TOKEN-??????`),
         resource(`arn:${partition}:logs:${region}:${account}:log-group:*SOC-BOT-${upper}-*`),
         resource(`arn:${partition}:logs:${region}:${account}:log-group:API-Gateway-Execution-Logs_*/${environment}`),
