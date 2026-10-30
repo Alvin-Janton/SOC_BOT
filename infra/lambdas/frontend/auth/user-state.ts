@@ -78,7 +78,7 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
         ExpressionAttributeValues: { ':type': 'USER_AUTH_STATE', ':sub': sub, ':version': state.session_version,
           ':disabled': state.disabled, ':one': 1, ...(disable ? { ':true': true } : {}) },
         ReturnValues: 'ALL_NEW',
-      }), 
+      }),
       authRequestOptions(budget));
       const updated = userStateSchema.safeParse(result.Attributes);
       if (!updated.success || updated.data.sub !== sub) throw new BffAuthError('session_unavailable');

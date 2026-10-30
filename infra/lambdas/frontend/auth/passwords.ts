@@ -85,8 +85,8 @@ export function createPasswordService(config: BffAuthConfig, budget: AuthRequest
       const account = await cognito.lookupAccount(session.sub);
       if (account.sub !== session.sub) throw new BffAuthError('password_change_failed');
       proof = await cognito.passwordChangeProof({ username: account.username, password: currentPassword }, session.sub);
-    } 
-    
+    }
+
     catch (error) {
       const safe = passwordServiceError(error);
       throw safe.statusCode === 401 || safe.statusCode === 403 ? new BffAuthError('password_change_failed') : safe;
@@ -108,8 +108,8 @@ export function createPasswordService(config: BffAuthConfig, budget: AuthRequest
 
       try {
         await client.send(new ForgotPasswordCommand({ ClientId: config.clientId, Username: email }), authRequestOptions(budget));
-      } 
-      
+      }
+
       catch (error) {
         const name = errorName(error);
         if (name === 'UserNotFoundException') return;
@@ -118,7 +118,7 @@ export function createPasswordService(config: BffAuthConfig, budget: AuthRequest
           if (!await cognito.lookupRecoveryAccount(email)) return;
           throw new BffAuthError('password_service_unavailable');
         }
-        
+
         throw passwordServiceError(error);
       }
     },
