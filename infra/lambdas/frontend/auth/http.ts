@@ -1,7 +1,8 @@
 import { FRONTEND_ORIGIN_ROUTES } from '../shared/origin-routes';
 import { BffAuthConfig, parseBffAuthConfig } from './config';
 import { ConfirmationResend, EmailCredentials, parseConfirmationResend, parseEmailCredentials,
-  parseSignupConfirmation, parseSignupCredentials, SignupConfirmation, SignupCredentials } from './contracts';
+  parsePasswordChange, parsePasswordReset, parseSignupConfirmation, parseSignupCredentials,
+  PasswordChange, PasswordReset, SignupConfirmation, SignupCredentials } from './contracts';
 import { BffAuthError } from './errors';
 
 export interface AuthHttpConfiguration {
@@ -17,6 +18,9 @@ export type AuthHttpRequest =
   | { readonly route: 'signup'; readonly input: SignupCredentials }
   | { readonly route: 'confirm-signup'; readonly input: SignupConfirmation }
   | { readonly route: 'resend-confirmation'; readonly input: ConfirmationResend }
+  | { readonly route: 'forgot-password'; readonly input: ConfirmationResend }
+  | { readonly route: 'reset-password'; readonly input: PasswordReset }
+  | { readonly route: 'change-password'; readonly input: PasswordChange; readonly cookieHeader?: string; readonly invalidCookie: boolean }
   | { readonly route: 'me' | 'logout'; readonly cookieHeader?: string; readonly invalidCookie: boolean };
 
 export interface AuthHttpResponse {
@@ -73,6 +77,12 @@ function header(event: Record<string, unknown>, name: string): string | undefine
   if (values.some(value => [...value].some(character => (character.charCodeAt(0) < 32 && character !== '\t')
     || character.charCodeAt(0) === 127) || value !== values[0])) throw new BffAuthError('invalid_input');
   return values[0];
+}
+
+/** Preserves strict cookie ambiguity handling only for routes that use a current session. */
+function sessionCookie(event: Record<string, unknown>): { cookieHeader?: string; invalidCookie: boolean } {
+  try { return { cookieHeader: header(event, 'Cookie'), invalidCookie: false }; }
+  catch { return { invalidCookie: true }; }
 }
 
 /** Enforces browser Origin and optional Fetch Metadata before either credential or session work. */
@@ -172,6 +182,9 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
     case 'signup': return { route: 'signup', input: parseSignupCredentials(value) };
     case 'confirm-signup': return { route: 'confirm-signup', input: parseSignupConfirmation(value) };
     case 'resend-confirmation': return { route: 'resend-confirmation', input: parseConfirmationResend(value) };
+    case 'forgot-password': return { route: 'forgot-password', input: parseConfirmationResend(value) };
+    case 'reset-password': return { route: 'reset-password', input: parsePasswordReset(value) };
+    case 'change-password': return { route: 'change-password', input: parsePasswordChange(value), ...sessionCookie(event) };
     case 'logout': {
       const body = object(value);
       if (!body || Object.keys(body).length) throw new BffAuthError('invalid_input');
@@ -180,8 +193,7 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
     case 'me': break;
     default: throw new BffAuthError('invalid_input');
   }
-  try { return { route: selected.route, cookieHeader: header(event, 'Cookie'), invalidCookie: false }; }
-  catch { return { route: selected.route, invalidCookie: true }; }
+  return { route: selected.route, ...sessionCookie(event) };
 }
 
 /** Serializes only authored result/error bodies, with cookie output isolated in Set-Cookie. */

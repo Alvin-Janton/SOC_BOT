@@ -43,8 +43,8 @@ export function createAuthRequestBudget(lambdaRemainingMs: number): AuthRequestB
 }
 
 /** Clamps each SDK request to the original deadline, retaining a final response reserve. */
-export function authRequestOptions(budget?: AuthRequestBudget): { abortSignal: AbortSignal } {
-  const timeout = Math.min(10_000, Math.floor((budget?.remainingMs() ?? 10_500) - 500));
+export function authRequestOptions(budget?: AuthRequestBudget, maximumMs = 10_000): { abortSignal: AbortSignal } {
+  const timeout = Math.min(maximumMs, Math.floor((budget?.remainingMs() ?? 10_500) - 500));
   if (timeout <= 0 || budget?.signal.aborted) throw new BffAuthError('session_unavailable');
   const signal = AbortSignal.timeout(timeout);
   return { abortSignal: budget ? AbortSignal.any([budget.signal, signal]) : signal };

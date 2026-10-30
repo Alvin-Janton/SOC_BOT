@@ -2,17 +2,17 @@
 
 ## Implemented scope
 
-The stack defines infrastructure and six email/password authentication routes.
-Frontend UI, password recovery and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
+The stack defines infrastructure and nine email/password authentication routes.
+Frontend UI and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
 resources. Account/Region values are CDK tokens, not committed account IDs.
 
-No frontend UI/assets, password-recovery route, Google provider/domain/credentials,
+No frontend UI/assets, Google provider/domain/credentials,
 identity pool, live user, account-linking flow, chat integration, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
-signup, code confirmation and resend. Frontend owns a generated
+signup, code confirmation/resend and password recovery/change. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
 CloudFront IPv4 WAF. The existing dev
 WAF-gated `/chat` remains the only working chat endpoint. Demo release stays
@@ -28,7 +28,7 @@ exposes the new authentication construct:
 | --- | --- |
 | [AuthStorage](../../infra/lib/stacks/frontend/auth-storage.ts) | `SOC-BOT-<ENV>-AUTH-SESSIONS`, string `PK` only; no sort key, GSI or stream; on-demand billing, AWS-managed DynamoDB encryption, TTL `expires_at`. |
 | [FrontendIdentity](../../infra/lib/stacks/frontend/frontend-identity.ts) | `SOC-BOT-<ENV>-USERS` user pool and `SOC-BOT-<ENV>-WEB` no-secret app client. |
-| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK plus six exact origin-protected auth routes. |
+| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK plus nine exact origin-protected auth routes. |
 | [FrontendHosting](../../infra/lib/stacks/frontend/frontend-hosting.ts) | Private `soc-bot-<environment>-frontend-<account>-<region>` bucket, named OAC and CloudFront distribution with its generated hostname. |
 | [FrontendWaf](../../infra/lib/stacks/frontend/frontend-waf.ts) | Dev-only `SOC-BOT-DEV-FRONTEND-CLIENTS` and `SOC-BOT-DEV-FRONTEND-ALLOWLIST`, CLOUDFRONT scope in `us-east-1`; one IPv4 `/32`, default BLOCK, metrics enabled and sampling disabled. |
 | [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads only its exact secret and writes its own logs. |
@@ -61,7 +61,7 @@ hostname with origin path `/dev` or `/demo`, retaining `/api/health`. It returns
 only `{"status":"ok"}` after origin verification. The REQUEST authorizer can read
 Secrets Manager; the health MOCK response exposes no authentication diagnostic.
 API Gateway has no proxy/catch-all or chat route. Invocation permissions
-target only this API/source account: its authorizer and six exact
+target only this API/source account: its authorizer and nine exact
 stage/method auth integrations. Both
 request-validation flags are enabled; this no-input MOCK
 does not define a body schema.
@@ -70,7 +70,7 @@ The `/api/*` CloudFront behavior uses HTTPS to the origin, disabled caching, and
 the AWS-managed `ALL_VIEWER_EXCEPT_HOST_HEADER` origin-request policy to forward
 cookies, query strings and viewer headers without sending the viewer Host to API
 Gateway. It allows all API methods for later integration, but only the explicit
-health and six documented auth routes exist now. Set-Cookie responses are not cached. Unknown
+health and nine documented auth routes exist now. Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
 
 Both frontend and legacy chat Regional APIs use
@@ -131,7 +131,7 @@ while missing, malformed, repeated or conflicting values are rejected. Fixed
 64-byte buffers are compared with `timingSafeEqual`. No event/header/secret or SDK
 response is logged.
 
-API authorization caching is disabled (TTL zero). Only health and the six auth
+API authorization caching is disabled (TTL zero). Only health and the nine auth
 routes on the configured account/Region/API/stage can receive an Allow policy
 for the single incoming method;
 the principal is `cloudfront-origin`, without a Cognito user identity. Invalid
@@ -266,6 +266,9 @@ bodies, credentials, cookies, tokens, auth records and provider diagnostics.
 | POST `/api/auth/signup` | Only email/password; normalized email max 128, unchanged password 15-256 without whitespace. | 202 fixed generic guidance, also for duplicate signup; no automatic resend or credential replacement. |
 | POST `/api/auth/confirm-signup` | Only email/code; unchanged non-whitespace string code, 1-2048 characters with leading zeroes preserved. | 200 only after provider confirmation; separate login is required. |
 | POST `/api/auth/resend-confirmation` | Only email; the same normalization. | The same 202 body as signup for success, absent and known ineligible accounts. |
+| POST `/api/auth/forgot-password` | Only email; no session required. | 202 generic recovery guidance; no DynamoDB or cookie change. |
+| POST `/api/auth/reset-password` | Only email/code/newPassword; code remains a string, new password follows signup policy. | 200 only after both password success and confirmed application-session revocation, then clears the cookie. |
+| POST `/api/auth/change-password` | Only currentPassword/newPassword plus the existing valid opaque session. | Fresh current-password/access-token proof and original-session revalidation; the same success/clear-cookie result. |
 
 The handler validates REST API/account/stage and authorizer context, exact
 method/resource, unambiguous headers and at most 8 KiB decoded UTF-8 JSON (strict
@@ -278,7 +281,7 @@ bad origin/unconfirmed account, 429 throttling and 503 backend/configuration
 unavailability. Distinct account-confirmation/challenge errors intentionally
 reveal limited account state. No provider diagnostics or Cognito tokens appear.
 
-All five POST routes require the exact HTTPS distribution Origin, and cross-site
+All eight POST routes require the exact HTTPS distribution Origin, and cross-site
 Fetch Metadata is rejected when present. There is no permissive CORS or Referer
 fallback. Origin-secret verification is a separate check and cannot prevent
 login CSRF alone. API responses remain uncached, with supported CloudFront error
@@ -334,13 +337,68 @@ Cognito owns codes and email delivery, with a
 [currently 24-hour verification-code lifetime](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-email-phone-verification.html).
 There is no local code store/timer, auto-confirmation, alias migration or auto-login.
 Registration neither reads nor writes DynamoDB or modifies an existing cookie.
-Only a subsequent explicit login initializes USER metadata and creates a session.
+Only trusted first login or eligible first-use password reset initializes USER
+metadata; registration creates no session, and login remains explicit.
 No pool/client setting, runtime grant or foundation boundary changes in this
 slice: these three public Cognito APIs do not use IAM; the existing AdminGetUser
 permission covers the narrow resend fallback. Default dev email capacity remains
 limited. Comprehensive signup/email-abuse controls and production delivery review
 are prerequisites for public demo, beyond best-effort API throttles/UI cooldowns.
 See the [registration adapter guide](../../infra/lambdas/frontend/auth/README.md#registration-confirmation-and-recovery).
+
+### Password updates and accepted partial-failure risk
+
+Forgot-password returns exactly
+`{"message":"If this account is eligible for password recovery, check your email for a reset code."}`
+with 202 for accepted and known absent/ineligible users. Ambiguous provider errors
+permit a bounded exact-pool eligibility lookup; genuine delivery/configuration
+failures remain 503 and throttling remains 429. The endpoint does not touch USER
+metadata, sessions or cookies. Recovery needs the existing email-only pool setting
+and a verified eligible email; no provider or delivery setting changes here.
+
+Reset uses canonical trusted account data, including eligible RESET_REQUIRED
+accounts, and Cognito code proof. A genuinely absent USER record may be initialized
+conditionally before the mutation, never overwriting malformed/existing state or
+re-enabling disabled metadata. Change requires a valid original BFF cookie, fresh
+current-password authentication and an access token verified for the configured
+pool/client/subject/use/expiry and required scope. The original cookie is resolved
+again before mutation. That token is request-local, never a browser/DynamoDB token.
+
+Both password mutations use maxAttempts one and a four-second request cap, and
+require at least ten seconds remaining before dispatch. Reads and identical
+idempotent DynamoDB transactions retain maxAttempts two. The remaining six-second
+reserve covers a two-second fresh post-success metadata read, three-second
+conditional version transaction and response, within the unchanged work/Lambda/API
+deadlines. There is no outer mutation retry or timeout increase.
+
+Only confirmed Cognito success followed by a confirmed version increment returns
+200 `{"message":"Password updated. Sign in again."}` and clears the existing
+cookie without replacing it. The fresh read is after password success, and the
+transaction preserves disabled/identity fields with one stable retry token. No
+later higher-version read can substitute for a confirmed write. Wrong code/current
+password/policy errors use safe 400/401, preserve usable cookies and do not revoke.
+
+If Cognito changed the password but revocation is unconfirmed, 503
+PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED explicitly says:
+"Your password was changed, but signing out existing sessions could not be
+confirmed. Contact the administrator." It clears only the current browser cookie;
+old server-side sessions can still work. An ambiguous dispatched password mutation
+instead returns 503 PASSWORD_UPDATE_UNCONFIRMED, preserves the cookie and makes no
+revocation/password-success claim. Verify sign-in access, request a fresh recovery
+code or contact an administrator; do not blindly repeat consumed code/old-password
+mutations. HTTP retries are not idempotent password operations.
+
+Cognito and DynamoDB cannot commit atomically. This MVP explicitly accepts that
+interval/partial-failure risk; cookie clearing does not remove it. Follow the
+[administrator recovery runbook](../../infra/lambdas/frontend/auth/README.md#administrator-recovery-runbook):
+correlate safe request ID/outcome, independently identify the account, validate
+current metadata, confirm a bounded conditional increment preserving disabled,
+then verify both old private cookie jars fail with 401. Do not rerun Cognito just
+to finish revocation or recreate missing/malformed metadata at version one.
+Automatic durable repair, global Cognito token sign-out, other applications'
+sessions, admin-disable workflows and public-demo abuse controls remain deferred.
+Accepted in-flight work is not cancelled; subsequent protected requests enforce
+the new version. Out-of-band console changes still need reviewed coordination.
 
 ## Deployment, teardown and deferred activation
 
@@ -414,19 +472,19 @@ credentials or actual session records. This slice's lint/build/existing-test and
 offline synthesis results do not establish live AWS, email, cookie/browser or
 authentication correctness.
 
-Later product slices must add custom email/password UI, password recovery,
+Later product slices must add custom email/password UI,
 Google login/linking with fresh proof of both methods, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
-sessions but do not change the orchestrator's temporary identity. MFA, recovery
-and administrator synchronization remain reviewed follow-ups; reset/disable
-must coordinate Cognito and DynamoDB fail-closed on partial failure. No session
+sessions but do not change the orchestrator's temporary identity. MFA and
+administrator synchronization remain reviewed follow-ups; out-of-band password
+changes/disablement still require deliberate revocation coordination. No session
 refresh/sliding expiry is implemented. Complete those security/abuse controls
 and public-demo email review before exposing user data or launching demo.
 
-The auth role now has GetItem, PutItem, DeleteItem and ConditionCheckItem on only
+The auth role now has GetItem, PutItem, DeleteItem, ConditionCheckItem and UpdateItem on only
 its exact AUTH-SESSIONS table, AdminGetUser on only its exact pool, and its own
-log writes. No UpdateItem, Scan/Query/batch, secret, S3, Bedrock, tool or admin
+log writes. No Scan/Query/batch, secret, S3, Bedrock, tool or admin
 mutation grant is added. The APPLICATION boundary adds ConditionCheckItem only
 for the exact environment auth table, and AdminGetUser for account/Region pools
 with the existing ownership tags. QUERY/GLUE and other runtime identities stay
@@ -542,5 +600,41 @@ checks or from 202 alone. Signup delivery/quota errors may already have created 
 unconfirmed account; wait and use resend rather than deleting/recreating it.
 After a lost confirmation success response, login is the recovery path; a repeated
 confirmation need not return success. Cognito controls expiry and delivery, not
-local timers. Public-demo email/abuse review, password recovery/change, Google/linking,
+local timers. Public-demo email/abuse review, Google/linking,
 UI and authenticated chat ownership remain separate work.
+
+## Later manual password validation
+
+These are operator checks after review and separately authorized deployment, not
+executions performed by this change. Use CloudFront with matching Origin/JSON,
+prompted credentials/codes and private in-memory cookie jars as in the existing
+manual procedures. Never put secrets in command-line literals, issues, logs,
+committed files or request diagnostics. Do not induce account outages/faults.
+
+- Compare eligible/nonexistent forgot-password requests: both should return the
+  exact generic 202 body, and existing sessions should remain valid. No delivery
+  guarantee follows from that status.
+- Verify wrong/expired recovery codes, wrong current passwords and invalid new
+  passwords do not mutate credentials or the application-session version.
+- Reset an ordinary eligible user and a confirmed eligible account that never
+  logged in. The latter uses conditional first-use metadata initialization;
+  investigate missing/malformed previously established metadata instead of
+  deliberately deleting it or using reset as a repair mechanism.
+- Change-password must require a valid original opaque session and the correct
+  current password. Do not submit a Cognito token or client-selected subject.
+- Retain two distinct valid private device-cookie jars before a successful reset
+  or change. Replay BOTH old cookies to `/api/auth/me`; both should return 401.
+  Clearing the active browser cookie alone proves nothing about server-side
+  invalidation. Fresh new-password login should work and old credentials fail.
+- Source-review partial/uncertain paths and the recovery runbook without fault
+  injection. A confirmed password change with unconfirmed revocation needs an
+  independently confirmed conditional metadata repair, preserving disabled.
+  An unknown Cognito outcome needs authorized access/recovery verification;
+  neither case justifies blindly replaying a password mutation.
+
+The [administrator runbook](../../infra/lambdas/frontend/auth/README.md#administrator-recovery-runbook)
+explains safe request-ID correlation, trusted account identification, strict
+metadata inspection, bounded conditional revocation and two-jar validation.
+Missing/malformed records require reviewed investigation, never version-one
+replacement. Automatic durable recovery, global token sign-out, admin-disable
+workflows, authenticated chat, UI and public-demo abuse readiness remain deferred.

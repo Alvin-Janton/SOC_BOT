@@ -7,4 +7,7 @@ export const FRONTEND_ORIGIN_ROUTES = [
   { route: 'signup', method: 'POST', resource: '/api/auth/signup' },
   { route: 'confirm-signup', method: 'POST', resource: '/api/auth/confirm-signup' },
   { route: 'resend-confirmation', method: 'POST', resource: '/api/auth/resend-confirmation' },
+  { route: 'forgot-password', method: 'POST', resource: '/api/auth/forgot-password' },
+  { route: 'reset-password', method: 'POST', resource: '/api/auth/reset-password' },
+  { route: 'change-password', method: 'POST', resource: '/api/auth/change-password' },
 ] as const;

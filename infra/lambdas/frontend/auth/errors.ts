@@ -1,7 +1,9 @@
 export type BffAuthErrorCode = 'invalid_configuration' | 'authentication_failed' | 'authentication_required' | 'session_unavailable'
   | 'invalid_input' | 'body_too_large' | 'unsupported_media_type' | 'invalid_origin' | 'account_not_confirmed'
   | 'authentication_challenge' | 'throttled' | 'invalid_signup_password' | 'confirmation_failed'
-  | 'registration_unavailable' | 'registration_throttled';
+  | 'registration_unavailable' | 'registration_throttled' | 'invalid_new_password' | 'password_reset_failed'
+  | 'password_change_failed' | 'password_service_unavailable' | 'password_update_unconfirmed'
+  | 'password_changed_session_revocation_unconfirmed';
 
 const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: number }> = {
   invalid_configuration: { message: 'Authentication is not configured.', statusCode: 503 },
@@ -19,6 +21,12 @@ const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: numbe
   confirmation_failed: { message: 'The code could not be confirmed. Check it or request another code. If already confirmed, sign in.', statusCode: 400 },
   registration_unavailable: { message: 'Account confirmation is temporarily unavailable. Wait, then request another code if needed.', statusCode: 503 },
   registration_throttled: { message: 'Confirmation requests are temporarily limited. Wait, then request another code if needed.', statusCode: 429 },
+  invalid_new_password: { message: 'Use a new password of 15 to 256 characters without whitespace.', statusCode: 400 },
+  password_reset_failed: { message: 'The password could not be reset. Check the code or request another reset code.', statusCode: 400 },
+  password_change_failed: { message: 'The current password could not be verified.', statusCode: 401 },
+  password_service_unavailable: { message: 'Password services are temporarily unavailable. Try again later.', statusCode: 503 },
+  password_update_unconfirmed: { message: 'Your password update could not be confirmed. Verify sign-in access, request a fresh recovery code, or contact the administrator instead of blindly repeating this request.', statusCode: 503 },
+  password_changed_session_revocation_unconfirmed: { message: 'Your password was changed, but signing out existing sessions could not be confirmed. Contact the administrator.', statusCode: 503 },
 };
 
 /** Carries only safe public authentication details, without service errors or tokens. */
@@ -30,6 +38,11 @@ export class BffAuthError extends Error {
     this.name = 'BffAuthError';
     this.statusCode = SAFE_ERRORS[code].statusCode;
   }
+}
+
+/** Identifies a confirmed create-only metadata conflict without exposing provider diagnostics. */
+export class AuthStateInitializationConflict extends BffAuthError {
+  public constructor() { super('authentication_failed'); }
 }
 
 /** Maps only known provider categories to authored errors, discarding service details and causes. */
