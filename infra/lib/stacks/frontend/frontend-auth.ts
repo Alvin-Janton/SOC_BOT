@@ -24,7 +24,7 @@ export interface FrontendAuthProps {
   readonly browserOrigin: string;
 }
 
-/** Owns six explicit authentication routes and one exact-pool/table Lambda, without chat integration. */
+/** Owns nine explicit authentication routes and one exact-pool/table Lambda, without chat integration. */
 export class FrontendAuth extends Construct {
   public readonly function: NodejsFunction;
   public readonly role: Role;
@@ -48,7 +48,7 @@ export class FrontendAuth extends Construct {
       resources: [`arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:${logGroupName}:*`],
     }));
     this.role.addToPolicy(new PolicyStatement({
-      actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:ConditionCheckItem'],
+      actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem', 'dynamodb:ConditionCheckItem', 'dynamodb:UpdateItem'],
       resources: [props.table.tableArn],
     }));
     this.role.addToPolicy(new PolicyStatement({ actions: ['cognito-idp:AdminGetUser'], resources: [props.userPool.userPoolArn] }));
@@ -82,10 +82,15 @@ export class FrontendAuth extends Construct {
       permissions[0].sourceAccount = Aws.ACCOUNT_ID;
       permissions[0].sourceArn = props.api.arnForExecuteApi(route.method, route.resource, props.environment);
       const registration = ['signup', 'confirm-signup', 'resend-confirmation'].includes(route.route);
+      const recovery = ['forgot-password', 'reset-password'].includes(route.route);
       Validations.of(method.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
         reason: registration
           ? 'This registration method requires CloudFront origin verification and browser Origin validation, without a prior session. Cognito owns account/code verification; explicit login is separate. Public-demo signup/email abuse controls remain deferred.'
-          : 'This exact route uses origin verification plus BFF password/session validation instead of a native Cognito JWT authorizer. Opaque cookies are resolved by the auth Lambda; login requires no prior session. Public-demo abuse controls remain deferred.',
+          : recovery
+            ? 'This recovery method requires origin verification and browser Origin validation without a prior session. Reset additionally requires Cognito recovery-code proof; only confirmed password success permits application-session revocation. Public-demo abuse controls remain deferred.'
+            : route.route === 'change-password'
+              ? 'This method requires origin verification, browser Origin validation, a valid revalidated opaque session and fresh current-password/access-token proof. A native Cognito JWT authorizer cannot validate the BFF cookie; public-demo abuse controls remain deferred.'
+              : 'This exact route uses origin verification plus BFF password/session validation instead of a native Cognito JWT authorizer. Opaque cookies are resolved by the auth Lambda; login requires no prior session. Public-demo abuse controls remain deferred.',
       });
     }
     Validations.of(this.function.node.defaultChild!).acknowledge({ id: 'AwsSolutions-L1',

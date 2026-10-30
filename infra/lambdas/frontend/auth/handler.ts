@@ -6,13 +6,14 @@ import { BffAuthError } from './errors';
 import { authHttpConfiguration, authHttpResponse, AuthHttpRequest, AuthHttpResponse, parseAuthHttpRequest } from './http';
 import { AuthSession } from './sessions';
 import { createCognitoRegistration, REGISTRATION_ACCEPTED_RESPONSE, SIGNUP_CONFIRMED_RESPONSE } from './registration';
+import { createPasswordService, PASSWORD_RECOVERY_RESPONSE, PASSWORD_UPDATED_RESPONSE } from './passwords';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
   return { userId: session.sub, expiresAt: new Date(session.expiresAt * 1_000).toISOString() };
 }
 
-/** Explicitly dispatches six origin-protected auth routes under one bounded request budget. */
+/** Explicitly dispatches nine origin-protected auth routes under one bounded request budget. */
 export async function handler(raw: unknown, context: { awsRequestId: string; getRemainingTimeInMillis(): number }): Promise<AuthHttpResponse> {
   const startedAt = Date.now();
 
@@ -27,6 +28,22 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     const config = authHttpConfiguration();
     request = parseAuthHttpRequest(raw, config);
     switch (request.route) {
+      case 'forgot-password': {
+        await createPasswordService(config.auth, budget).forgot(request.input);
+        outcome = 'PASSWORD_RECOVERY_ACCEPTED';
+        return authHttpResponse(202, PASSWORD_RECOVERY_RESPONSE);
+      }
+      case 'reset-password': {
+        await createPasswordService(config.auth, budget).reset(request.input);
+        outcome = 'PASSWORD_RESET_SUCCEEDED';
+        return authHttpResponse(200, PASSWORD_UPDATED_RESPONSE, clearSessionCookie(config.auth.sameSite));
+      }
+      case 'change-password': {
+        if (request.invalidCookie) throw new BffAuthError('authentication_required');
+        await createPasswordService(config.auth, budget).change(request.input, request.cookieHeader);
+        outcome = 'PASSWORD_CHANGE_SUCCEEDED';
+        return authHttpResponse(200, PASSWORD_UPDATED_RESPONSE, clearSessionCookie(config.auth.sameSite));
+      }
       case 'signup': {
         await createCognitoRegistration(config.auth, undefined, budget).signup(request.input);
         outcome = 'SIGNUP_ACCEPTED';
@@ -67,8 +84,10 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     outcome = safe.code.toUpperCase();
     const clearInvalid = request?.route === 'me' && safe.code === 'authentication_required'
       && (request.invalidCookie || request.cookieHeader !== undefined);
+    const clearPasswordPartial = (request?.route === 'reset-password' || request?.route === 'change-password')
+      && safe.code === 'password_changed_session_revocation_unconfirmed';
     return authHttpResponse(safe.statusCode, { error: { code: outcome, message: safe.message }, requestId },
-      clearInvalid ? clearSessionCookie('Lax') : undefined);
+      clearInvalid || clearPasswordPartial ? clearSessionCookie('Lax') : undefined);
   } finally {
     // Never log bodies, identities, headers, cookies, hashes, provider failures or token values.
     console.info(JSON.stringify({ event: 'frontend_auth', requestId, route: request?.route ?? 'unvalidated', outcome,

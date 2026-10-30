@@ -1,8 +1,9 @@
 import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from './config';
-import { BffAuthError, serviceAuthError } from './errors';
+import { AuthStateInitializationConflict, BffAuthError, serviceAuthError } from './errors';
 
 export const authSubSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
 export const sessionVersionSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -33,6 +34,7 @@ export interface UserAuthStateStore {
   readForProvisioning(sub: string): Promise<UserAuthState | undefined>;
   readForAuthentication(sub: string): Promise<TrustedAuthenticationContext>;
   incrementVersion(sub: string): Promise<UserAuthState>;
+  revokeAfterPasswordChange(sub: string): Promise<void>;
   disable(sub: string): Promise<UserAuthState>;
 }
 
@@ -47,11 +49,11 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
   }
 
   /** Strongly reads strict metadata; missing/malformed state never becomes an enabled default. */
-  async function read(sub: string, rejectMalformed = false): Promise<UserAuthState | undefined> {
+  async function read(sub: string, rejectMalformed = false, maximumMs = 10_000): Promise<UserAuthState | undefined> {
     const Key = key(sub);
     try {
       const result = await client.send(new GetCommand({ TableName: config.sessionTableName, Key, ConsistentRead: true }),
-        authRequestOptions(budget));
+        authRequestOptions(budget, maximumMs));
       const state = userStateSchema.safeParse(result.Item);
       if (rejectMalformed && result.Item !== undefined && (!state.success || state.data.sub !== sub)) {
         throw new BffAuthError('authentication_failed');
@@ -67,6 +69,7 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
     const state = await read(sub);
     if (!state || state.session_version === Number.MAX_SAFE_INTEGER) throw new BffAuthError('authentication_failed');
     try {
+
       const result = await client.send(new UpdateCommand({
         TableName: config.sessionTableName, Key: key(sub),
         UpdateExpression: `${disable ? 'SET #disabled = :true ' : ''}ADD #version :one`,
@@ -75,7 +78,8 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
         ExpressionAttributeValues: { ':type': 'USER_AUTH_STATE', ':sub': sub, ':version': state.session_version,
           ':disabled': state.disabled, ':one': 1, ...(disable ? { ':true': true } : {}) },
         ReturnValues: 'ALL_NEW',
-      }), authRequestOptions(budget));
+      }), 
+      authRequestOptions(budget));
       const updated = userStateSchema.safeParse(result.Attributes);
       if (!updated.success || updated.data.sub !== sub) throw new BffAuthError('session_unavailable');
       return Object.freeze(updated.data);
@@ -93,7 +97,7 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
         await client.send(new PutCommand({ TableName: config.sessionTableName, Item: item,
           ConditionExpression: 'attribute_not_exists(PK)' }), authRequestOptions(budget));
       } catch (error) {
-        if (error instanceof ConditionalCheckFailedException) throw new BffAuthError('authentication_failed');
+        if (error instanceof ConditionalCheckFailedException) throw new AuthStateInitializationConflict();
         throw serviceAuthError(error);
       }
       return Object.freeze(item);
@@ -109,6 +113,25 @@ export function createUserAuthStateStore(config: BffAuthConfig, suppliedClient?:
     },
     /** Revokes all existing sessions without scanning or extending any session. */
     async incrementVersion(sub: string): Promise<UserAuthState> { return changeVersion(sub, false); },
+    /** Freshly observes post-password state and confirms one retry-idempotent version update, preserving disablement. */
+    async revokeAfterPasswordChange(sub: string): Promise<void> {
+      try {
+        const state = await read(sub, true, 2_000);
+        if (!state || state.session_version === Number.MAX_SAFE_INTEGER) throw new BffAuthError('password_changed_session_revocation_unconfirmed');
+        const clientRequestToken = randomUUID();
+        const command = new TransactWriteCommand({ ClientRequestToken: clientRequestToken, TransactItems: [{ Update: {
+          TableName: config.sessionTableName, Key: key(sub), UpdateExpression: 'SET #version = :next',
+          ConditionExpression: '#type = :type AND #sub = :sub AND #version = :version AND #disabled = :disabled AND attribute_not_exists(expires_at)',
+          ExpressionAttributeNames: { '#type': 'entity_type', '#sub': 'sub', '#version': 'session_version', '#disabled': 'disabled' },
+          ExpressionAttributeValues: { ':type': 'USER_AUTH_STATE', ':sub': sub, ':version': state.session_version,
+            ':next': state.session_version + 1, ':disabled': state.disabled },
+        } }] });
+        // The same command/token/next-version survive SDK retries; no outer retry or inference from a later read.
+        await client.send(command, authRequestOptions(budget, 3_000));
+      } catch {
+        throw new BffAuthError('password_changed_session_revocation_unconfirmed');
+      }
+    },
     /** Blocks new sessions and invalidates existing sessions atomically, without a Cognito-side action. */
     async disable(sub: string): Promise<UserAuthState> { return changeVersion(sub, true); },
   };

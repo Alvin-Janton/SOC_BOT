@@ -1,15 +1,15 @@
 # Email/password registration, BFF and session routes
 
-The frontend stack defines one `SOC-BOT-<ENV>-FRONTEND-AUTH` Lambda for six
+The frontend stack defines one `SOC-BOT-<ENV>-FRONTEND-AUTH` Lambda for nine
 explicit REST routes. It uses the existing Cognito pool/client and dedicated
-auth table. The separate origin authorizer protects all six routes plus
+auth table. The separate origin authorizer protects all nine routes plus
 health. The [frontend guide](../../../../Docs/FrontendStack/README.md) describes
 infrastructure, origin-secret handling, TLS and deployment prerequisites.
 
 This implements local source/CDK wiring, not a claim of successful live login.
 The AI chat still uses its temporary environment-wide owner: these session routes
 do not authenticate the orchestrator or migrate its API. Public demo remains
-deferred. Signup, confirmation and resend are implemented; reset/password changes, Google/linking,
+deferred. Signup, confirmation, resend and password recovery/change are implemented; Google/linking,
 MFA challenges, renewal and all-device logout/disable APIs are not implemented.
 
 ## HTTP contracts
@@ -28,6 +28,9 @@ Registration routes ignore cookies and never change a signed-in browser's sessio
 | `POST /api/auth/signup` | Exactly email/password; the same normalized email limit, unchanged password of 15-256 characters without whitespace. | 202 generic confirmation guidance, also for duplicate signup; no automatic resend or account replacement. |
 | `POST /api/auth/confirm-signup` | Exactly email/code; code is an unchanged non-whitespace string of 1-2048 characters, preserving leading zeroes. | 200 confirmation guidance only after provider success; no automatic login or alias migration. |
 | `POST /api/auth/resend-confirmation` | Exactly email. | The same 202 body as signup, including absent or known ineligible accounts. |
+| `POST /api/auth/forgot-password` | Exactly email; the existing normalization. No session required. | 202 generic recovery guidance; no application state or cookie change. |
+| `POST /api/auth/reset-password` | Exactly email/code/newPassword; unchanged string code and signup new-password policy. No session required. | 200 only after confirmed Cognito success and application-session revocation; clears the browser cookie. |
+| `POST /api/auth/change-password` | Exactly currentPassword/newPassword plus a valid opaque session; current password retains login bounds. | The same 200 after fresh password/access-token proof, original-session revalidation and confirmed revocation; no replacement session. |
 
 Login/me success JSON contains only these fields (illustrative values):
 
@@ -69,6 +72,8 @@ headers. Proxy responses are not base64 encoded.
   retaining the original login password rules.
 - [registration.ts](registration.ts) owns signup, code confirmation and resend,
   using trusted configuration and operation-specific errors without session helpers.
+- [passwords.ts](passwords.ts) coordinates recovery, fresh password proof,
+  single-attempt mutations and confirmed post-success application-session revocation.
 - [login.ts](login.ts) orchestrates canonical lookup, conditional first-login
   provisioning and pre-authentication snapshot capture.
 - [bff.ts](bff.ts) reuses Cognito verification and durable session operations.
@@ -84,7 +89,7 @@ origin verification, not a user. Resource-based invocation permissions restrict
 API Gateway to the exact source account/API/stage/method. The auth function gets
 no Secrets Manager read grant and does not duplicate the authorizer's fetch.
 
-All five POST routes reject missing, null, mismatched or ambiguous Origin.
+All eight POST routes reject missing, null, mismatched or ambiguous Origin.
 GET me may omit Origin for same-origin/manual requests, but rejects explicit bad
 Origin. Cross-site Fetch Metadata is rejected when supplied. Equivalent single-
 and multivalue header maps are reconciled; repeated/conflicting critical values
@@ -144,8 +149,8 @@ only the configured app-client ID, email/password or email/code as appropriate,
 and the required email attribute for signup. ConfirmSignUp explicitly sets
 ForceAliasCreation false. UserSub, UserConfirmed, CodeDeliveryDetails and provider
 Session values are discarded; confirmation never signs the user in. USER metadata
-remains exclusive to the later trusted first-login path. Existing session/version,
-cookie, expiry and revocation behavior is unchanged.
+remains outside registration: trusted first login or eligible first-use password
+reset can conditionally initialize it. Existing session shapes and expiry remain unchanged.
 
 These [three public Cognito operations](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_SignUp.html)
 do not evaluate IAM. No new permissions or boundary changes are needed; the
@@ -220,26 +225,130 @@ cookie or claiming success. Login failure also leaves an existing cookie alone;
 successful login mints a fresh token without revoking other devices.
 
 `incrementVersion` and `disable` remain trusted helper primitives without HTTP
-routes or UpdateItem permission in this runtime. Cognito-console sign-out,
-password reset and disablement do not automatically revoke existing application
-sessions. Later account-management flows must coordinate DynamoDB versions and
-Cognito safely; no refresh or synchronization worker is introduced.
+routes. Password flows use the separate retry-idempotent post-success helper,
+not the older ADD-based increment. Out-of-band Cognito console password changes,
+sign-out and disablement still do not synchronize application sessions. No
+refresh, automatic durable repair or synchronization worker is introduced.
+
+## Password recovery, changes and revocation
+
+Forgot-password returns the same HTTP 202 for accepted and known ineligible or
+nonexistent accounts:
+
+```json
+{"message":"If this account is eligible for password recovery, check your email for a reset code."}
+```
+
+It sends only the configured client ID and normalized email to ForgotPassword.
+Ambiguous invalid-parameter/not-authorized errors permit one bounded exact-pool
+AdminGetUser lookup; enabled, recovery-eligible accounts retain an operational
+error, while known ineligibility remains generic. Delivery/configuration/service
+failures remain safe 503s and throttling remains 429. A 202 does not prove email
+delivery or eligibility, and provides neither constant-time nor complete account-
+enumeration resistance. Merely requesting a code never touches DynamoDB or cookies.
+
+Reset independently resolves an enabled local CONFIRMED or RESET_REQUIRED account
+with verified email, instead of using login's stricter status helper. It uses the
+canonical username and supplied recovery code/new password with ConfirmForgotPassword.
+Only genuinely absent metadata is conditionally initialized before mutation; a
+confirmed competing initialization permits one strong reread. Existing malformed
+metadata is denied, existing versions/disabled flags are not reset, and no session
+is created. This first-use path cannot distinguish prior deletion from an account
+that never logged in; preserve permanent revocation state and never use reset as
+an operator metadata-repair shortcut. Existing disabled application state stays disabled.
+
+Change requires the original BFF cookie, canonical lookup using its trusted
+subject and fresh current-password authentication. Its request-local access token
+is cryptographically checked for issuer, pool/client, subject, token use, live
+expiry and the required aws.cognito.signin.user.admin scope. The same original
+cookie is resolved again before ChangePassword; revoked/expired sessions cannot
+adopt newer user metadata. The transient token leaves scope after that call and
+is never added to login results, HTTP bodies, DynamoDB or logs.
+
+Both mutations use a dedicated maxAttempts-one client, unlike safe reads and
+idempotent DynamoDB writes (maxAttempts two). At least ten seconds of remaining
+work budget are required before dispatch; the mutation is capped at four seconds,
+reserving six seconds for a two-second post-success strong read, three-second
+transaction and response. No timeout is increased. Insufficient budget refuses
+the mutation; these limits do not guarantee backend availability.
+
+After confirmed Cognito success, a fresh strict USER read precedes a conditional
+SET to the next safe integer version, preserving disabled and identity fields.
+One single-item transaction and stable ClientRequestToken are reused by SDK
+retries. No outer retry, fresh token, session scan/deletion or higher-version
+read is used to infer success. Conflicts, missing/malformed state, overflow and
+uncertain/exhausted writes remain revocation-unconfirmed. The request-local
+[transaction idempotency window](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html)
+is not an HTTP retry or durable recovery contract.
+
+| Outcome | Response | Cookie/server-side interpretation |
+| --- | --- | --- |
+| Password and version update confirmed | 200 `{"message":"Password updated. Sign in again."}` | Clears the current cookie with existing attributes; creates no replacement. Both old device sessions fail subsequent checks. |
+| Invalid code/account/password policy | Safe 400; wrong current password or invalid BFF session uses 401 | No revocation or usable-cookie clearing for a rejected mutation. |
+| Throttle/quota or definite configuration failure | Safe 429/503 | No success claim or usable-cookie clearing. |
+| Cognito password success, revocation not confirmed | 503 PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED | Clears only the browser cookie; other server-side sessions may still work. |
+| Dispatched Cognito mutation outcome unknown | 503 PASSWORD_UPDATE_UNCONFIRMED | Preserves the cookie; no revocation attempt or success/failure claim about the password. |
+
+The partial-success message is exactly:
+
+```json
+{"error":{"code":"PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED","message":"Your password was changed, but signing out existing sessions could not be confirmed. Contact the administrator."},"requestId":"example-request-id"}
+```
+
+The uncertain-outcome message advises verifying sign-in access, obtaining a fresh
+recovery code or contacting the administrator instead of blindly repeating a
+possibly consumed code/old-password mutation. Provider/transport/trigger failures
+after dispatch can be uncertain; no caller idempotency token exists for these
+password APIs. No submitted credential, code or provider response is persisted.
+All outcomes retain no-store and safe operational-only logs, with distinct authored
+outcome classifications. Cognito and DynamoDB do not commit atomically: this MVP
+accepts an interval/partial-failure risk where a changed password coexists with
+usable old application sessions. Cookie clearing does not resolve that risk.
+
+### Administrator recovery runbook
+
+1. Correlate the safe request ID/outcome and independently identify the intended
+   account through trusted administrative tools. Never ask for a password, code,
+   bearer cookie or token in an issue/log/committed file/command history.
+2. Read current USER metadata strongly consistently and validate its exact schema,
+   subject/key, safe version and disabled flag. Missing/malformed records require
+   investigation and reviewed recovery, never replacement with version one.
+3. For a confirmed password change needing repair, perform a bounded conditional
+   version increment against that fresh observed record, preserving disabled and
+   identity fields. Prefer one transaction with a stable token for identical SDK
+   retries. A conflict or uncertain result requires review; a later higher version
+   alone does not prove this repair succeeded. Do not rerun the Cognito password
+   mutation merely to finish application-session revocation.
+4. After confirmed repair, verify both private old device-cookie jars fail `/me`
+   with 401 and a fresh new-password login works. The owner retains the jars;
+   do not collect them as support evidence. Subsequent requests enforce version
+   invalidation; accepted in-flight work is not cancelled or pushed out.
+
+For an uncertain Cognito result, first establish the password/account outcome
+through authorized recovery and complete revocation as required; never infer it
+from a cleared cookie. Automatic durable recovery, global Cognito token sign-out,
+other applications' sessions, account-disable workflows, UI/chat identity cutover
+and comprehensive public-demo abuse prevention remain deferred.
 
 ## Deadlines, permissions and later validation
 
 The Lambda uses Node.js 22, 256 MiB, a 25-second timeout and seven-day logs.
 The handler allows at most twenty seconds of work with a response reserve.
-Every SDK call is clamped to the remaining budget, with maxAttempts two; JWKS
+Safe SDK reads and identical DynamoDB transactions use maxAttempts two, with
+remaining-budget cancellation; password mutations use maxAttempts one. JWKS
 verification uses supported HTTPS abort/timeout options and its bounded built-in
 retry. Cryptographic checks remain enabled. Logs contain only request ID, fixed
 route/outcome labels and duration, never identities, payloads, cookies, hashes,
 credentials or provider diagnostics.
 
-The APPLICATION role has exact-table GetItem, PutItem, DeleteItem and
-ConditionCheckItem, exact-pool AdminGetUser and its own log writes. There is no
-UpdateItem/Scan/Query/batch, secret/S3/Bedrock/tool access or admin mutation grant.
+The APPLICATION role has exact-table GetItem, PutItem, DeleteItem,
+ConditionCheckItem and UpdateItem, exact-pool AdminGetUser and its own log writes. There is no
+Scan/Query/batch, secret/S3/Bedrock/tool access or administrative password grant.
 The boundary adds ConditionCheckItem only for the exact environment auth table
 and AdminGetUser only for account/Region pools with the existing ownership tags.
+The existing APPLICATION boundary already covers UpdateItem; only the exact-table
+runtime identity grant changes. ForgotPassword/ConfirmForgotPassword use the
+public client, and ChangePassword uses its transient verified access token, not IAM.
 See [transaction IAM](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html).
 
 Apply the reviewed foundation boundary update before the operator's application
