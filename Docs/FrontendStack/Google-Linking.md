@@ -138,8 +138,14 @@ No unsigned-token decoding, email-only authentication or Google API access exist
 Before mutation, the same session/version and five-minute deadline must still
 hold, canonical local email must still be verified/matching, and ownership must
 be consistent. Missing identities means none only in this linking-specific parser;
-malformed, duplicate or ambiguous provider data fails closed. Ordinary Google
-login's strict one-Google-identity validation is unchanged.
+malformed, duplicate or ambiguous provider data fails closed. A present
+`identities[].primary` accepts only booleans or exact strings `"true"`/`"false"`,
+normalizing strings before the existing checks. Both `true` and `"true"` are
+rejected as primary identities; `false` and `"false"` are nonprimary. Other values
+fail validation, and an absent flag retains its existing behavior. No generic
+boolean coercion is used. Ordinary Google login's strict one-Google-identity
+validation is unchanged; existing link/recovery records are not repaired by this
+parser compatibility fix.
 
 - Exactly the same identity already linked: fixed 200 `{"message":"This Google account is already linked."}`; no link, USER version or session mutation.
 - Different/multiple Google identities, standalone provider profile or another recorded owner: 409, without deletion, reassignment or replacement.

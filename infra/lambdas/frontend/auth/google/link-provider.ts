@@ -27,7 +27,9 @@ function linkedGoogle(result: AdminGetUserCommandOutput): string | undefined {
   if (attributes.length !== 1 || typeof attributes[0].Value !== 'string' || Buffer.byteLength(attributes[0].Value) > 8_192) throw new GoogleLinkError('google_link_unavailable');
   try {
     const identities = z.array(z.object({ userId: z.string().min(1).max(256), providerName: z.string().min(1),
-      providerType: z.string().min(1), primary: z.boolean().optional() })).max(10).parse(JSON.parse(attributes[0].Value));
+      providerType: z.string().min(1),
+      primary: z.union([z.boolean(), z.enum(['true', 'false']).transform(value => value === 'true')]).optional(),
+    })).max(10).parse(JSON.parse(attributes[0].Value));
     const providers = identities.map(value => value.providerName);
     if (new Set(providers).size !== providers.length || identities.some(value => value.primary === true)) throw new GoogleLinkError('google_link_conflict');
     const google = identities.filter(value => value.providerName === 'Google' || value.providerType === 'Google');

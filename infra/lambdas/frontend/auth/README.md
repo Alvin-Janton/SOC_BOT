@@ -42,6 +42,10 @@ Callback obtains direct Google proof without creating a Cognito profile, and
 requires the same session/version and matching verified emails. A no-op changes
 no sessions; a new link requires confirmed association and conditional revocation
 before success. Unknown outcomes remain fenced for administrator review.
+The linking identity parser normalizes only boolean `primary` flags and exact
+`"true"`/`"false"` strings, continues rejecting primary identities and malformed or
+ambiguous provider data, and preserves absent-flag behavior. This parsing fix does
+not resolve existing link/recovery records.
 Only the direct Google linking callback accepts optional query `iss`, requiring
 exact `https://accounts.google.com` with no empty, repeated or conflicting values.
 Missing `iss` is accepted; normal Cognito callback parameters and signed-token
