@@ -6,7 +6,7 @@ This guide follows the outer request lifecycle. The [agent/tool loop](Agent-Loop
 
 In [handler.ts](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts), exported `handler` wraps the private `respond(event, raw, context)` function with `awslambda.streamifyResponse`. `raw` is Lambda's writable response stream; `context` supplies the invocation ID and remaining Lambda lifetime. The handler returns no answer object: it writes HTTP/NDJSON output.
 
-[contracts.ts](../../../../infra/lambdas/ai/chat-orchestrator/contracts.ts) parses an API-proxy-shaped event such as:
+[auth.ts](../../../../infra/lambdas/ai/chat-orchestrator/auth.ts) first validates the REST gateway envelope and resolves one owner. [contracts.ts](../../../../infra/lambdas/ai/chat-orchestrator/contracts.ts) then parses the body. This body-only excerpt is not a valid standalone invocation:
 
 ```json
 {
@@ -25,11 +25,11 @@ The JSON body accepts only:
 
 The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 encoded. Unknown body keys, including client identity or transcript/history, fail validation. Extra proxy-envelope fields do not become trusted identity.
 
-[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) accepts trusted dev/demo configuration: fixed `TEMPORARY_OWNER_ID`, exact matching table/query-function/RAG-function/database names, approved model/Region, and a valid query-window cap. `RAG_TOOL_FUNCTION_NAME` must match `SOC-BOT-<ENV>-RAG-TOOL`; request bodies cannot override it. The fixed owner is not authentication; all callers in an environment share it. The Regional streaming POST `/chat` route uses basic request validation before deeper Lambda validation. Dev's source-IP WAF gate is temporary; demo intentionally has no WAF and must remain undeployed until Cognito/security is complete. No active Cognito integration or frontend/CORS support exists. [Infrastructure prerequisites](../../Infra/README.md) include the foundation-owned logging setting and dev CIDR context.
+[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) validates environment resources, model/Region, query-window cap and the legacy-only temporary owner. `auth.ts` also validates `EXPECTED_ACCOUNT_ID`, `LEGACY_CHAT_API_ID`, the REST route/context and authenticated principal agreement. `/api/chat` receives its Cognito sub from the frontend origin/session authorizer; only the configured legacy API retains a shared owner. Bare console bodies or missing frontend context cannot fall back. See [authenticated admission, errors and operator checks](../../../FrontendStack/Authenticated-Chat.md). The legacy dev WAF and deferred legacy-demo exposure remain unchanged.
 
 ## Handler lifecycle
 
-1. **Start the budget.** `respond()` records acceptance time and creates `TurnBudget`, then loads configuration and parses the request. It rejects a Lambda context with less than ten minutes remaining.
+1. **Start the budget.** `respond()` records acceptance time and creates `TurnBudget`, then loads configuration, resolves the trusted invocation owner and parses the request before constructing either store. It rejects a Lambda context with less than ten minutes remaining.
 2. **Begin/replay the turn.** A normal store is bounded by the application deadline minus its cleanup reserve; a cleanup store may operate until the full deadline. `ConversationStore.begin()` checks ownership/idempotency and takes a lease before appending the original user event. The lease expires 30 seconds beyond the remaining hard Lambda lifetime.
 3. **Open the stream.** Only after acceptance succeeds does `NdjsonStream` wrap `raw` and emit `conversation`. Earlier failures use ordinary HTTP errors.
 4. **Replay or investigate.** Completed matching retries emit the saved answer and `complete` with `replayed: true`, without invoking the model or tools. Otherwise `Orchestrator.run()` handles recovery, context, model calls, and tools.

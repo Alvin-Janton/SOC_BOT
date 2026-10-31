@@ -9,6 +9,7 @@ export const MAX_OUTPUT_TOKENS = 4_096;
 
 export interface Configuration {
   readonly environment: 'dev' | 'demo';
+  /** Legacy /chat owner only; authenticated requests resolve their owner independently in auth.ts. */
   readonly ownerId: string;
   readonly tableName: string;
   readonly queryFunction: string;
@@ -20,7 +21,8 @@ export interface Configuration {
 }
 
 /**
- * Fails closed unless trusted configuration selects one environment's fixed identity and resources.
+ * Fails closed unless trusted configuration selects environment resources and the isolated legacy identity.
+ * auth.ts additionally validates the configured legacy API/account and resolves each invocation's actual owner.
  *
  * Example Input (no arguments; trusted environment variables):
  * {

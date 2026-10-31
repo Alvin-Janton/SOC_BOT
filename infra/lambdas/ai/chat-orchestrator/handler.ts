@@ -4,6 +4,7 @@ import { parseRequest } from './contracts';
 import { Orchestrator } from './orchestrator';
 import { ConversationStore, Lease, StoreError } from './store';
 import { httpError, LambdaContext, NdjsonStream } from './stream';
+import { resolveOwner } from './auth';
 
 /**
  * Maps failures to safe public contracts, never exposing SDK errors, prompts, or record contents.
@@ -36,11 +37,15 @@ function publicError(error: unknown, budget: TurnBudget): ChatError {
 }
 
 /**
- * Accepts the trusted dev identity, persists outcomes before completion, and leaves auth/API integration inactive.
+ * Resolves one trusted invocation owner before persistence, then persists outcomes before completion.
  *
- * Example Input (Lambda supplies the Writable and context; trusted dev configuration is required):
+ * Example Input (Lambda supplies the Writable and context; trusted gateway context is required):
  * {
- *   event: { body: '{"turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9","message":"Describe waf_events."}' },
+ *   event: { body: '{"turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9","message":"Describe waf_events."}',
+ *     httpMethod: 'POST', path: '/api/chat', resource: '/api/chat',
+ *     requestContext: { accountId: '<account>', apiId: '<frontend-api>', stage: 'dev', httpMethod: 'POST',
+ *       resourcePath: '/api/chat', authorizer: { authenticationType: 'bff-session', principalId: '<sub>',
+ *         userId: '<sub>', apiId: '<frontend-api>', stage: 'dev' } } },
  *   raw: Writable <Lambda response stream>,
  *   context: { awsRequestId: '<invocation-id>', getRemainingTimeInMillis: () => 890_000 },
  * }
@@ -70,6 +75,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
 
   try {
     const config = configuration();
+    const ownerId = resolveOwner(event, config);
     const request = parseRequest(event);
     turnId = request.turnId;
     const remainingRuntime = context.getRemainingTimeInMillis();
@@ -78,8 +84,8 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
       throw new ChatError('CONFIGURATION_ERROR', 'The investigation runtime is not available.', 503, false);
     }
 
-    store = new ConversationStore(config.tableName, config.ownerId, budget.deadline - OUTCOME_RESERVE_MS);
-    cleanupStore = new ConversationStore(config.tableName, config.ownerId, budget.deadline);
+    store = new ConversationStore(config.tableName, ownerId, budget.deadline - OUTCOME_RESERVE_MS);
+    cleanupStore = new ConversationStore(config.tableName, ownerId, budget.deadline);
 
     const begun = await store.begin(request.conversationId, request.turnId, request.message,
       Math.ceil((Date.now() + remainingRuntime + 30_000) / 1_000));

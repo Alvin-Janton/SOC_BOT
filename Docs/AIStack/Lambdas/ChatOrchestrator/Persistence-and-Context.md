@@ -30,7 +30,7 @@ Only a rejected `INVALID_TOOL_INPUT` preparation may optionally include `validat
 
 ## Acceptance, leases, and appends
 
-`ConversationStore.begin()` uses the configured trusted owner, never an owner from the request. With no conversation ID, it derives a stable UUID from table/owner/initial turn ID, conditionally creates metadata, and then reads it with owner authorization. This lets an initial retry recover even if the first conversation event was never delivered.
+`ConversationStore.begin()` uses the request-resolved trusted owner, never a viewer-supplied identity. Both normal and cleanup stores receive the same validated Cognito sub for Frontend traffic, or the fixed isolated legacy owner only for its configured API. Another owner and a missing conversation both return generic NOT_FOUND before history/replay. See [chat admission](../../../FrontendStack/Authenticated-Chat.md). With no conversation ID, it derives a stable UUID from table/owner/initial turn ID, conditionally creates metadata, and then reads it with owner authorization. This lets an initial retry recover even if the first conversation event was never delivered.
 
 Before and after taking a lease, `checkTurn()` checks this turn's original message and completion/outcome state. Matching completed turns replay; changed message content conflicts; abandoned or nonretryable terminal turns cannot be retried. A duplicate original user event is invalid stored state.
 

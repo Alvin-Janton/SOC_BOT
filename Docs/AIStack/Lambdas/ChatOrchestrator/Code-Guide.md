@@ -1,6 +1,6 @@
 # Chat Orchestrator Code Guide
 
-This is a compact index of the eleven TypeScript modules in `infra/lambdas/ai/chat-orchestrator/`. Read the [overview](README.md) for scope, integrations, and security boundaries. Focused guides explain [request/streaming](Request-and-Streaming.md), [agent/tools](Agent-Loop-and-Tools.md), [RAG integration](RAG-Tools.md), and [persistence/context](Persistence-and-Context.md) across module boundaries.
+This is a compact index of the twelve TypeScript modules in `infra/lambdas/ai/chat-orchestrator/`. Read the [overview](README.md) for scope, integrations, and security boundaries. Focused guides explain [request/streaming](Request-and-Streaming.md), [agent/tools](Agent-Loop-and-Tools.md), [RAG integration](RAG-Tools.md), and [persistence/context](Persistence-and-Context.md) across module boundaries.
 
 There is one AWS Lambda entry point: the exported `handler` in `handler.ts` wraps `respond()` with `awslambda.streamifyResponse`. Other modules expose functions or class methods used by that request lifecycle; they are not separate Lambda handlers. Types and interfaces describe the data passed between them.
 
@@ -8,6 +8,7 @@ There is one AWS Lambda entry point: the exported `handler` in `handler.ts` wrap
 
 | Module | Start with | Responsibility and place in the flow |
 | --- | --- | --- |
+| [auth.ts](../../../../infra/lambdas/ai/chat-orchestrator/auth.ts) | `resolveOwner()` | Validates REST gateway routing and the session-authorizer contract before either store; only the exact configured legacy API retains temporary ownership. Never parses browser cookies or accepts viewer identity. |
 | [handler.ts](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) | `handler`, `respond()` | Outer request lifecycle: validate, begin/replay a turn, run the orchestrator, persist the answer/outcome, release ownership, and finish streaming. |
 | [orchestrator.ts](../../../../infra/lambdas/ai/chat-orchestrator/orchestrator.ts) | `Orchestrator.run()`; `context()`, `prepare()` | Model/tool loop: recover recorded work, pass the live call count before each main model call, rebuild context, validate/record calls, execute sequentially, and switch to tools-disabled finalization when required. Returns the final response to the handler. |
 | [contracts.ts](../../../../infra/lambdas/ai/chat-orchestrator/contracts.ts) | `parseRequest()`, `validateTool()`; `isRagRequest()` | Input boundaries: strict chat/six-tool schemas, reused pure RAG validators, Athena-only compilation and bounded typed correction hints for rejected input. `bedrockTools()` generates unchanged schemas/descriptions; `tableFacts()` supplies catalog facts plus authored source-field, evidence-locator and per-query completeness meanings as reference data. |
@@ -17,12 +18,12 @@ There is one AWS Lambda entry point: the exported `handler` in `handler.ts` wrap
 | [rag-tools.ts](../../../../infra/lambdas/ai/chat-orchestrator/rag-tools.ts) | `invokeRag()`; `validatedResponse()` | One exact private Lambda invocation, bounded wait/bytes, strict response and request-identity checks, and safe recoverable availability errors. No persistence, S3 access, polling, or remote cancellation. See the [focused guide](RAG-Tools.md). |
 | [store.ts](../../../../infra/lambdas/ai/chat-orchestrator/store.ts) | `ConversationStore.begin()`, `append()`, `reload()`; `appendFor()` | Authorized DynamoDB persistence: turn idempotency, leases/version checks, transactional event sequences, and bounded history reads. `loadSummary()`/`saveSummary()` manage checkpoints; `release()` clears matching ownership. |
 | [stream.ts](../../../../infra/lambdas/ai/chat-orchestrator/stream.ts) | `NdjsonStream.emit()`, `finish()`, `httpError()` | Response transport: queued NDJSON writes, idle heartbeats, bounded backpressure, one terminal-event attempt, and pre-stream HTTP errors. Transport failure does not itself determine the stored turn outcome. |
-| [config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) | `configuration()`, `TurnBudget` | Trusted environment-specific resource/temporary-owner configuration, safe `ChatError` values, and deadline/reserve checks used throughout the request. Does not acquire a conversation lease. |
+| [config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) | `configuration()`, `TurnBudget` | Trusted environment-specific resources and legacy-only temporary-owner configuration, safe `ChatError` values, and deadline/reserve checks used throughout the request. Does not acquire a conversation lease. |
 | [prompt.ts](../../../../infra/lambdas/ai/chat-orchestrator/prompt.ts) | `SYSTEM_PROMPT`, `SYSTEM_PROMPT_VERSION` | Versioned `soc_bot_system_v8` read-only/untrusted-evidence policy: exact-IP/actor-link limits, authorization/baseline uncertainty, source-specific outcomes, NULL/count reconciliation and section-grounded guidance. Seven invented partial-JSON illustrations cover all four sources; they are not evidence, baselines or answer templates. Behavioral guidance only, not deterministic correlation. No function or handler; live allowance comes separately from runtime state. |
 
 ## Suggested reading order
 
-1. **Request lifecycle:** `handler.respond()` and `contracts.parseRequest()`.
+1. **Request lifecycle:** `handler.respond()`, `auth.resolveOwner()` and `contracts.parseRequest()`.
 2. **Turn ownership:** `store.begin()`, then `append()`/`appendFor()` and `release()`.
 3. **Investigation loop:** `orchestrator.run()` and its `prepare()`/`context()` methods.
 4. **Model input/output:** `context.buildContext()`, then `model.respond()`/`request()`, `modelMessages()` and finalization-only `finalizationMessages()`.
@@ -31,7 +32,7 @@ There is one AWS Lambda entry point: the exported `handler` in `handler.ts` wrap
 
 Private methods such as `request()`, `poll()`, and `appendFor()` contain substantial logic and security checks; they are not merely formatting helpers. Module imports show the actual dependencies, while the index above explains their business roles.
 
-## Boundaries outside these eleven modules
+## Boundaries outside these twelve modules
 
 - The [safe diagnostic formatter/validator](../../../../infra/lib/shared/tool-validation.ts) and its [shared contract](../../../../infra/lib/shared/tool-validation-contract.json) bound correction metadata used by runtime storage/recovery and the evaluator; they are not another tool or a replacement input validator.
 - The [CDK ChatOrchestrator construct](../../../../infra/lib/stacks/ai/chat-orchestrator.ts) defines deployment resources and IAM; the [AI infrastructure guide](../../Infra/README.md) explains stack wiring and boundaries.

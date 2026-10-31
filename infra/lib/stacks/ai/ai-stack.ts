@@ -58,6 +58,9 @@ export class AiStack extends Stack {
       orchestratorFunction: this.chatOrchestrator.function,
       devAllowedClientCidr: props.devAllowedClientCidr,
     });
+    // Same-stack legacy identity binding; Frontend must never be imported into AI configuration.
+    this.chatOrchestrator.function.addEnvironment('LEGACY_CHAT_API_ID', this.chatApi.api.restApiId);
+    this.chatOrchestrator.function.addEnvironment('EXPECTED_ACCOUNT_ID', this.account);
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', props.deploymentEnvironment);
     Tags.of(this).add('ManagedBy', 'CDK');

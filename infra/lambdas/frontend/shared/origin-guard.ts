@@ -35,8 +35,9 @@ function originHeader(event: Record<string, unknown>): string | undefined {
   return values[0];
 }
 
-/** Verifies only AWSCURRENT, caching one validated token for at most five minutes and failing closed. */
-export function createOriginGuard(secretArn: string): (event: Record<string, unknown>, remainingMs: number) => Promise<boolean> {
+/** Verifies AWSCURRENT with a five-minute token cache; strict callers distinguish backend failures from invalid tokens. */
+export function createOriginGuard(secretArn: string, failOnUnavailable = false):
+  (event: Record<string, unknown>, remainingMs: number, signal?: AbortSignal) => Promise<boolean> {
 
   const client = new SecretsManagerClient({
     maxAttempts: 2, requestHandler: { connectionTimeout: 500, requestTimeout: 2_000 },
@@ -44,22 +45,24 @@ export function createOriginGuard(secretArn: string): (event: Record<string, unk
 
   let cache: { value: Buffer; expiresAt: number } | undefined;
 
-  return async (event, remainingMs) => {
+  return async (event, remainingMs, signal) => {
     const header = originHeader(event);
 
-    if (!header || !Number.isFinite(remainingMs) || remainingMs <= 500) return false;
+    if (!header) return false;
 
     try {
+      if (!Number.isFinite(remainingMs) || remainingMs <= 500 || signal?.aborted) throw new Error('Origin verification unavailable');
       if (!cache || cache.expiresAt <= Date.now()) {
         cache = undefined;
         const startedAt = Date.now();
 
+        const timeout = AbortSignal.timeout(Math.min(3_000, Math.floor(remainingMs - 500)));
         const result = await client.send(new GetSecretValueCommand({ SecretId: secretArn, VersionStage: 'AWSCURRENT' }), {
-          abortSignal: AbortSignal.timeout(Math.min(3_000, Math.floor(remainingMs - 500))),
+          abortSignal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
 
         if (typeof result.SecretString !== 'string' || !TOKEN_PATTERN.test(result.SecretString)
-          || result.SecretBinary !== undefined || !result.VersionStages?.includes('AWSCURRENT')) return false;
+          || result.SecretBinary !== undefined || !result.VersionStages?.includes('AWSCURRENT')) throw new Error('Origin verification unavailable');
         cache = { value: Buffer.from(result.SecretString, 'ascii'), expiresAt: startedAt + CACHE_MS };
       }
 
@@ -68,6 +71,7 @@ export function createOriginGuard(secretArn: string): (event: Record<string, unk
 
     catch {
       cache = undefined;
+      if (failOnUnavailable) throw new Error('Origin verification unavailable');
       return false;
     }
   };

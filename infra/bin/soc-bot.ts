@@ -52,6 +52,7 @@ for (const environment of ['dev', 'demo'] as const) {
   // The Regional logging account setting is administrator-managed, never recreated by AI.
   aiStack.addStackDependency(foundation);
   const frontendStack = new FrontendStack(app, `${environment}FrontendStack`, {
+    orchestratorFunction: aiStack.chatOrchestrator.function,
     deploymentEnvironment: environment, stackName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND`,
     devFrontendAllowedClientCidr: environment === 'dev' ? devFrontendAllowedClientCidr : undefined,
     devGoogleLoginEnabled: environment === 'dev' ? devGoogleLoginEnabled : undefined,

@@ -1,6 +1,6 @@
 # End-to-End Chat Data Flow
 
-This walkthrough follows one illustrative successful `query_events` turn through the dev Lambda. A calling client can use the streaming POST `/chat` API after operator deployment; React integration remains unimplemented. Dev API access uses a temporary WAF source-IP gate and fixed shared owner, not user authentication. The API-proxy snapshots below remain valid; see [AI infrastructure](../../Infra/README.md) for prerequisites and the undeployed-demo security exception. The model proposes an investigation; application code validates and executes it.
+This walkthrough retains the **legacy `/chat`** example and its shared owner. New authenticated traffic is explained in the [frontend chat guide](../../../FrontendStack/Authenticated-Chat.md); no legacy data is migrated. This walkthrough follows one illustrative successful `query_events` turn through the dev Lambda. A calling client can use the streaming POST `/chat` API after operator deployment; React integration remains unimplemented. Dev API access uses a temporary WAF source-IP gate and fixed shared owner, not user authentication. The API-proxy snapshots below remain valid; see [AI infrastructure](../../Infra/README.md) for prerequisites and the undeployed-demo security exception. The model proposes an investigation; application code validates and executes it.
 
 ```mermaid
 sequenceDiagram
@@ -9,7 +9,7 @@ sequenceDiagram
     participant D as DynamoDB
     participant B as Bedrock
     participant Q as Query Lambda
-    Note over C,H: API Gateway streams /chat; frontend/Cognito integration is not implemented
+    Note over C,H: API Gateway streams /chat; legacy shared owner; authenticated /api/chat is separate
     C->>H: API-proxy-shaped event
     H->>D: Acquire lease and save USER_MESSAGE
     H-->>C: conversation event
@@ -57,7 +57,17 @@ For detailed behavior, use the [overview](README.md), [request/streaming](Reques
 ```json
 {
   "body": "{\"conversationId\":\"c4e7173b-3075-47b9-9e7d-260921bbc870\",\"turnId\":\"296a0470-b7b7-4a21-a9d7-72fb7be90ac9\",\"message\":\"Show one blocked WAF request from September 11, 2026 UTC, including action, path, and severity_id.\"}",
-  "isBase64Encoded": false
+  "isBase64Encoded": false,
+  "httpMethod": "POST",
+  "path": "/chat",
+  "resource": "/chat",
+  "requestContext": {
+    "accountId": "<configured account>",
+    "apiId": "<configured LEGACY_CHAT_API_ID>",
+    "stage": "dev",
+    "httpMethod": "POST",
+    "resourcePath": "/chat"
+  }
 }
 ```
 
@@ -71,7 +81,7 @@ For detailed behavior, use the [overview](README.md), [request/streaming](Reques
 }
 ```
 
-The caller supplies neither owner identity nor history. Trusted configuration provides `soc-bot-dev-analyst`; this fixed shared dev owner is not authentication.
+The caller supplies neither owner identity nor history. Only the validated legacy gateway envelope and configured API ID select `soc-bot-dev-analyst`; this fixed shared dev owner is not authentication.
 
 ## 2. Accepted request -> metadata, lease, and user event
 

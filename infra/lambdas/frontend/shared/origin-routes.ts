@@ -12,6 +12,11 @@ export const FRONTEND_ORIGIN_ROUTES = [
   { route: 'change-password', method: 'POST', resource: '/api/auth/change-password' },
 ] as const;
 
+/** Session-protected application routes, deliberately excluded from auth-Lambda route registration. */
+export const FRONTEND_PROTECTED_ROUTES = [
+  { route: 'chat', method: 'POST', resource: '/api/chat' },
+] as const;
+
 const GOOGLE_ORIGIN_ROUTES = [
   { route: 'google-start', method: 'GET', resource: '/api/auth/google/start' },
   { route: 'google-callback', method: 'GET', resource: '/api/auth/google/callback' },
