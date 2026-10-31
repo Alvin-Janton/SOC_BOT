@@ -42,6 +42,10 @@ Callback obtains direct Google proof without creating a Cognito profile, and
 requires the same session/version and matching verified emails. A no-op changes
 no sessions; a new link requires confirmed association and conditional revocation
 before success. Unknown outcomes remain fenced for administrator review.
+Only the direct Google linking callback accepts optional query `iss`, requiring
+exact `https://accounts.google.com` with no empty, repeated or conflicting values.
+Missing `iss` is accepted; normal Cognito callback parameters and signed-token
+verification are unchanged.
 See [contracts, state and recovery](../../../../Docs/FrontendStack/Google-Linking.md).
 `google/linking.ts` coordinates the flow, `google/link-provider.ts` owns fixed
 provider operations and `google/link-state.ts` owns operational records.

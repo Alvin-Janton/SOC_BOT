@@ -67,7 +67,7 @@ export function authHttpConfiguration(): AuthHttpConfiguration {
 /** Reconciles bounded OAuth query maps, requiring one state and either a code or provider error. */
 function googleCallbackQuery(event: Record<string, unknown>, directGoogle = false): GoogleCallbackQuery {
   const merged = new Map<string, string>();
-  const keys = ['state', 'code', 'error', 'error_description', 'error_uri', ...(directGoogle ? ['scope', 'authuser', 'prompt', 'hd'] : [])];
+  const keys = ['state', 'code', 'error', 'error_description', 'error_uri', ...(directGoogle ? ['scope', 'authuser', 'prompt', 'hd', 'iss'] : [])];
   for (const mapName of ['queryStringParameters', 'multiValueQueryStringParameters']) {
     const raw = event[mapName];
     if (raw === undefined || raw === null) continue;
@@ -79,6 +79,7 @@ function googleCallbackQuery(event: Record<string, unknown>, directGoogle = fals
         ? Array.isArray(value) && value.length === 1 ? value[0] : undefined : value;
       if (typeof entry !== 'string' || !entry.length || entry.length > (key === 'code' ? 4_096 : 1_024)
         || [...entry].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+        || (key === 'iss' && entry !== 'https://accounts.google.com')
         || (merged.has(key) && merged.get(key) !== entry)) throw new BffAuthError('invalid_input');
       merged.set(key, entry);
     }

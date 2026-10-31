@@ -70,9 +70,15 @@ Callback permits only top-level cross-site GET navigation on its exact path.
 Existing POST Origin/Fetch Metadata checks are unchanged. Query/header map
 duplicates, conflicts, unexpected combinations and oversized fields are rejected.
 Bounded scope/authuser/prompt/hd callback metadata is explicitly accepted and
-ignored as identity evidence; state and exactly one code/error alternative remain
-mandatory. All linking responses use no-store/no-referrer. Errors never echo query
-values, provider diagnostics, credentials or identities.
+ignored as identity evidence. Optional `iss` is accepted only on this direct Google
+callback and must equal `https://accounts.google.com` exactly; empty, unexpected,
+repeated or conflicting values are rejected. Equivalent single/multivalue maps
+represent the same parameter; repeated multivalue entries are rejected even when
+identical. Absence remains compatible. This query value does not replace signed
+ID-token issuer verification. The normal Cognito callback does not accept `iss`.
+State and exactly one code/error alternative remain mandatory. All linking
+responses use no-store/no-referrer. Errors never echo query values, provider
+diagnostics, credentials or identities.
 
 ## Proof and short-lived state
 
