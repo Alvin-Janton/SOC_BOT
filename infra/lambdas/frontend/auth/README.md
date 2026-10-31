@@ -14,6 +14,25 @@ deferred. Signup, confirmation, resend and password recovery/change are implemen
 dev Google login/linking are staged/opt-in, while demo Google, unlinking/replacement,
 MFA challenges, renewal and all-device logout/disable APIs are not implemented.
 
+## Google module grouping
+
+Google-specific runtime code lives in `google/`; shared auth modules remain in
+this folder. In particular, shared `config.ts` supplies the auth configuration
+and request budget, while `google/config.ts` supplies Google activation/public
+configuration. The main API handler stays here; the Cognito trigger has its own
+entry point under `google/`. The CDK construct remains under `infra/lib/stacks/frontend/`.
+
+| Module | Existing responsibility |
+| --- | --- |
+| [google/config.ts](google/config.ts) | Strict Google activation and public OAuth configuration. |
+| [google/login.ts](google/login.ts) | Signed-out browser login, identity verification and existing session issuance. |
+| [google/provider.ts](google/provider.ts) | Cognito code exchange, dedicated-client token verification and canonical Google profile checks. |
+| [google/pre-signup.ts](google/pre-signup.ts) | Separate Cognito trigger that denies unlinked email collisions and preserves native signup. |
+| [google/oauth-transactions.ts](google/oauth-transactions.ts) | Login state/nonce/PKCE proof, browser cookie and one-time transaction consumption. |
+| [google/link-provider.ts](google/link-provider.ts) | Fixed Google linking proof endpoints, credential reads and exact-pool Cognito association operations. |
+| [google/link-state.ts](google/link-state.ts) | Session-bound linking transactions, cookies, destination guards and provider ownership records. |
+| [google/linking.ts](google/linking.ts) | Fresh-proof linking flow, no-op/conflict handling and confirmed session revocation. |
+
 ## HTTP contracts
 
 Explicit linking adds POST `/api/auth/link/google/start` (only currentPassword,
@@ -24,8 +43,8 @@ requires the same session/version and matching verified emails. A no-op changes
 no sessions; a new link requires confirmed association and conditional revocation
 before success. Unknown outcomes remain fenced for administrator review.
 See [contracts, state and recovery](../../../../Docs/FrontendStack/Google-Linking.md).
-`google-linking.ts` coordinates the flow, `google-link-provider.ts` owns fixed
-provider operations and `google-link-state.ts` owns operational records.
+`google/linking.ts` coordinates the flow, `google/link-provider.ts` owns fixed
+provider operations and `google/link-state.ts` owns operational records.
 `sessions.resolveProof` is internal; public session schemas remain unchanged.
 
 Enabled dev additionally exposes GET `/api/auth/google/start` and
@@ -40,9 +59,9 @@ to `/api/auth/me`. Existing single-cookie password responses remain unchanged.
 
 See [Google setup, collision justification and limits](../../../../Docs/FrontendStack/Google-Login.md)
 for staged provisioning, transaction fields and later operator validation.
-`google-login.ts` coordinates the flow, `oauth-transactions.ts` owns proof/cookie
-consumption, `google-provider.ts` verifies the dedicated Cognito identity,
-`google-config.ts` validates public configuration, and `google-pre-signup.ts` is
+`google/login.ts` coordinates the flow, `google/oauth-transactions.ts` owns proof/cookie
+consumption, `google/provider.ts` verifies the dedicated Cognito identity,
+`google/config.ts` validates public configuration, and `google/pre-signup.ts` is
 the distinct exact-pool creation trigger. The latter denies collisions in every
 local-account status; only UserNotFoundException permits absence, never a lookup
 failure or malformed result. It does not initialize metadata or link accounts.

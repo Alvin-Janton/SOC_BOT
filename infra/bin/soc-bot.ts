@@ -8,7 +8,7 @@ import { DEFAULT_QUERY_WINDOW_DAYS, queryWindowDays } from '../lib/stacks/ai/que
 import { devClientCidr } from '../lib/stacks/ai/chat-api';
 import { FrontendStack } from '../lib/stacks/frontend/frontend-stack';
 import { devFrontendClientCidr } from '../lib/stacks/frontend/frontend-waf';
-import { googleLoginEnabled } from '../lambdas/frontend/auth/google-config';
+import { googleLoginEnabled } from '../lambdas/frontend/auth/google/config';
 
 const app = new App();
 const devGoogleLoginEnabled = googleLoginEnabled(app.node.tryGetContext('devGoogleLoginEnabled'));

@@ -7,10 +7,10 @@ import { authHttpConfiguration, authHttpResponse, AuthHttpRequest, AuthHttpRespo
 import { AuthSession } from './sessions';
 import { createCognitoRegistration, REGISTRATION_ACCEPTED_RESPONSE, SIGNUP_CONFIRMED_RESPONSE } from './registration';
 import { createPasswordService, PASSWORD_RECOVERY_RESPONSE, PASSWORD_UPDATED_RESPONSE } from './passwords';
-import { createGoogleLogin } from './google-login';
-import { GoogleLoginError, oauthCookie } from './oauth-transactions';
-import { createGoogleLinking } from './google-linking';
-import { GoogleLinkError, googleLinkCookie } from './google-link-state';
+import { createGoogleLogin } from './google/login';
+import { GoogleLoginError, oauthCookie } from './google/oauth-transactions';
+import { createGoogleLinking } from './google/linking';
+import { GoogleLinkError, googleLinkCookie } from './google/link-state';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
@@ -34,7 +34,7 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     const budget = createAuthRequestBudget(context.getRemainingTimeInMillis());
     const config = authHttpConfiguration();
     request = parseAuthHttpRequest(raw, config);
-    
+
     switch (request.route) {
       case 'google-link-start': {
         if (request.invalidCookie) throw new BffAuthError('authentication_required');

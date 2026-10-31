@@ -76,7 +76,7 @@ values, provider diagnostics, credentials or identities.
 
 ## Proof and short-lived state
 
-[google-linking.ts](../../infra/lambdas/frontend/auth/google-linking.ts) resolves
+[google/linking.ts](../../infra/lambdas/frontend/auth/google/linking.ts) resolves
 a strict internal session proof: sub, hashed session key, session_version,
 createdAt and expiry. Public login/me responses remain sub/expiry-only. Canonical
 Cognito reads require native CONFIRMED, enabled, verified-email, unchallenged
@@ -88,7 +88,7 @@ before fresh password verification for that subject. The same session and email
 are revalidated afterward without adopting a newer version. Proof expiry is no
 later than five minutes from proof start or the source session's expiry.
 
-[google-link-state.ts](../../infra/lambdas/frontend/auth/google-link-state.ts)
+[google/link-state.ts](../../infra/lambdas/frontend/auth/google/link-state.ts)
 owns three strict item shapes in the existing auth table; USER_AUTH_STATE and
 AUTH_SESSION schemas remain unchanged:
 
@@ -118,7 +118,7 @@ linking cookie. Unknown/mismatched attempts cannot clear another active flow.
 
 ## Google proof and mutation
 
-[google-link-provider.ts](../../infra/lambdas/frontend/auth/google-link-provider.ts)
+[google/link-provider.ts](../../infra/lambdas/frontend/auth/google/link-provider.ts)
 exchanges the code only at Google's fixed token endpoint, using the recorded
 verifier, exact callback and current matching credentials. Redirects/retries of
 code redemption are disabled; time and response bytes are bounded. The installed

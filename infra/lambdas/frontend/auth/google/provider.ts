@@ -4,11 +4,11 @@ import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { SimpleFetcher } from 'aws-jwt-verify/https';
 import { SimpleJwksCache } from 'aws-jwt-verify/jwk';
 import { z } from 'zod';
-import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from './config';
-import { parseConfirmationResend } from './contracts';
-import { GoogleLoginConfiguration } from './google-config';
+import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from '../config';
+import { parseConfirmationResend } from '../contracts';
+import { GoogleLoginConfiguration } from './config';
 import { GoogleLoginError, oauthHash, OAuthTransaction, sameOAuthHash } from './oauth-transactions';
-import { authSubSchema } from './user-state';
+import { authSubSchema } from '../user-state';
 
 const providerIdentitySchema = z.array(z.object({ providerName: z.string(), providerType: z.string(), userId: z.string().min(1).max(256) })).min(1).max(10);
 

@@ -1,12 +1,12 @@
-import { createBffAuth } from './bff';
-import { AuthRequestBudget } from './config';
-import { AUTH_SESSION_COOKIE_NAME, createSessionCookie } from './cookies';
-import { AuthStateInitializationConflict } from './errors';
-import { verifyGoogleLogin } from './google-provider';
-import { AuthHttpConfiguration, AuthHttpResponse, GoogleCallbackQuery } from './http';
+import { createBffAuth } from '../bff';
+import { AuthRequestBudget } from '../config';
+import { AUTH_SESSION_COOKIE_NAME, createSessionCookie } from '../cookies';
+import { AuthStateInitializationConflict } from '../errors';
+import { verifyGoogleLogin } from './provider';
+import { AuthHttpConfiguration, AuthHttpResponse, GoogleCallbackQuery } from '../http';
 import { createOAuthTransactions, GoogleLoginError, oauthCookie, readOAuthCookie } from './oauth-transactions';
-import { createAuthSessionStore } from './sessions';
-import { createUserAuthStateStore } from './user-state';
+import { createAuthSessionStore } from '../sessions';
+import { createUserAuthStateStore } from '../user-state';
 
 /** Emits redirects with independent cookies and no cache/referrer disclosure of the callback URL. */
 function redirect(statusCode: 302 | 303, location: string, cookies: string[]): AuthHttpResponse {

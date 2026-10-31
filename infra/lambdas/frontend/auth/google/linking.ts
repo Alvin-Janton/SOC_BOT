@@ -1,15 +1,15 @@
 import { z } from 'zod';
-import { createCognitoAuthenticator } from './cognito';
-import { AuthRequestBudget } from './config';
-import { AUTH_SESSION_COOKIE_NAME, clearSessionCookie, readSessionCookie } from './cookies';
-import { BffAuthError, serviceAuthError } from './errors';
-import { createGoogleLinkProvider, googleLinkAuthorization, readGoogleLinkCredentials, verifyGoogleLinkCode } from './google-link-provider';
+import { createCognitoAuthenticator } from '../cognito';
+import { AuthRequestBudget } from '../config';
+import { AUTH_SESSION_COOKIE_NAME, clearSessionCookie, readSessionCookie } from '../cookies';
+import { BffAuthError, serviceAuthError } from '../errors';
+import { createGoogleLinkProvider, googleLinkAuthorization, readGoogleLinkCredentials, verifyGoogleLinkCode } from './link-provider';
 import { createGoogleLinkState, GoogleLinkError, googleLinkCookie, GoogleLinkTransaction, linkTime,
-  readGoogleLinkCookie, requireLinkSession } from './google-link-state';
-import { AuthHttpConfiguration, AuthHttpResponse, GoogleCallbackQuery } from './http';
+  readGoogleLinkCookie, requireLinkSession } from './link-state';
+import { AuthHttpConfiguration, AuthHttpResponse, GoogleCallbackQuery } from '../http';
 import { oauthHash, sameOAuthHash } from './oauth-transactions';
-import { AuthSessionProof, createAuthSessionStore } from './sessions';
-import { createUserAuthStateStore } from './user-state';
+import { AuthSessionProof, createAuthSessionStore } from '../sessions';
+import { createUserAuthStateStore } from '../user-state';
 
 const inputSchema = z.strictObject({ currentPassword: z.string().min(1).max(256) });
 

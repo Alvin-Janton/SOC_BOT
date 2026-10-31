@@ -1,6 +1,6 @@
 import { frontendOriginRoutes } from '../shared/origin-routes';
-import { GoogleLoginConfiguration, googleLoginConfiguration } from './google-config';
-import { parseGoogleLinkStart } from './google-linking';
+import { GoogleLoginConfiguration, googleLoginConfiguration } from './google/config';
+import { parseGoogleLinkStart } from './google/linking';
 import { BffAuthConfig, parseBffAuthConfig } from './config';
 import { ConfirmationResend, EmailCredentials, parseConfirmationResend, parseEmailCredentials,
   parsePasswordChange, parsePasswordReset, parseSignupConfirmation, parseSignupCredentials,

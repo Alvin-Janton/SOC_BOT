@@ -1,6 +1,6 @@
 import { createOriginGuard, record } from '../shared/origin-guard';
 import { frontendOriginRoutes } from '../shared/origin-routes';
-import { googleLoginEnabled } from '../auth/google-config';
+import { googleLoginEnabled } from '../auth/google/config';
 
 interface OriginConfiguration {
   readonly secretArn: string;

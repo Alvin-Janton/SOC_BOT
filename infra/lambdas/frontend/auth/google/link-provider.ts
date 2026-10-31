@@ -4,11 +4,11 @@ import { JwtVerifier } from 'aws-jwt-verify';
 import { SimpleFetcher } from 'aws-jwt-verify/https';
 import { SimpleJwksCache } from 'aws-jwt-verify/jwk';
 import { z } from 'zod';
-import { createCognitoClient, createCognitoPasswordMutationClient } from './cognito';
-import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from './config';
-import { serviceAuthError } from './errors';
-import { googleEmail, googleProfileAttribute } from './google-provider';
-import { GoogleLinkError, GoogleLinkTransaction, linkTime } from './google-link-state';
+import { createCognitoClient, createCognitoPasswordMutationClient } from '../cognito';
+import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from '../config';
+import { serviceAuthError } from '../errors';
+import { googleEmail, googleProfileAttribute } from './provider';
+import { GoogleLinkError, GoogleLinkTransaction, linkTime } from './link-state';
 import { oauthHash, sameOAuthHash } from './oauth-transactions';
 
 const GOOGLE_AUTHORIZE = 'https://accounts.google.com/o/oauth2/v2/auth';

@@ -1,8 +1,8 @@
 import { AdminGetUserCommand, CognitoIdentityProviderClient, UserNotFoundException, UserStatusType } from '@aws-sdk/client-cognito-identity-provider';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { z } from 'zod';
-import { googleEmail, googleProfileAttribute, googleProfileIdentity } from './google-provider';
-import { authSubSchema } from './user-state';
+import { googleEmail, googleProfileAttribute, googleProfileIdentity } from './provider';
+import { authSubSchema } from '../user-state';
 
 const eventSchema = z.object({ version: z.literal('1'), region: z.literal('us-east-1'), userPoolId: z.string().regex(/^us-east-1_[A-Za-z0-9]+$/),
   userName: z.string().min(1).max(128), triggerSource: z.enum(['PreSignUp_ExternalProvider', 'PreSignUp_SignUp', 'PreSignUp_AdminCreateUser']),

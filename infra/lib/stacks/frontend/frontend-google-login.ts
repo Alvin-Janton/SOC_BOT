@@ -75,12 +75,12 @@ export class FrontendGoogleLogin extends Construct {
       permissionsBoundary: ManagedPolicy.fromManagedPolicyArn(this, 'ApplicationBoundary', runtimeBoundaryArn('dev', 'application')),
     });
     Tags.of(role).add('SOCBOTAccessClass', 'application');
-    const entry = ['../../../lambdas/frontend/auth/google-pre-signup.ts', '../../../../lambdas/frontend/auth/google-pre-signup.ts']
+    const entry = ['../../../lambdas/frontend/auth/google/pre-signup.ts', '../../../../lambdas/frontend/auth/google/pre-signup.ts']
       .map(path => resolve(__dirname, path)).find(path => existsSync(path));
     if (!entry) throw new Error('Google pre-signup source was not found.');
     const fn = new NodejsFunction(this, 'Guard', { functionName: name, entry, handler: 'handler', role,
       runtime: Runtime.NODEJS_22_X, memorySize: 128, timeout: Duration.seconds(4), logGroup: logs,
-      depsLockFilePath: resolve(dirname(entry), '../../../../package-lock.json'),
+      depsLockFilePath: resolve(dirname(entry), '../../../../../package-lock.json'),
       bundling: { bundleAwsSDK: true, externalModules: [], minify: true, target: 'node22' },
       environment: { EXPECTED_ACCOUNT_ID: Aws.ACCOUNT_ID },
     });

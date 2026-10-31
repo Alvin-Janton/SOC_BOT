@@ -2,11 +2,11 @@ import { DynamoDBClient, TransactionCanceledException } from '@aws-sdk/client-dy
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, TransactWriteCommand, TransactWriteCommandInput } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from './config';
-import { BffAuthError, BffAuthErrorCode, serviceAuthError } from './errors';
+import { authRequestOptions, AuthRequestBudget, BffAuthConfig } from '../config';
+import { BffAuthError, BffAuthErrorCode, serviceAuthError } from '../errors';
 import { oauthHash, sameOAuthHash } from './oauth-transactions';
-import { AuthSessionProof } from './sessions';
-import { authSubSchema, UserAuthState, sessionVersionSchema } from './user-state';
+import { AuthSessionProof } from '../sessions';
+import { authSubSchema, UserAuthState, sessionVersionSchema } from '../user-state';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -154,7 +154,7 @@ export function createGoogleLinkState(auth: BffAuthConfig, budget: AuthRequestBu
       await transact([...sessionChecks(TableName, proof),
         { Put: { TableName, Item: guard, ...(old ? exact(old) : { ConditionExpression: 'attribute_not_exists(PK)' }) } },
         { Put: { TableName, Item: transaction, ConditionExpression: 'attribute_not_exists(PK)' } }]);
-        
+
       return { transaction, state, nonce, binding, challenge: createHash('sha256').update(verifier).digest('base64url') };
     },
     /** Consumes one browser-owned linking transaction; an uncertain delete never permits code exchange. */

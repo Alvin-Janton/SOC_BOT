@@ -1,4 +1,4 @@
-import { BffAuthError } from './errors';
+import { BffAuthError } from '../errors';
 
 export interface GoogleLoginConfiguration {
   readonly clientId: string;
