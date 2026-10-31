@@ -183,40 +183,100 @@ Cognito and DynamoDB are not atomic. Confirmed password success with unconfirmed
 
 ### Manual Chat Client
 
-Use [scripts/chat_client.py](scripts/chat_client.py) with Python 3.11 or newer; it uses only the standard library and needs no package installation or AWS credentials. This is developer tooling for manually viewing responses, not an evaluation, integration, or regression test. It does not assess answer correctness and is not included in CI or `npm test`.
+Use [scripts/chat_client.py](scripts/chat_client.py) with Python 3.11+ and the standard library only. This is developer-operated manual validation tooling, not an evaluator, browser, automated test or authentication implementation; it is not included in CI or `npm test`. It needs no AWS credentials or package installation. Prefer explicit CloudFront mode for authenticated chat; legacy shared-identity usage remains available below.
 
-From the repository root in PowerShell:
+#### Private session-file setup on Windows
+
+The session file contains a **plaintext bearer credential**. Never share, sync, commit, print or upload it. Use a new private directory under `LOCALAPPDATA`, outside this OneDrive-synchronized checkout. Verify the chosen directory is not synchronized. These PowerShell commands create a new directory and remove inherited ACL entries while granting your current Windows identity access; inspect the resulting ACL before logging in. An existing directory needs deliberate ACL review rather than assuming it is private. Python's POSIX file modes do not guarantee Windows ACL protection.
 
 ```powershell
-# New conversation: save the printed turn ID before dispatch and the returned conversation ID.
-python scripts/chat_client.py --message "Which playbook IDs are available?"
+$base = 'https://dxxxxxxxxxxxxx.cloudfront.net' # Replace with your deployed CloudFrontHostname.
+$private = Join-Path $env:LOCALAPPDATA 'SOC_BOT\ManualChat'
+if (Test-Path -LiteralPath $private) { throw 'Inspect the existing directory ACL, or choose a new private directory.' }
+New-Item -ItemType Directory -Path $private -Force | Out-Null
+$principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+icacls $private /inheritance:r /grant:r "$($principal):(OI)(CI)F"
+if ($LASTEXITCODE -ne 0) { throw 'Private-directory permissions could not be configured.' }
+icacls $private
+$session = Join-Path $private '.soc-bot-chat-session-user-a.json'
+```
 
-# Follow-up: use the actual returned conversation ID; a new turn ID is generated.
-python scripts/chat_client.py --conversation-id "<returned-conversation-id>" --message "Describe the credential-compromise playbook."
+`--base-url` permits only HTTPS at a generated CloudFront hostname, with at most one trailing slash. Ports, user information, non-root paths, query strings and fragments are rejected. The client normalizes the origin and derives only `/api/auth/login`, `/api/auth/me`, `/api/auth/logout` and `/api/chat`. It sends that exact Origin and never discovers AWS resources or falls back to legacy mode. Custom domains are deferred. Dev's CloudFront IPv4 WAF must allow your current IPv4 address; legacy dev's separate source-IP WAF remains unchanged.
 
-# Deliberate retry/replay of the INITIAL request: use its actual printed UUID and exact original message.
-python scripts/chat_client.py --turn-id "<original-turn-uuid>" --message "Which playbook IDs are available?"
+Session filenames must be `.soc-bot-chat-session.json` or `.soc-bot-chat-session-<label>.json`, with letters/digits/underscores/hyphens in the label. Only these credential-file patterns and their atomic temporary files are ignored in Git; external private storage remains preferred. There is no implicit session filename. Login can create its explicitly named file inside an existing directory; otherwise a supplied missing/unreadable/malformed/wrong-origin file fails locally. The bounded versioned JSON stores only the exact origin and cookie data needed for scope/expiry, with `cookie: null` after clearing. Saves use a same-directory private temporary file and atomic replacement. Save failures distinguish remote acceptance from local persistence failure; inspect private files before reuse. Do not paste their contents into bug reports.
 
-# Retry/replay of a FOLLOW-UP must also retain its original conversation context and exact message.
-python scripts/chat_client.py --conversation-id "<original-conversation-id>" --turn-id "<original-follow-up-turn-uuid>" --message "Describe the credential-compromise playbook."
+#### Authenticated manual flow
 
-# Override with the COMPLETE HTTPS endpoint, including its stage and /chat route.
-python scripts/chat_client.py --api-url "https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/chat" --message "Describe waf_events."
+Use a confirmed, enabled account with a permanent native password. Login requires `--email` and `--session-file`, prompts with hidden `getpass` input, and refuses an echoing fallback. There is no password flag, environment-variable password, MFA/challenge flow, Google login/linking or automatic login. Run from the repository root after the operator has deployed the backend:
 
+```powershell
+$email = Read-Host 'Confirmed password-account email'
+python scripts/chat_client.py --base-url $base --session-file $session --action login --email $email
+python scripts/chat_client.py --base-url $base --session-file $session --action me
+
+# New conversation: retain the original UUID/question before dispatch.
+$turn = [guid]::NewGuid().ToString()
+$question = 'Which playbook IDs are available?'
+python scripts/chat_client.py --base-url $base --session-file $session --turn-id $turn --message $question
+
+# Deliberate completed-turn replay: identical initial request, still without a conversation ID.
+python scripts/chat_client.py --base-url $base --session-file $session --turn-id $turn --message $question
+
+# Follow-up: enter the actual returned conversation ID and use a fresh turn UUID.
+$conversation = Read-Host 'Returned conversation ID'
+$followTurn = [guid]::NewGuid().ToString()
+$followQuestion = 'Describe the credential-compromise playbook.'
+python scripts/chat_client.py --base-url $base --session-file $session --conversation-id $conversation --turn-id $followTurn --message $followQuestion
+
+# Follow-up replay retains its original conversation ID too.
+python scripts/chat_client.py --base-url $base --session-file $session --conversation-id $conversation --turn-id $followTurn --message $followQuestion
+
+python scripts/chat_client.py --base-url $base --session-file $session --action logout
+python scripts/chat_client.py --base-url $base --session-file $session --action me
+# The final me is expected to report HTTP 401 and exit 1; the cleared file remains usable but sends no cookie.
+```
+
+Login and me print only validated public `userId`/`expiresAt` JSON; logout reports confirmed success as text. Auth errors/progress use stderr, without cookie headers, passwords, provider responses or tracebacks. Login requires a matching unexpired cookie and public expiry before saving; me never renews. Logout sends `{}` and requires an empty 204 with the deletion cookie before clearing local state. A recognized me `AUTHENTICATION_REQUIRED` response can also clear local state when it supplies a valid deletion cookie. Opaque chat 401/403, redirects, network failures, 5xx and malformed responses never clear or replace the saved credential. An otherwise valid expired file is accepted with guidance, but its expired cookie is not sent; reauthentication is a separate operator action. Server expiry/version/disablement checks remain authoritative.
+
+Without `--session-file`, CloudFront chat/me/logout deliberately use an empty in-memory cookie jar. For example, this should report HTTP 401 after deployment, with client exit 1:
+
+```powershell
+python scripts/chat_client.py --base-url $base --message 'Describe waf_events.'
+```
+
+For a two-account ownership check, preserve the conversation ID from account A above, then explicitly sign in a different confirmed password account using a separate file:
+
+```powershell
+$sessionB = Join-Path $private '.soc-bot-chat-session-user-b.json'
+$emailB = Read-Host 'Different confirmed password-account email'
+python scripts/chat_client.py --base-url $base --session-file $sessionB --action login --email $emailB
+python scripts/chat_client.py --base-url $base --session-file $sessionB --conversation-id $conversation --message 'Describe waf_events.'
+# Expected generic HTTP 404/NOT_FOUND, without account A metadata/history; client exit 1.
+# Also try the original account-A turn/message/context under B to verify replay remains isolated.
+python scripts/chat_client.py --base-url $base --session-file $sessionB --conversation-id $conversation --turn-id $followTurn --message $followQuestion
+```
+
+These are later operator checks, not results established by implementation. The Python client supplies Origin and uses a strict host-only Secure cookie jar, but is **not a browser**: it cannot prove browser SameSite, HttpOnly, CSRF or Fetch Metadata behavior. It fabricates no Fetch Metadata or origin secret. A later browser check remains required. See [authenticated chat and admission-only authorization](Docs/FrontendStack/Authenticated-Chat.md). Legacy shared-owner conversations are not migrated or automatically accessible to signed-in users.
+
+#### Streaming, errors and legacy compatibility
+
+Chat accepts only `turnId`, `message` and optional `conversationId`; no identity/session data enters the body. Messages must fit 8,192 UTF-16 units and the 32-KiB serialized-body cap. UUIDs are generated when omitted, and supplied original IDs are preserved. Exactly one chat POST is made, without `/me` preflight, automatic retries, new-conversation fallback, login/renewal or logout. `--action` defaults to `chat`; auth actions reject chat-only message/IDs, `--email` is login-only, and `--api-url` excludes `--base-url`/sessions.
+
+Only assistant Markdown goes to stdout as readable plain text; headings, progress, IDs and errors go to stderr. Auth command JSON/text is separate from chat output. Silent heartbeats, UTF-8/control-character protection, incremental NDJSON validation, matching response IDs, the 256-KiB line cap and 8-KiB error-body cap remain. HTML/WAF bodies, unexpected JSON and headers are not dumped. HTTP 401 on chat is session-related; HTTP 403 can involve Origin or WAF and is not attributed to WAF alone. An HTTP/transport error does not establish that no turn was accepted.
+
+Exit codes remain `0` for normal completion/replay or successful auth, `1` for failed/incomplete operations (including expected manual 401/404 checks), `2` for invalid arguments, `3` for truncated chat completion and `130` for local interruption. The 60-second timeout measures socket inactivity, not total turn duration; server heartbeats are normally every fifteen seconds. Ctrl+C/disconnect does not cancel backend work. Retry only deliberately with the **same authenticated account, original turn ID, exact message and original conversation context**. Omit `--conversation-id` again when retrying an initial request. Replayed answers are labeled; no continuation follows truncation. Local cookie deletion alone is not proof of server revocation; an old-credential logout check needs a separately retained private copy, never a committed fixture or automatic backup.
+
+For local cleanup, remove only the selected session file after confirmed logout when no longer needed (`Remove-Item -LiteralPath $session`). Deleting it without logout does not revoke the server credential. Keep any leftover atomic temporary file private and review it deliberately; there are no automatic backups.
+
+Legacy calls still work as before and print a shared-identity warning:
+
+```powershell
+python scripts/chat_client.py --message 'Which playbook IDs are available?'
+python scripts/chat_client.py --api-url 'https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/chat' --message 'Describe waf_events.'
 python scripts/chat_client.py --help
 ```
 
-Replace angle-bracket placeholders; the identifier/URL validators reject the examples if pasted unchanged. The default endpoint is `https://1vg8z8ov16.execute-api.us-east-1.amazonaws.com/dev/chat`, public dev configuration rather than a credential. Override it if the API is recreated; the client does not discover AWS resources or append another `/chat`. Only absolute HTTPS is accepted, with normal certificate verification and no redirect following, static keys, signing, or Cognito session/cookie support. The existing dev WAF must allow your current source address. HTTP 403 is reported explicitly; WAF is one possible cause, not the only one. This client is not authentication and does not make the temporarily unauthenticated demo deployment safe.
-
-The request contains only `turnId`, `message`, and optional `conversationId`; absent conversation IDs are omitted. Messages must be nonblank and fit the backend's 8,192 UTF-16-code-unit string limit (an emoji outside the BMP counts as two) and 32-KiB serialized-body cap. Supplied IDs are validated and retained. The actual turn ID and initial conversation context are flushed to stderr before the single POST. No automatic retries, new-turn fallback, local history/state files, or hidden second request are made.
-
-Only assistant text goes to stdout, preserving Unicode, paragraph boundaries, and Markdown as plain text; it is not printed again on completion. The Assistant heading, identifiers, readable tool activities, warnings, and errors go to stderr, so stdout can be redirected separately. Heartbeats are silent. Windows output uses UTF-8 where supported with escaped-character fallback; terminal control/format characters are removed rather than executed. The client never executes commands, renders HTML, or follows links returned by the model. NDJSON is read incrementally with a 256-KiB per-line cap, strict UTF-8/JSON/object/consumed-field validation, and matching turn/conversation IDs. HTTP error bodies are capped at 8 KiB and only the known JSON error envelope is displayed; arbitrary HTML/raw bodies and tracebacks are omitted.
-
-Exit statuses are `0` for recognized normal completion (including saved-response replay), `1` for streamed error, HTTP/connection/protocol failure, or EOF without a terminal event, `2` for invalid arguments, `3` for recognized completion with a truncated/incomplete answer, and `130` for Ctrl+C. A truncated answer is not mislabeled as a transport failure and does not trigger continuation. Unknown future informational event types produce a short warning but cannot replace `complete`/`error`. The first recognized terminal event closes the response without waiting for EOF.
-
-The 60-second socket timeout is an inactivity timeout, not a total-turn limit; the server's usual 15-second heartbeats keep healthy long turns active. A timeout, EOF, or closed client does not prove acceptance/completion or cancel Bedrock/Athena/backend work. Already printed answer text remains visible; IDs and deliberate retry guidance are shown. Reuse the **same turn ID, exact message, and original conversation context** for a retry. For an initial request, omit `--conversation-id` again, especially if no ID was received; never invent an ID or silently start a new turn as a retry. Replayed completion is labeled as a saved answer, not a fresh investigation. A server `retryable` flag is displayed, not acted on automatically.
-
-Operator validation remains pending after review: check new-conversation output/IDs, a follow-up with the returned ID, explicit same-turn replay, visible rejected/backend-tool errors, and interrupted/error/truncated handling when those outcomes occur. Confirm stdout has no status/NDJSON noise and no duplicate answer; after interruption, verify that client exit is not mistaken for remote cancellation. No live calls or response-simulation harness were run during implementation. Temporary dev tool-input diagnostics and permanent activity events remain unchanged; use controlled synthetic messages until diagnostic logging is removed through its separately approved cleanup.
+The unchanged default legacy endpoint is `https://1vg8z8ov16.execute-api.us-east-1.amazonaws.com/dev/chat`, public dev configuration rather than a credential. Override its complete HTTPS URL if recreated; no path is appended. This mode never sends application cookies/passwords or makes demo safe for public release. TLS verification, redirect refusal and no automatic retries apply in both modes. No users, live sessions, deployment, endpoint requests or AWS calls are created/performed by adding this tooling.
 
 ### Shared application, WAF, VPC, and CloudTrail normalization
 
