@@ -1,10 +1,12 @@
 # Dev Google login through Cognito
 
 This is source/CDK wiring for an operator-activated dev flow, not a report of live
-browser verification. Demo Google, frontend UI, account linking and authenticated
+browser verification. Demo Google, frontend UI and authenticated
 chat ownership remain separate work. The existing password client, its verifier
 audience, pool sign-in settings, session keys and origin/WAF protections are preserved.
 See the [frontend overview](README.md) and [auth runtime guide](../../infra/lambdas/frontend/auth/README.md).
+
+Explicit dev [password-to-Google linking](Google-Linking.md) is a separate two-proof flow; it never bypasses the login collision guard.
 
 ## Resources and activation
 
@@ -24,8 +26,10 @@ always stages these resources in dev:
 `devGoogleLoginEnabled` defaults to false. Only booleans or exact `true`/`false`
 strings are accepted. False creates no Google provider/client/trigger/routes and
 does not resolve missing JSON secret fields. True adds a dedicated, no-secret
-Cognito client, Google IdP, pre-signup guard and two exact GET routes. Demo cannot
-enable Google using this flag. No provider secret is passed to either Lambda.
+Cognito client, Google IdP, pre-signup guard, two login GET routes and separate
+linking POST/GET routes. Demo cannot enable Google using this flag. Secret values
+are never passed through Lambda environment variables; only enabled dev auth
+can read AWSCURRENT for explicit linking.
 
 The original password client retains OAuth disabled and COGNITO-only sign-in.
 The dedicated client accepts only authorization-code OAuth with openid/email/profile
@@ -38,7 +42,8 @@ Later operator setup, in order:
    owned-pool domain/provider lifecycle and exact Google-secret lifecycle/read
    access for dynamic references. `DescribeUserPoolDomain` alone needs `Resource:
    "*"`, restricted to the stack Region, because AWS supports no resource ARN for
-   it. No deployment identity or runtime gets Google-secret read access.
+   it. Deployment identities have no direct Google-secret read. Linking additionally
+   requires the reviewed dev APPLICATION ceiling and exact auth-role grant.
 2. Deploy dev Frontend with activation false to stage the empty secret/domain.
 3. Configure the operator-owned Google Web OAuth client, audience/testing users
    and consent settings. Securely populate the **existing** secret through the
@@ -200,5 +205,5 @@ cancelled consent, expired/missing/mismatched bindings and callback replay. Chec
 no duplicate federated profile/local sub/history changes, direct-API denial and
 subsequent cookie `/me`/logout. Keep both dev WAF gates enabled and allow Cognito
 domain/provider propagation. No such live validation is claimed by local checks.
-Demo activation, linking with fresh proof of both methods, reverse-direction
+Demo activation, unlinking/replacement, reverse-direction
 consolidation/history migration and public release/abuse readiness remain deferred.

@@ -22,7 +22,8 @@ export interface FrontendAuthProps {
   readonly client: IUserPoolClient;
   readonly table: ITable;
   readonly browserOrigin: string;
-  readonly google?: { readonly client: IUserPoolClient; readonly domain: string; readonly redirectUri: string };
+  readonly google?: { readonly client: IUserPoolClient; readonly domain: string; readonly redirectUri: string;
+    readonly credentialSecretArn: string; readonly linkRedirectUri: string };
 }
 
 /** Owns explicit authentication routes and one exact-pool/table Lambda, without chat integration. */
@@ -53,6 +54,12 @@ export class FrontendAuth extends Construct {
       resources: [props.table.tableArn],
     }));
     this.role.addToPolicy(new PolicyStatement({ actions: ['cognito-idp:AdminGetUser'], resources: [props.userPool.userPoolArn] }));
+    if (props.google) {
+      if (props.environment !== 'dev') throw new Error('Google linking is dev-only.');
+      this.role.addToPolicy(new PolicyStatement({ actions: ['cognito-idp:AdminLinkProviderForUser'], resources: [props.userPool.userPoolArn] }));
+      this.role.addToPolicy(new PolicyStatement({ actions: ['secretsmanager:GetSecretValue'], resources: [props.google.credentialSecretArn],
+        conditions: { StringEquals: { 'secretsmanager:VersionStage': 'AWSCURRENT' } } }));
+    }
     const entry = this.handlerEntry();
     this.function = new NodejsFunction(this, 'Function', {
       functionName: name, entry, handler: 'handler', role: this.role,
@@ -64,7 +71,8 @@ export class FrontendAuth extends Construct {
         USER_POOL_CLIENT_ID: props.client.userPoolClientId, AUTH_SESSION_TABLE_NAME: props.table.tableName,
         EXPECTED_ACCOUNT_ID: Aws.ACCOUNT_ID, FRONTEND_API_ID: props.api.restApiId, BROWSER_ORIGIN: props.browserOrigin,
         ...(props.google ? { GOOGLE_LOGIN_ENABLED: 'true', GOOGLE_USER_POOL_CLIENT_ID: props.google.client.userPoolClientId,
-          GOOGLE_COGNITO_DOMAIN: props.google.domain, GOOGLE_CALLBACK_URI: props.google.redirectUri } : {}),
+          GOOGLE_COGNITO_DOMAIN: props.google.domain, GOOGLE_CALLBACK_URI: props.google.redirectUri,
+          GOOGLE_CREDENTIAL_SECRET_ARN: props.google.credentialSecretArn, GOOGLE_LINK_CALLBACK_URI: props.google.linkRedirectUri } : {}),
       },
     });
     const policy = this.role.node.findChild('DefaultPolicy').node.defaultChild as CfnPolicy;
@@ -74,9 +82,12 @@ export class FrontendAuth extends Construct {
     if (!apiRoot) throw new Error('The frontend API root must exist before auth routes are attached.');
     const authRoot = apiRoot.addResource('auth');
     const googleRoot = props.google ? authRoot.addResource('google') : undefined;
+    const linkRoot = props.google ? authRoot.addResource('link').addResource('google') : undefined;
     for (const route of frontendOriginRoutes(props.google !== undefined).filter(candidate => candidate.route !== 'health')) {
       const resource = route.route === 'google-start' ? googleRoot!.addResource('start')
-        : route.route === 'google-callback' ? googleRoot!.addResource('callback') : authRoot.addResource(route.route);
+        : route.route === 'google-callback' ? googleRoot!.addResource('callback')
+          : route.route === 'google-link-start' ? linkRoot!.addResource('start')
+            : route.route === 'google-link-callback' ? linkRoot!.addResource('callback') : authRoot.addResource(route.route);
       const method = resource.addMethod(route.method, new LambdaIntegration(this.function, {
         proxy: true, allowTestInvoke: false, scopePermissionToMethod: true, timeout: Duration.seconds(25),
       }), {
@@ -92,6 +103,8 @@ export class FrontendAuth extends Construct {
       Validations.of(method.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
         reason: registration
           ? 'This registration method requires CloudFront origin verification and browser Origin validation, without a prior session. Cognito owns account/code verification; explicit login is separate. Public-demo signup/email abuse controls remain deferred.'
+          : route.route === 'google-link-start' || route.route === 'google-link-callback'
+            ? 'Dev-only linking uses origin verification, a valid opaque session, fresh native password proof and a five-minute session-bound Google code/PKCE/nonce transaction. Callback verifies both identities and the same session before exact-pool linking. A JWT authorizer cannot validate the BFF cookie; demo linking remains disabled.'
           : route.route === 'google-start' || route.route === 'google-callback'
             ? 'Dev-only Google navigation requires origin verification; callback additionally requires browser-bound one-time state, PKCE, nonce, verified Cognito identity and conditional opaque-session persistence. No prior JWT exists; public-demo Google activation remains deferred.'
             : recovery

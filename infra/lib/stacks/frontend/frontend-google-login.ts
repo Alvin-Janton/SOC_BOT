@@ -21,12 +21,16 @@ export class FrontendGoogleLogin extends Construct {
   public readonly client?: UserPoolClient;
   public readonly domain: string;
   public readonly redirectUri: string;
+  public readonly credentialSecretArn: string;
+  public readonly linkRedirectUri: string;
 
   public constructor(scope: Construct, id: string, props: FrontendGoogleLoginProps) {
     super(scope, id);
     // Neither SecretString nor GenerateSecretString: CloudFormation creates an empty credential container.
     const secret = new CfnSecret(this, 'Credentials', { name: 'SOC-BOT-DEV-GOOGLE-OAUTH',
-      description: 'Operator-provisioned Google OAuth clientId/clientSecret; never read by runtime roles.' });
+      description: props.enabled ? 'Operator-provisioned Google OAuth credentials; exact dev auth reads AWSCURRENT only for explicit linking.'
+        : 'Operator-provisioned Google OAuth clientId/clientSecret; never read by runtime roles.' });
+    this.credentialSecretArn = secret.ref;
     secret.applyRemovalPolicy(RemovalPolicy.DESTROY);
     Validations.of(secret).acknowledge({ id: 'AwsSolutions-SMG4',
       reason: 'Google credentials are populated and rotated by the operator. Rotation must explicitly refresh the Cognito provider configuration; a secret-value update alone does not reapply dynamic references.' });
@@ -34,10 +38,12 @@ export class FrontendGoogleLogin extends Construct {
       domain: `soc-bot-dev-${Aws.ACCOUNT_ID}-${Aws.REGION}` });
     this.domain = `https://${domain.ref}.auth.${Aws.REGION}.amazoncognito.com`;
     this.redirectUri = `${props.browserOrigin}/api/auth/google/callback`;
+    this.linkRedirectUri = `${props.browserOrigin}/api/auth/link/google/callback`;
     new CfnOutput(this, 'CognitoDomain', { value: this.domain });
     new CfnOutput(this, 'GoogleRedirectUri', { value: `${this.domain}/oauth2/idpresponse` });
     new CfnOutput(this, 'CredentialSecretArn', { value: secret.ref });
     if (!props.enabled) return;
+    new CfnOutput(this, 'GoogleLinkCallbackUri', { value: this.linkRedirectUri });
 
     const provider = new CfnUserPoolIdentityProvider(this, 'Provider', {
       userPoolId: props.userPool.userPoolId, providerName: 'Google', providerType: 'Google',
@@ -69,12 +75,12 @@ export class FrontendGoogleLogin extends Construct {
       permissionsBoundary: ManagedPolicy.fromManagedPolicyArn(this, 'ApplicationBoundary', runtimeBoundaryArn('dev', 'application')),
     });
     Tags.of(role).add('SOCBOTAccessClass', 'application');
-    const entry = ['../../../lambdas/frontend/auth/google-pre-signup.ts', '../../../../lambdas/frontend/auth/google-pre-signup.ts']
+    const entry = ['../../../lambdas/frontend/auth/google/pre-signup.ts', '../../../../lambdas/frontend/auth/google/pre-signup.ts']
       .map(path => resolve(__dirname, path)).find(path => existsSync(path));
     if (!entry) throw new Error('Google pre-signup source was not found.');
     const fn = new NodejsFunction(this, 'Guard', { functionName: name, entry, handler: 'handler', role,
       runtime: Runtime.NODEJS_22_X, memorySize: 128, timeout: Duration.seconds(4), logGroup: logs,
-      depsLockFilePath: resolve(dirname(entry), '../../../../package-lock.json'),
+      depsLockFilePath: resolve(dirname(entry), '../../../../../package-lock.json'),
       bundling: { bundleAwsSDK: true, externalModules: [], minify: true, target: 'node22' },
       environment: { EXPECTED_ACCOUNT_ID: Aws.ACCOUNT_ID },
     });

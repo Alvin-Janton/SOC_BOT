@@ -1,13 +1,14 @@
 # AI Stack Working Specification
 
-**Status:** The Athena query tool and Lake Formation integration are deployed in dev, and query behavior has been operator-verified. The conversation table/schema are established. CDK defines environment-specific streaming orchestrators, private RAG tools, and Regional dual-stack POST `/chat` APIs; only dev has the temporary WAF source-IP allowlist. RAG is integrated in source/CDK; corpus publication, deployment and live integration verification remain operator work. The independent [frontend foundation](FrontendStack/README.md) defines hosting, Cognito/auth storage and origin-protected health plus nine explicit auth routes. Its BFF handles email/password login, durable sessions and signup/confirmation/resend plus password recovery/change with application-session revocation, without auto-login; authenticated chat ownership/Stop, UI and provider linking remain planned. Source/CDK wiring is not live auth validation. The user approved the temporary demo API definition exception but will not deploy demo until the application and its authentication/security are complete.
+**Status:** The Athena query tool and Lake Formation integration are deployed in dev, and query behavior has been operator-verified. The conversation table/schema are established. CDK defines environment-specific streaming orchestrators, private RAG tools, and Regional dual-stack POST `/chat` APIs; only dev has the temporary WAF source-IP allowlist. RAG is integrated in source/CDK; corpus publication, deployment and live integration verification remain operator work. The independent [frontend foundation](FrontendStack/README.md) defines hosting, Cognito/auth storage and origin-protected health plus nine explicit auth routes. Its BFF handles email/password login, durable sessions and signup/confirmation/resend plus password recovery/change with application-session revocation, without auto-login; authenticated chat ownership/Stop, UI and provider unlinking/replacement remain planned. Source/CDK wiring is not live auth validation. The user approved the temporary demo API definition exception but will not deploy demo until the application and its authentication/security are complete.
 
 This document records the AI-stack decisions discussed so far. `Docs/Final_Spec.md` remains the broader project specification. Where this temporary document introduces a more specific choice or a different contract, reconcile the two documents before implementation.
 
 Dev frontend also stages [opt-in Google login](FrontendStack/Google-Login.md) with
 a separate client and pre-creation collision guard. Its opaque sessions remain
-disconnected from the chat API's temporary owner; demo Google and account linking
-are deferred. This does not change AI roles, tools or conversation ownership.
+disconnected from the chat API's temporary owner. Explicit dev
+[password-to-Google linking](FrontendStack/Google-Linking.md) is implemented in
+source/CDK; demo Google and unlinking/replacement remain deferred. This does not change AI roles, tools or conversation ownership.
 
 ## 1. Scope
 

@@ -3,7 +3,8 @@
 ## Implemented scope
 
 The stack defines infrastructure and nine email/password authentication routes,
-plus [operator-activated dev Google login](Google-Login.md).
+plus [operator-activated dev Google login](Google-Login.md) and
+[explicit password-to-Google linking](Google-Linking.md).
 Frontend UI and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
@@ -11,9 +12,10 @@ standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on tagg
 resources. Account/Region values are CDK tokens, not committed account IDs.
 
 Dev stages an empty Google credential secret and Cognito domain; explicit activation
-adds a dedicated client/provider, pre-creation guard and two Google GET routes.
+adds a dedicated client/provider, pre-creation guard, two login GET routes and
+explicit linking POST/GET routes under `/api/auth/link/google/`.
 Demo Google stays disabled. No frontend UI/assets,
-identity pool, live user, account-linking flow, chat integration, DNS or custom
+identity pool, live user, merging/unlinking, chat integration, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
@@ -74,7 +76,7 @@ The `/api/*` CloudFront behavior uses HTTPS to the origin, disabled caching, and
 the AWS-managed `ALL_VIEWER_EXCEPT_HOST_HEADER` origin-request policy to forward
 cookies, query strings and viewer headers without sending the viewer Host to API
 Gateway. It allows all API methods for later integration, but only the explicit
-health, nine email/password routes and optionally two dev Google routes exist now. Set-Cookie responses are not cached. Unknown
+health, nine email/password routes and optionally dev Google login/linking routes exist now. Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
 
 Both frontend and legacy chat Regional APIs use
@@ -209,8 +211,9 @@ Existing CloudFront OAC `Resource:"*"` and tag-constrained creation exceptions a
 not broadened. Bedrock, evaluation-data separation and Data definitions are
 unchanged. The APPLICATION boundary's origin-secret statement
 permits reading only its environment's origin-secret name with the generated
-six-character ARN suffix. QUERY/GLUE boundaries and other runtime identities
-receive no secret reads. This auth slice leaves AI definitions unchanged.
+six-character ARN suffix. A separate dev APPLICATION ceiling now permits exact
+Google-secret AWSCURRENT reads for linking; only enabled dev auth has the grant.
+QUERY/GLUE receive no secret reads; other identities gain no Google access. This auth slice leaves AI definitions unchanged.
 
 The existing five execution-policy attachments are retained. New global WAF
 statements use headroom in CFN_DATA_ANALYTICS, and origin-secret lifecycle
@@ -471,13 +474,13 @@ endpoint. Local workflow edits are not permission to launch demo or change
 GitHub Environment protection settings.
 
 Stack outputs contain only the CloudFront hostname/distribution ID, bucket/API
-IDs, health URL, pool/client IDs, auth-table name and dev Google public domain/redirect/secret ARN. They do not expose tokens,
+IDs, health URL, pool/client IDs, auth-table name and dev Google public domain/redirect/link-callback/secret ARN. They do not expose tokens,
 credentials or actual session records. This slice's lint/build/existing-test and
 offline synthesis results do not establish live AWS, email, cookie/browser or
 authentication correctness.
 
 Later product slices must add custom email/password UI,
-demo Google activation, linking with fresh proof of both methods, comprehensive
+demo Google activation, unlinking/replacement, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
 sessions but do not change the orchestrator's temporary identity. MFA and
@@ -488,8 +491,9 @@ and public-demo email review before exposing user data or launching demo.
 
 The auth role now has GetItem, PutItem, DeleteItem, ConditionCheckItem and UpdateItem on only
 its exact AUTH-SESSIONS table, AdminGetUser on only its exact pool, and its own
-log writes. No Scan/Query/batch, secret, S3, Bedrock, tool or admin
-mutation grant is added. The APPLICATION boundary adds ConditionCheckItem only
+log writes. Enabled dev linking additionally gets exact-pool AdminLinkProviderForUser
+and AWSCURRENT GetSecretValue for the exact Google credential secret. No Scan/Query/batch,
+S3, Bedrock, tool or unrelated administrative mutation grant is added. The APPLICATION boundary adds ConditionCheckItem only
 for the exact environment auth table, and AdminGetUser for account/Region pools
 with the existing ownership tags. QUERY/GLUE and other runtime identities stay
 unchanged. Apply this administrator-owned boundary update before deploying auth. See

@@ -1,7 +1,7 @@
 # Email/password, dev Google login and BFF session routes
 
 The frontend stack defines one `SOC-BOT-<ENV>-FRONTEND-AUTH` Lambda for nine
-email/password REST routes plus two explicitly activated dev Google GET routes.
+email/password REST routes plus explicitly activated dev Google login/linking routes.
 It uses the existing Cognito pool, an unchanged password client, a separate Google
 client when enabled and the dedicated auth table. The separate origin authorizer protects these routes plus
 health. The [frontend guide](../../../../Docs/FrontendStack/README.md) describes
@@ -11,16 +11,47 @@ This implements local source/CDK wiring, not a claim of successful live login.
 The AI chat still uses its temporary environment-wide owner: these session routes
 do not authenticate the orchestrator or migrate its API. Public demo remains
 deferred. Signup, confirmation, resend and password recovery/change are implemented;
-dev Google is staged/opt-in, while demo Google and linking,
+dev Google login/linking are staged/opt-in, while demo Google, unlinking/replacement,
 MFA challenges, renewal and all-device logout/disable APIs are not implemented.
 
+## Google module grouping
+
+Google-specific runtime code lives in `google/`; shared auth modules remain in
+this folder. In particular, shared `config.ts` supplies the auth configuration
+and request budget, while `google/config.ts` supplies Google activation/public
+configuration. The main API handler stays here; the Cognito trigger has its own
+entry point under `google/`. The CDK construct remains under `infra/lib/stacks/frontend/`.
+
+| Module | Existing responsibility |
+| --- | --- |
+| [google/config.ts](google/config.ts) | Strict Google activation and public OAuth configuration. |
+| [google/login.ts](google/login.ts) | Signed-out browser login, identity verification and existing session issuance. |
+| [google/provider.ts](google/provider.ts) | Cognito code exchange, dedicated-client token verification and canonical Google profile checks. |
+| [google/pre-signup.ts](google/pre-signup.ts) | Separate Cognito trigger that denies unlinked email collisions and preserves native signup. |
+| [google/oauth-transactions.ts](google/oauth-transactions.ts) | Login state/nonce/PKCE proof, browser cookie and one-time transaction consumption. |
+| [google/link-provider.ts](google/link-provider.ts) | Fixed Google linking proof endpoints, credential reads and exact-pool Cognito association operations. |
+| [google/link-state.ts](google/link-state.ts) | Session-bound linking transactions, cookies, destination guards and provider ownership records. |
+| [google/linking.ts](google/linking.ts) | Fresh-proof linking flow, no-op/conflict handling and confirmed session revocation. |
+
 ## HTTP contracts
+
+Explicit linking adds POST `/api/auth/link/google/start` (only currentPassword,
+exact Origin and original session) and GET `/api/auth/link/google/callback`.
+Start returns JSON authorizationUrl/expiresAt and a separate five-minute cookie.
+Callback obtains direct Google proof without creating a Cognito profile, and
+requires the same session/version and matching verified emails. A no-op changes
+no sessions; a new link requires confirmed association and conditional revocation
+before success. Unknown outcomes remain fenced for administrator review.
+See [contracts, state and recovery](../../../../Docs/FrontendStack/Google-Linking.md).
+`google/linking.ts` coordinates the flow, `google/link-provider.ts` owns fixed
+provider operations and `google/link-state.ts` owns operational records.
+`sessions.resolveProof` is internal; public session schemas remain unchanged.
 
 Enabled dev additionally exposes GET `/api/auth/google/start` and
 `/api/auth/google/callback`. Start requires a signed-out browser and no body/query;
 callback requires bounded state plus code/provider-error query fields and a
-matching ten-minute browser-bound transaction. It alone accepts the expected
-cross-site top-level navigation. Both keep exact origin-authorizer protections,
+matching ten-minute browser-bound transaction. This callback and the explicit
+linking callback are the only routes accepting expected cross-site navigation. Both keep exact origin-authorizer protections,
 no-store and no-referrer; callback consumes state once before exchange and never
 overwrites a valid session. HTTP 303 success issues the existing twelve-hour
 cookie plus independent OAuth-cookie clearing via multiValueHeaders, then goes
@@ -28,13 +59,14 @@ to `/api/auth/me`. Existing single-cookie password responses remain unchanged.
 
 See [Google setup, collision justification and limits](../../../../Docs/FrontendStack/Google-Login.md)
 for staged provisioning, transaction fields and later operator validation.
-`google-login.ts` coordinates the flow, `oauth-transactions.ts` owns proof/cookie
-consumption, `google-provider.ts` verifies the dedicated Cognito identity,
-`google-config.ts` validates public configuration, and `google-pre-signup.ts` is
+`google/login.ts` coordinates the flow, `google/oauth-transactions.ts` owns proof/cookie
+consumption, `google/provider.ts` verifies the dedicated Cognito identity,
+`google/config.ts` validates public configuration, and `google/pre-signup.ts` is
 the distinct exact-pool creation trigger. The latter denies collisions in every
 local-account status; only UserNotFoundException permits absence, never a lookup
 failure or malformed result. It does not initialize metadata or link accounts.
-No runtime reads Google credentials or calls ListUsers. Password's pre-password
+Normal login reads no Google credentials; only explicit dev linking gives auth
+AWSCURRENT access to its exact credential secret. No runtime calls ListUsers. Password's pre-password
 snapshot ordering is unchanged; Google first verifies its identity, then captures
 an enabled/version snapshot for the same conditional session insertion.
 
@@ -368,7 +400,9 @@ credentials or provider diagnostics.
 
 The APPLICATION role has exact-table GetItem, PutItem, DeleteItem,
 ConditionCheckItem and UpdateItem, exact-pool AdminGetUser and its own log writes. There is no
-Scan/Query/batch, secret/S3/Bedrock/tool access or administrative password grant.
+Scan/Query/batch, S3/Bedrock/tool access or administrative password grant. Enabled
+dev linking alone adds exact-pool AdminLinkProviderForUser and exact Google-secret
+AWSCURRENT GetSecretValue, with matching dev APPLICATION ceilings.
 The boundary adds ConditionCheckItem only for the exact environment auth table
 and AdminGetUser only for account/Region pools with the existing ownership tags.
 The existing APPLICATION boundary already covers UpdateItem; only the exact-table
@@ -377,7 +411,8 @@ public client, and ChangePassword uses its transient verified access token, not 
 See [transaction IAM](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis-iam.html).
 
 Apply the reviewed foundation boundary update before the operator's application
-deployment. Existing workflows need no new variable or secret. Later manual
+deployment. Linking reuses the existing Google activation variable and credential
+secret; workflows gain no additional variable or secret. Later manual
 login validation can use an operator-created enabled/confirmed local account
 with a permanent password. Registration validation instead needs a fresh
 self-service account and real deliverable email; that administrator-created

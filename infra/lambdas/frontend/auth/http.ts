@@ -1,5 +1,6 @@
 import { frontendOriginRoutes } from '../shared/origin-routes';
-import { GoogleLoginConfiguration, googleLoginConfiguration } from './google-config';
+import { GoogleLoginConfiguration, googleLoginConfiguration } from './google/config';
+import { parseGoogleLinkStart } from './google/linking';
 import { BffAuthConfig, parseBffAuthConfig } from './config';
 import { ConfirmationResend, EmailCredentials, parseConfirmationResend, parseEmailCredentials,
   parsePasswordChange, parsePasswordReset, parseSignupConfirmation, parseSignupCredentials,
@@ -20,6 +21,8 @@ export interface GoogleCallbackQuery { readonly state: string; readonly code?: s
 export type AuthHttpRequest =
   | { readonly route: 'google-start'; readonly cookieHeader?: string }
   | { readonly route: 'google-callback'; readonly cookieHeader?: string; readonly query: GoogleCallbackQuery }
+  | { readonly route: 'google-link-start'; readonly cookieHeader?: string; readonly invalidCookie: boolean; readonly input: { readonly currentPassword: string } }
+  | { readonly route: 'google-link-callback'; readonly cookieHeader?: string; readonly query: GoogleCallbackQuery }
   | { readonly route: 'login'; readonly credentials: EmailCredentials }
   | { readonly route: 'signup'; readonly input: SignupCredentials }
   | { readonly route: 'confirm-signup'; readonly input: SignupConfirmation }
@@ -62,15 +65,16 @@ export function authHttpConfiguration(): AuthHttpConfiguration {
 }
 
 /** Reconciles bounded OAuth query maps, requiring one state and either a code or provider error. */
-function googleCallbackQuery(event: Record<string, unknown>): GoogleCallbackQuery {
+function googleCallbackQuery(event: Record<string, unknown>, directGoogle = false): GoogleCallbackQuery {
   const merged = new Map<string, string>();
+  const keys = ['state', 'code', 'error', 'error_description', 'error_uri', ...(directGoogle ? ['scope', 'authuser', 'prompt', 'hd'] : [])];
   for (const mapName of ['queryStringParameters', 'multiValueQueryStringParameters']) {
     const raw = event[mapName];
     if (raw === undefined || raw === null) continue;
     const map = object(raw);
-    if (!map || Object.keys(map).length > 5) throw new BffAuthError('invalid_input');
+    if (!map || Object.keys(map).length > keys.length) throw new BffAuthError('invalid_input');
     for (const [key, value] of Object.entries(map)) {
-      if (!['state', 'code', 'error', 'error_description', 'error_uri'].includes(key)) throw new BffAuthError('invalid_input');
+      if (!keys.includes(key)) throw new BffAuthError('invalid_input');
       const entry = mapName === 'multiValueQueryStringParameters'
         ? Array.isArray(value) && value.length === 1 ? value[0] : undefined : value;
       if (typeof entry !== 'string' || !entry.length || entry.length > (key === 'code' ? 4_096 : 1_024)
@@ -89,14 +93,15 @@ function googleCallbackQuery(event: Record<string, unknown>): GoogleCallbackQuer
 }
 
 /** Allows only top-level OAuth navigation; cross-site entry is isolated to the bound callback. */
-function googleBrowserRequest(event: Record<string, unknown>, config: AuthHttpConfiguration, callback: boolean): void {
+function googleBrowserRequest(event: Record<string, unknown>, config: AuthHttpConfiguration, callback: boolean, directGoogle = false): void {
   const mode = header(event, 'Sec-Fetch-Mode');
   const destination = header(event, 'Sec-Fetch-Dest');
   if ((mode !== undefined && mode !== 'navigate') || (destination !== undefined && destination !== 'document')) throw new BffAuthError('invalid_origin');
   if (!callback) browserRequest(event, 'GET', config.browserOrigin);
   else {
     const origin = header(event, 'Origin');
-    if (origin !== undefined && origin !== config.browserOrigin && origin !== config.google?.domain) throw new BffAuthError('invalid_origin');
+    if (origin !== undefined && origin !== config.browserOrigin
+      && origin !== (directGoogle ? 'https://accounts.google.com' : config.google?.domain)) throw new BffAuthError('invalid_origin');
     header(event, 'Sec-Fetch-Site'); // Reject ambiguous metadata even though a cross-site callback is expected.
   }
 }
@@ -200,12 +205,13 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
   if (!selected || selected.route === 'health' || context.httpMethod !== selected.method
     || context.resourcePath !== selected.resource) throw new BffAuthError('invalid_input');
 
-  if (selected.route === 'google-start' || selected.route === 'google-callback') {
-    googleBrowserRequest(event, config, selected.route === 'google-callback');
+  if (selected.route === 'google-start' || selected.route === 'google-callback' || selected.route === 'google-link-callback') {
+    googleBrowserRequest(event, config, selected.route !== 'google-start', selected.route === 'google-link-callback');
     noParameters(event.pathParameters);
     if (decodedBody(event) !== '') throw new BffAuthError('invalid_input');
     const cookieHeader = header(event, 'Cookie');
     if (selected.route === 'google-callback') return { route: selected.route, cookieHeader, query: googleCallbackQuery(event) };
+    if (selected.route === 'google-link-callback') return { route: selected.route, cookieHeader, query: googleCallbackQuery(event, true) };
     noParameters(event.queryStringParameters);
     noParameters(event.multiValueQueryStringParameters);
     return { route: selected.route, cookieHeader };
@@ -235,6 +241,7 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
   }
 
   switch (selected.route) {
+    case 'google-link-start': return { route: selected.route, input: parseGoogleLinkStart(value), ...sessionCookie(event) };
     case 'login': return { route: 'login', credentials: parseEmailCredentials(value) };
     case 'signup': return { route: 'signup', input: parseSignupCredentials(value) };
     case 'confirm-signup': return { route: 'confirm-signup', input: parseSignupConfirmation(value) };

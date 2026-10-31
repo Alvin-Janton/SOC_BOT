@@ -151,6 +151,12 @@ export class CicdFoundationStack extends Stack {
         'Class-specific runtime limits use environment resources, scoped listing, and evaluation denial. Bedrock Region wildcard is restricted to the approved model through the exact US profile.',
       );
       boundary.node.addMetadata('Purpose', `${environment} ${kind} runtime boundary`);
+      if (environment === 'dev' && kind === 'application') {
+        Validations.of(boundary.node.defaultChild!).acknowledge({
+          id: 'AwsSolutions-IAM5[Resource::arn:<AWS::Partition>:secretsmanager:<AWS::Region>:<AWS::AccountId>:secret:SOC-BOT-DEV-GOOGLE-OAUTH-??????]',
+          reason: 'The dev application ceiling permits AWSCURRENT reads of only the exact Google credential name plus the six AWS-generated suffix characters. Only the enabled dev auth identity receives a matching grant; other application roles gain no secret access.',
+        });
+      }
     }
 
     const dataPolicy = this.createManagedPolicy(

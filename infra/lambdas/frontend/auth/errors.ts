@@ -3,9 +3,16 @@ export type BffAuthErrorCode = 'invalid_configuration' | 'authentication_failed'
   | 'authentication_challenge' | 'throttled' | 'invalid_signup_password' | 'confirmation_failed'
   | 'registration_unavailable' | 'registration_throttled' | 'invalid_new_password' | 'password_reset_failed'
   | 'password_change_failed' | 'password_service_unavailable' | 'password_update_unconfirmed'
-  | 'password_changed_session_revocation_unconfirmed' | 'google_login_failed' | 'sign_out_required';
+  | 'password_changed_session_revocation_unconfirmed' | 'google_login_failed' | 'sign_out_required'
+  | 'google_link_failed' | 'google_link_conflict' | 'google_link_unavailable'
+  | 'google_link_outcome_unconfirmed' | 'google_linked_session_revocation_unconfirmed';
 
 const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: number }> = {
+  google_link_failed: { message: 'Google sign-in could not be linked. Use your existing sign-in method or contact the administrator.', statusCode: 401 },
+  google_link_conflict: { message: 'Google linking conflicts with an existing account or operation. Contact the administrator before retrying.', statusCode: 409 },
+  google_link_unavailable: { message: 'Google linking is temporarily unavailable. Start a new attempt after the issue is resolved.', statusCode: 503 },
+  google_link_outcome_unconfirmed: { message: 'Google sign-in may be linked. Contact the administrator to review the outcome before retrying.', statusCode: 503 },
+  google_linked_session_revocation_unconfirmed: { message: 'Google sign-in was linked, but signing out existing sessions could not be confirmed. Contact the administrator.', statusCode: 503 },
   google_login_failed: { message: 'Google sign-in could not be completed. Try your existing sign-in method or account recovery.', statusCode: 401 },
   sign_out_required: { message: 'Sign out before starting another login.', statusCode: 409 },
   invalid_configuration: { message: 'Authentication is not configured.', statusCode: 503 },

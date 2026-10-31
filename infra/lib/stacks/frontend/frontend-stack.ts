@@ -48,7 +48,8 @@ export class FrontendStack extends Stack {
       requestValidator: this.api.requestValidator,
       userPool: this.identity.userPool, client: this.identity.client, table: this.authStorage.table,
       browserOrigin: `https://${this.hosting.distribution.distributionDomainName}`,
-      google: google?.client ? { client: google.client, domain: google.domain, redirectUri: google.redirectUri } : undefined,
+      google: google?.client ? { client: google.client, domain: google.domain, redirectUri: google.redirectUri,
+        credentialSecretArn: google.credentialSecretArn, linkRedirectUri: google.linkRedirectUri } : undefined,
     });
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', environment);

@@ -7,8 +7,10 @@ import { authHttpConfiguration, authHttpResponse, AuthHttpRequest, AuthHttpRespo
 import { AuthSession } from './sessions';
 import { createCognitoRegistration, REGISTRATION_ACCEPTED_RESPONSE, SIGNUP_CONFIRMED_RESPONSE } from './registration';
 import { createPasswordService, PASSWORD_RECOVERY_RESPONSE, PASSWORD_UPDATED_RESPONSE } from './passwords';
-import { createGoogleLogin } from './google-login';
-import { GoogleLoginError, oauthCookie } from './oauth-transactions';
+import { createGoogleLogin } from './google/login';
+import { GoogleLoginError, oauthCookie } from './google/oauth-transactions';
+import { createGoogleLinking } from './google/linking';
+import { GoogleLinkError, googleLinkCookie } from './google/link-state';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
@@ -25,13 +27,26 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
   let request: AuthHttpRequest | undefined;
   let outcome = 'SESSION_UNAVAILABLE';
   const googleRoute = raw !== null && typeof raw === 'object' && 'resource' in raw && typeof raw.resource === 'string'
-    && ['/api/auth/google/start', '/api/auth/google/callback'].includes(raw.resource);
+    && ['/api/auth/google/start', '/api/auth/google/callback', '/api/auth/link/google/start', '/api/auth/link/google/callback'].includes(raw.resource);
+  const linkingRoute = googleRoute && typeof raw.resource === 'string' && raw.resource.startsWith('/api/auth/link/');
 
   try {
     const budget = createAuthRequestBudget(context.getRemainingTimeInMillis());
     const config = authHttpConfiguration();
     request = parseAuthHttpRequest(raw, config);
+
     switch (request.route) {
+      case 'google-link-start': {
+        if (request.invalidCookie) throw new BffAuthError('authentication_required');
+        const response = await createGoogleLinking(config, budget, requestId).start(request.input, request.cookieHeader);
+        outcome = 'GOOGLE_LINK_STARTED';
+        return response;
+      }
+      case 'google-link-callback': {
+        const response = await createGoogleLinking(config, budget, requestId).callback(request.query, request.cookieHeader);
+        outcome = 'GOOGLE_LINK_COMPLETED';
+        return response;
+      }
       case 'google-start': {
         const response = await createGoogleLogin(config, budget).start(request.cookieHeader);
         outcome = 'GOOGLE_LOGIN_STARTED';
@@ -94,7 +109,8 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
   }
 
   catch (error) {
-    const safe = error instanceof BffAuthError ? error : googleRoute ? new GoogleLoginError() : new BffAuthError('session_unavailable');
+    const safe = error instanceof BffAuthError ? error : linkingRoute ? new GoogleLinkError('google_link_unavailable')
+      : googleRoute ? new GoogleLoginError() : new BffAuthError('session_unavailable');
     outcome = safe.code.toUpperCase();
     const clearInvalid = request?.route === 'me' && safe.code === 'authentication_required'
       && (request.invalidCookie || request.cookieHeader !== undefined);
@@ -102,6 +118,10 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
       && safe.code === 'password_changed_session_revocation_unconfirmed';
     const response = authHttpResponse(safe.statusCode, { error: { code: outcome, message: safe.message }, requestId },
       clearInvalid || clearPasswordPartial ? clearSessionCookie('Lax') : error instanceof GoogleLoginError && error.clearOAuthCookie ? oauthCookie() : undefined);
+    if (error instanceof GoogleLinkError && error.clearLinkCookie) {
+      return { ...response, headers: { ...response.headers, 'Referrer-Policy': 'no-referrer' },
+        multiValueHeaders: { 'Set-Cookie': [...(error.clearApplicationCookie ? [clearSessionCookie('Lax')] : []), googleLinkCookie()] } };
+    }
     return googleRoute ? { ...response, headers: { ...response.headers, 'Referrer-Policy': 'no-referrer' } } : response;
   } finally {
     // Never log bodies, identities, headers, cookies, hashes, provider failures or token values.

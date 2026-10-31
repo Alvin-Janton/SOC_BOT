@@ -2,9 +2,9 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { authRequestOptions, AuthRequestBudget, BffAuthConfig, currentAuthTime } from './config';
-import { BffAuthError } from './errors';
-import { GoogleLoginConfiguration } from './google-config';
+import { authRequestOptions, AuthRequestBudget, BffAuthConfig, currentAuthTime } from '../config';
+import { BffAuthError } from '../errors';
+import { GoogleLoginConfiguration } from './config';
 
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
