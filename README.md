@@ -167,8 +167,10 @@ code/PKCE login without changing the password client. Foundation permissions,
 operator-provisioned credentials and Google redirect setup must precede activation.
 The exact-pool pre-signup guard fails closed on local email collisions and lookup
 errors; callback validates browser-bound one-time proof before reusing fixed
-twelve-hour opaque sessions. Demo Google/linking and chat identity integration
-remain deferred. Follow the [staged setup and limitations](Docs/FrontendStack/Google-Login.md);
+twelve-hour opaque sessions. Explicit dev [Google linking](Docs/FrontendStack/Google-Linking.md)
+now requires the original session, fresh password proof and direct Google
+authorization; confirmed new links revoke application sessions. Demo Google,
+unlinking/replacement and chat identity integration remain deferred. Follow the [staged setup and limitations](Docs/FrontendStack/Google-Login.md);
 no credentials are resolved during synthesis and no deployment is implied.
 
 Signup and resend return the same fixed 202 guidance, including duplicate or known ineligible accounts; this does not prove account creation or email delivery. Confirmation returns 200 only after Cognito success and requires a subsequent login. Registration does not touch DynamoDB, create/clear cookies or change existing sessions. The existing pool/client, exact-pool AdminGetUser grant and runtime boundaries remain unchanged; signup/confirmation/resend themselves are public Cognito APIs that do not evaluate IAM.

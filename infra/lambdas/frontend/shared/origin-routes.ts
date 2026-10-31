@@ -15,6 +15,8 @@ export const FRONTEND_ORIGIN_ROUTES = [
 const GOOGLE_ORIGIN_ROUTES = [
   { route: 'google-start', method: 'GET', resource: '/api/auth/google/start' },
   { route: 'google-callback', method: 'GET', resource: '/api/auth/google/callback' },
+  { route: 'google-link-start', method: 'POST', resource: '/api/auth/link/google/start' },
+  { route: 'google-link-callback', method: 'GET', resource: '/api/auth/link/google/callback' },
 ] as const;
 
 /** Includes only explicitly activated Google routes; password and health routes remain unchanged. */

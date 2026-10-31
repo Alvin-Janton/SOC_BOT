@@ -420,7 +420,7 @@ Session requirements:
 
 The MVP uses one authenticated-user role. RBAC is deferred.
 
-The [frontend foundation](FrontendStack/README.md) defines Cognito/auth storage and one origin-protected Lambda for POST login, GET me, POST logout and POST signup/confirm-signup/resend-confirmation/forgot-password/reset-password/change-password. Canonical AdminGetUser lookup, conditional first-login metadata, a pre-auth version snapshot, cryptographic JWT verification and fixed twelve-hour opaque sessions are implemented in source/CDK. POSTs require the exact configured CloudFront Origin; me reads durable state without Cognito or renewal. The role has exact-pool/table permissions, with exact-auth-table ConditionCheckItem and tagged-pool AdminGetUser ceilings. Local checks are not live/browser verification. Registration uses generic signup/resend acceptance, explicit code confirmation and a separate subsequent login without session mutation or new IAM grants. Password recovery/change now uses explicit code/current-password proof and post-success application-session revocation; confirmed partial success and uncertain provider outcomes are distinct. Only exact-table UpdateItem is added, with no boundary change. Disablement HTTP flows, frontend UI and chat identity integration remain deferred. Version increments revoke sessions without scanning; disablement also blocks new sessions. Cognito console changes do not synchronize application state or cancel accepted requests. Custom email/password UI and Google linking with fresh proof of both methods remain planned, with MFA deferred.
+The [frontend foundation](FrontendStack/README.md) defines Cognito/auth storage and one origin-protected Lambda for POST login, GET me, POST logout and POST signup/confirm-signup/resend-confirmation/forgot-password/reset-password/change-password. Canonical AdminGetUser lookup, conditional first-login metadata, a pre-auth version snapshot, cryptographic JWT verification and fixed twelve-hour opaque sessions are implemented in source/CDK. POSTs require the exact configured CloudFront Origin; me reads durable state without Cognito or renewal. The role has exact-pool/table permissions, with exact-auth-table ConditionCheckItem and tagged-pool AdminGetUser ceilings. Local checks are not live/browser verification. Registration uses generic signup/resend acceptance, explicit code confirmation and a separate subsequent login without session mutation or new IAM grants. Password recovery/change now uses explicit code/current-password proof and post-success application-session revocation; confirmed partial success and uncertain provider outcomes are distinct. Only exact-table UpdateItem is added, with no boundary change. Disablement HTTP flows, frontend UI and chat identity integration remain deferred. Version increments revoke sessions without scanning; disablement also blocks new sessions. Cognito console changes do not synchronize application state or cancel accepted requests. Custom email/password UI and Google unlinking/replacement remain planned, with MFA deferred.
 
 Dev now stages an empty Google credential secret and account/Region-qualified
 Cognito domain. Strict `devGoogleLoginEnabled` activation (default false; demo
@@ -429,13 +429,26 @@ a dedicated Google code/PKCE client and an exact-pool pre-signup collision guard
 The password client and pool sign-in configuration remain unchanged. One-time,
 ten-minute browser-bound state, nonce and verifier proof precede callback exchange;
 verified Cognito sub and conditional fixed twelve-hour opaque-session persistence
-precede cookies. No automatic linking, ListUsers, runtime Google-secret read or
+precede cookies. Normal login adds no automatic linking, ListUsers, Google-secret read or
 new chat identity is introduced. Only definite UserNotFoundException permits
 absence; all local-account statuses, malformed results and lookup failures deny
 unlinked creation. AWS's email-username API contract and operator-verified pool
 settings justify the lookup; live unconfirmed-user lookup remains untested.
 See [Google setup, ownership and limits](FrontendStack/Google-Login.md) for staged
 operator provisioning, race/returning-user behavior and deferred browser validation.
+
+Explicit dev [Google linking](FrontendStack/Google-Linking.md) now requires the
+original opaque session, fresh native password proof and direct Google
+code/PKCE/nonce authorization with matching verified emails. Separate five-minute
+transactions and destination/provider fences preserve Cognito sub and prevent
+app-created reassignment. The operator confirmed no existing manual links; future
+out-of-band changes require reconciliation. Only enabled dev auth receives
+exact-pool AdminLinkProviderForUser and AWSCURRENT reads of the exact Google
+credential secret, with matching dev APPLICATION ceilings. New links require
+confirmed association and conditional session revocation; a no-op leaves sessions
+unchanged. Uncertainty retains nonexpiring records for administrator review.
+No unlink/replacement, merging, history migration, demo activation or UI is added.
+Normal login collision rejection and password-client behavior are preserved.
 
 ---
 

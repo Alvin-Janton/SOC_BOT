@@ -20,6 +20,12 @@ export interface AuthSession {
   readonly sub: string;
   readonly expiresAt: number;
 }
+/** Internal, strongly validated source-session binding; never included in public auth responses. */
+export interface AuthSessionProof extends AuthSession {
+  readonly sessionKey: string;
+  readonly sessionVersion: number;
+  readonly createdAt: number;
+}
 export interface CreatedAuthSession extends AuthSession {
   /** Only for Set-Cookie; never persist or log this bearer token. */
   readonly token: string;
@@ -28,6 +34,7 @@ export interface CreatedAuthSession extends AuthSession {
 export interface AuthSessionStore {
   create(identity: VerifiedCognitoIdentity, context: TrustedAuthenticationContext): Promise<CreatedAuthSession>;
   resolve(token: string): Promise<AuthSession | undefined>;
+  resolveProof(token: string): Promise<AuthSessionProof | undefined>;
   revoke(token: string): Promise<void>;
 }
 export type AuthSessionClient = Pick<DynamoDBDocumentClient, 'send'>;
@@ -43,7 +50,7 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
   const client = suppliedClient ?? DynamoDBDocumentClient.from(new DynamoDBClient({ maxAttempts: 2 }));
   const users = createUserAuthStateStore(config, client, budget);
 
-  return {
+  const store: AuthSessionStore = {
     /** Checks the original enabled user/version and inserts one absolute twelve-hour session atomically. */
     async create(identity: VerifiedCognitoIdentity, context: TrustedAuthenticationContext): Promise<CreatedAuthSession> {
       requireTrustedAuthenticationContext(context);
@@ -76,7 +83,7 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
     },
 
     /** Consistently reads both records and rejects malformed, expired, disabled or revoked sessions without caching. */
-    async resolve(token: string): Promise<AuthSession | undefined> {
+    async resolveProof(token: string): Promise<AuthSessionProof | undefined> {
       if (!isOpaqueSessionToken(token)) return undefined;
       const Key = sessionKey(token);
       let item: Record<string, unknown> | undefined;
@@ -91,7 +98,14 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
       const state = await users.read(record.data.sub);
       if (!state || state.disabled || state.session_version !== record.data.session_version
         || record.data.expires_at <= currentAuthTime(nowSeconds)) return undefined;
-      return { sub: record.data.sub, expiresAt: record.data.expires_at };
+      return Object.freeze({ sub: record.data.sub, expiresAt: record.data.expires_at, sessionKey: Key.PK,
+        sessionVersion: record.data.session_version, createdAt: record.data.created_at });
+    },
+
+    /** Keeps the public session contract limited to subject and absolute expiry. */
+    async resolve(token: string): Promise<AuthSession | undefined> {
+      const proof = await store.resolveProof(token);
+      return proof ? { sub: proof.sub, expiresAt: proof.expiresAt } : undefined;
     },
 
     /** Deletes only the supplied current session before its cookie may be cleared. */
@@ -103,4 +117,5 @@ export function createAuthSessionStore(config: BffAuthConfig, suppliedClient?: A
       } catch (error) { throw serviceAuthError(error); }
     },
   };
+  return store;
 }

@@ -753,6 +753,15 @@ export function runtimeBoundaryStatements(
       sid: `Allow${capitalize(resources.environment)}FrontendOriginSecret`,
       actions: ['secretsmanager:GetSecretValue'], resources: [frontendOriginSecretArn(resources.environment)],
     }),
+    ...(resources.environment === 'dev' ? [new PolicyStatement({
+      sid: 'AllowDevGoogleLinkCredentials', actions: ['secretsmanager:GetSecretValue'],
+      resources: [`arn:${Aws.PARTITION}:secretsmanager:${Aws.REGION}:${Aws.ACCOUNT_ID}:secret:SOC-BOT-DEV-GOOGLE-OAUTH-??????`],
+      conditions: { StringEquals: { 'secretsmanager:VersionStage': 'AWSCURRENT' } },
+    }), new PolicyStatement({
+      sid: 'AllowDevExplicitGoogleLink', actions: ['cognito-idp:AdminLinkProviderForUser'],
+      resources: [`arn:${Aws.PARTITION}:cognito-idp:${Aws.REGION}:${Aws.ACCOUNT_ID}:userpool/*`],
+      conditions: { StringEquals: { 'aws:ResourceTag/Project': 'SOC_BOT', 'aws:ResourceTag/Environment': 'dev', 'aws:ResourceTag/ManagedBy': 'CDK' } },
+    })] : []),
     new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}ApprovedBedrockInferenceProfile`,
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
