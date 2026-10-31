@@ -47,6 +47,10 @@ venv/
 *.key
 .codex
 
+# Manual chat-client bearer sessions and their atomic temporary files only
+.soc-bot-chat-session*.json
+.soc-bot-chat-session*.json.*.tmp
+
 # Local datasets, query output, and generated artifacts
 data/local/
 athena-results/

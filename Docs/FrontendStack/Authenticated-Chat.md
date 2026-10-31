@@ -159,6 +159,25 @@ caching and dev viewer WAF remain unchanged. `ChatUrl` outputs the CloudFront UR
 
 ## Operator checklist after later deployment
 
+### Manual Python client
+
+The [manual client guide](../../README.md#manual-chat-client) covers private
+Windows session storage, explicit login/me/logout, follow-up and completed-turn
+replay, no-session 401 and two-account generic-404 checks. Example after setting
+`$base` and a private `$session` as documented:
+
+```powershell
+python scripts/chat_client.py --base-url $base --session-file $session --action login --email (Read-Host 'Confirmed password-account email')
+python scripts/chat_client.py --base-url $base --session-file $session --message 'Describe waf_events.'
+```
+
+The password is prompted privately, never a command argument. This standard-library
+client is manual developer tooling, not a browser or automated test; supplied
+Origin/cookie handling does not verify browser SameSite, HttpOnly, CSRF or Fetch
+Metadata behavior. Authenticated client implementation is not live validation.
+Auth actions require CloudFront mode; legacy endpoint selection remains explicit
+and never receives cookies/passwords. No session refresh or retry is automatic.
+
 No AWS/browser validation was performed by implementation. Deploy through the
 reviewed application workflow in dependency order, then verify:
 
