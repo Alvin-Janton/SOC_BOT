@@ -8,8 +8,10 @@ health. The [frontend guide](../../../../Docs/FrontendStack/README.md) describes
 infrastructure, origin-secret handling, TLS and deployment prerequisites.
 
 This implements local source/CDK wiring, not a claim of successful live login.
-The AI chat still uses its temporary environment-wide owner: these session routes
-do not authenticate the orchestrator or migrate its API. Public demo remains
+The frontend authorizer reuses these session readers for protected `/api/chat`;
+the orchestrator receives the validated Cognito sub, not session data. Legacy
+AI `/chat` retains its isolated temporary owner. See the
+[authenticated chat guide](../../../../Docs/FrontendStack/Authenticated-Chat.md). Public demo remains
 deferred. Signup, confirmation, resend and password recovery/change are implemented;
 dev Google login/linking are staged/opt-in, while demo Google, unlinking/replacement,
 MFA challenges, renewal and all-device logout/disable APIs are not implemented.
@@ -392,7 +394,7 @@ usable old application sessions. Cookie clearing does not resolve that risk.
 For an uncertain Cognito result, first establish the password/account outcome
 through authorized recovery and complete revocation as required; never infer it
 from a cleared cookie. Automatic durable recovery, global Cognito token sign-out,
-other applications' sessions, account-disable workflows, UI/chat identity cutover
+other applications' sessions, account-disable workflows, UI/legacy-endpoint removal
 and comprehensive public-demo abuse prevention remain deferred.
 
 ## Deadlines, permissions and later validation

@@ -1,5 +1,6 @@
 import { CfnOutput, Stack, StackProps, Tags } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { IFunction } from 'aws-cdk-lib/aws-lambda';
 import { DeploymentEnvironment } from '../../shared/environment';
 import { AuthStorage } from './auth-storage';
 import { FrontendApi } from './frontend-api';
@@ -9,20 +10,23 @@ import { FrontendOriginAccess } from './frontend-origin-access';
 import { devFrontendClientCidr, FrontendWaf } from './frontend-waf';
 import { FrontendAuth } from './frontend-auth';
 import { FrontendGoogleLogin } from './frontend-google-login';
+import { FrontendChat } from './frontend-chat';
 
 export interface FrontendStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
   readonly devFrontendAllowedClientCidr?: string;
   readonly devGoogleLoginEnabled?: boolean;
+  readonly orchestratorFunction: IFunction;
 }
 
-/** Owns frontend hosting and session routes without creating users, assets or an AI identity integration. */
+/** Owns frontend hosting, session routes and authenticated access to the existing AI orchestrator. */
 export class FrontendStack extends Stack {
   public readonly authStorage: AuthStorage;
   public readonly identity: FrontendIdentity;
   public readonly api: FrontendApi;
   public readonly hosting: FrontendHosting;
   public readonly auth: FrontendAuth;
+  public readonly chat: FrontendChat;
 
   public constructor(scope: Construct, id: string, props: FrontendStackProps) {
     super(scope, id, props);
@@ -37,6 +41,12 @@ export class FrontendStack extends Stack {
     this.api = new FrontendApi(this, 'FrontendApi', environment, originAccess);
     this.hosting = new FrontendHosting(this, 'Hosting', {
       environment, api: this.api.api, originAccess, webAclArn: waf?.webAcl.attrArn,
+    });
+    originAccess.configureChatAuthorization(this.authStorage.table, this.identity.userPool, this.identity.client,
+      `https://${this.hosting.distribution.distributionDomainName}`);
+    this.chat = new FrontendChat(this, 'Chat', {
+      environment, api: this.api.api, authorizer: this.api.originAuthorizer,
+      requestValidator: this.api.requestValidator, orchestratorFunction: props.orchestratorFunction,
     });
     // Hosting references only the API ID, so the integration can safely reference its generated hostname.
     const google = environment === 'dev' ? new FrontendGoogleLogin(this, 'GoogleLogin', {
@@ -59,6 +69,7 @@ export class FrontendStack extends Stack {
     new CfnOutput(this, 'FrontendBucketName', { value: this.hosting.bucket.bucketName });
     new CfnOutput(this, 'FrontendApiId', { value: this.api.api.restApiId });
     new CfnOutput(this, 'HealthUrl', { value: `https://${this.hosting.distribution.distributionDomainName}/api/health` });
+    new CfnOutput(this, 'ChatUrl', { value: `https://${this.hosting.distribution.distributionDomainName}/api/chat` });
     new CfnOutput(this, 'UserPoolId', { value: this.identity.userPool.userPoolId });
     new CfnOutput(this, 'UserPoolClientId', { value: this.identity.client.userPoolClientId });
     new CfnOutput(this, 'AuthSessionsTableName', { value: this.authStorage.table.tableName });

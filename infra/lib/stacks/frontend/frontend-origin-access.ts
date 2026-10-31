@@ -1,5 +1,7 @@
 import { Aws, Duration, RemovalPolicy, Tags, Validations } from 'aws-cdk-lib';
 import { IdentitySource, RequestAuthorizer, RestApi } from 'aws-cdk-lib/aws-apigateway';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import { ITable } from 'aws-cdk-lib/aws-dynamodb';
 import { CfnPolicy, ManagedPolicy, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnPermission, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -14,6 +16,8 @@ import { runtimeBoundaryArn } from '../cicd-foundation/policy-statements';
 /** Owns the generated origin token and its exact-secret authorizer, separately from viewer WAF. */
 export class FrontendOriginAccess extends Construct {
   public readonly secret: Secret;
+  private authorizerFunction?: NodejsFunction;
+  private authorizerRole?: Role;
 
   public constructor(scope: Construct, id: string, private readonly environment: DeploymentEnvironment, private readonly googleEnabled = false) {
     super(scope, id);
@@ -64,6 +68,8 @@ export class FrontendOriginAccess extends Construct {
         ...(this.googleEnabled ? { GOOGLE_LOGIN_ENABLED: 'true' } : {}),
       },
     });
+    this.authorizerFunction = fn;
+    this.authorizerRole = role;
     const policy = role.node.findChild('DefaultPolicy').node.defaultChild as CfnPolicy;
     policy.policyName = `${functionName}-POLICY`;
     fn.node.addDependency(policy, logGroup);
@@ -82,6 +88,16 @@ export class FrontendOriginAccess extends Construct {
       reason: 'Only stream creation and event writes inside this authorizer\'s explicitly managed log group are allowed.',
     });
     return authorizer;
+  }
+
+  /** Configures chat admission after hosting exists, retaining the original authorizer resource identity. */
+  public configureChatAuthorization(table: ITable, userPool: IUserPool, client: IUserPoolClient, browserOrigin: string): void {
+    if (!this.authorizerFunction || !this.authorizerRole) throw new Error('Create the authorizer before configuring chat authorization.');
+    this.authorizerRole.addToPolicy(new PolicyStatement({ actions: ['dynamodb:GetItem'], resources: [table.tableArn] }));
+    this.authorizerFunction.addEnvironment('AUTH_SESSION_TABLE_NAME', table.tableName);
+    this.authorizerFunction.addEnvironment('USER_POOL_ID', userPool.userPoolId);
+    this.authorizerFunction.addEnvironment('USER_POOL_CLIENT_ID', client.userPoolClientId);
+    this.authorizerFunction.addEnvironment('BROWSER_ORIGIN', browserOrigin);
   }
 
   /** Locates the tracked handler from either source or compiled infrastructure. */

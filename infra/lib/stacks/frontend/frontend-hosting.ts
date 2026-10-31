@@ -64,11 +64,11 @@ export class FrontendHosting extends Construct {
     for (const [rule, reason] of [
       ['CFR1', 'No geography-based access assumption is approved; dev uses an explicit IPv4 viewer gate and auth routes independently enforce origin/session checks.'],
       ['CFR3', 'CloudFront access logging is intentionally deferred pending storage/retention and privacy review; API metadata-only logs are enabled.'],
-      ['CFR4', 'The approved generated hostname retains CloudFront\'s default certificate and fixed TLSv1 viewer policy; TLS 1.2 minimum at the viewer requires a later custom domain/certificate. API-origin TLS 1.2, origin verification and secure-cookie session checks are configured; chat cutover remains deferred.'],
+      ['CFR4', 'The approved generated hostname retains CloudFront\'s default certificate and fixed TLSv1 viewer policy; TLS 1.2 minimum at the viewer requires a later custom domain/certificate. API-origin TLS 1.2, origin verification and secure-cookie session checks protect authenticated /api/chat.'],
     ]) Validations.of(this.distribution.node.defaultChild!).acknowledge({ id: `AwsSolutions-${rule}`, reason });
     if (environment === 'demo') Validations.of(this.distribution.node.defaultChild!).acknowledge({
       id: 'AwsSolutions-CFR2',
-      reason: 'Demo intentionally has no viewer WAF. Frontend health/auth routes enforce origin verification and BFF session checks; public-demo rollout, abuse controls and chat identity cutover remain deferred.',
+      reason: 'Demo intentionally has no viewer WAF. Frontend health/auth enforce their origin/BFF rules and /api/chat requires a valid session at admission; public-demo rollout and abuse controls remain deferred. The separate legacy demo /chat endpoint remains unsafe for public release.',
     });
   }
 }

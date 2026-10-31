@@ -1,6 +1,6 @@
 import { RemovalPolicy, Validations } from 'aws-cdk-lib';
 import { AccessLogFormat, AuthorizationType, EndpointType, LogGroupLogDestination, MethodLoggingLevel,
-  CfnRestApi, MockIntegration, PassthroughBehavior, RequestAuthorizer, RequestValidator, RestApi } from 'aws-cdk-lib/aws-apigateway';
+  CfnRestApi, MockIntegration, PassthroughBehavior, RequestAuthorizer, RequestValidator, ResponseType, RestApi } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import { DeploymentEnvironment, frontendApiAccessLogGroupName } from '../../shared/environment';
@@ -20,7 +20,7 @@ export class FrontendApi extends Construct {
     });
     this.api = new RestApi(this, 'Api', {
       restApiName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND-API`,
-      description: 'Origin-protected health and email/password session API; chat integration is deferred.',
+      description: 'Origin-protected health/auth routes and session-authenticated streaming chat API.',
       endpointConfiguration: { types: [EndpointType.REGIONAL] }, cloudWatchRole: false,
       deployOptions: {
         stageName: environment, accessLogDestination: new LogGroupLogDestination(accessLogs),
@@ -38,6 +38,13 @@ export class FrontendApi extends Construct {
     apiResource.securityPolicy = transport.securityPolicy;
     apiResource.endpointAccessMode = transport.endpointAccessMode;
     this.api.latestDeployment!.addToLogicalId(transport);
+    // API-wide defaults preserve each error type's status while preventing cached authorization failures.
+    for (const [id, type] of [['SafeClientError', ResponseType.DEFAULT_4XX], ['SafeServerError', ResponseType.DEFAULT_5XX]] as const) {
+      this.api.addGatewayResponse(id, { type,
+        responseHeaders: { 'Cache-Control': "'no-store'", 'X-Content-Type-Options': "'nosniff'" },
+        templates: { 'application/json': '{"message":"Request could not be authorized or processed."}' },
+      });
+    }
     const executionLogs = new LogGroup(this, 'ExecutionLogs', {
       logGroupName: `API-Gateway-Execution-Logs_${this.api.restApiId}/${environment}`,
       retention: RetentionDays.ONE_WEEK, removalPolicy,
@@ -59,7 +66,7 @@ export class FrontendApi extends Construct {
     });
     Validations.of(this.api.deploymentStage.node.defaultChild!).acknowledge({
       id: 'AwsSolutions-APIG3',
-      reason: 'The frontend Regional API uses an exact-route origin-secret authorizer instead of a Regional WAF association. Auth integrations independently enforce browser Origin and durable sessions. Dev viewer filtering belongs to CloudFront WAF; public-demo abuse controls remain deferred.',
+      reason: 'The frontend Regional API uses an exact-route authorizer instead of a Regional WAF association. Auth integrations enforce their browser/session rules; POST /api/chat additionally resolves a durable session in the authorizer. Dev viewer filtering belongs to CloudFront WAF; public-demo abuse controls remain deferred.',
     });
   }
 }

@@ -5,7 +5,7 @@
 The stack defines infrastructure and nine email/password authentication routes,
 plus [operator-activated dev Google login](Google-Login.md) and
 [explicit password-to-Google linking](Google-Linking.md).
-Frontend UI and authenticated chat integration remain separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
+[Authenticated chat](Authenticated-Chat.md) is wired through the existing authorizer to the AI orchestrator; frontend UI remains separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
@@ -15,12 +15,12 @@ Dev stages an empty Google credential secret and Cognito domain; explicit activa
 adds a dedicated client/provider, pre-creation guard, two login GET routes and
 explicit linking POST/GET routes under `/api/auth/link/google/`.
 Demo Google stays disabled. No frontend UI/assets,
-identity pool, live user, merging/unlinking, chat integration, DNS or custom
+identity pool, live user, merging/unlinking, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
 CloudFront IPv4 WAF. The existing dev
-WAF-gated `/chat` remains the only working chat endpoint. Demo release stays
+WAF-gated legacy `/chat` retains its isolated shared owner alongside the new session-authenticated CloudFront `/api/chat`. Demo release stays
 deferred until authentication and abuse controls are complete.
 
 ## Constructs and resources
@@ -33,10 +33,10 @@ exposes the new authentication construct:
 | --- | --- |
 | [AuthStorage](../../infra/lib/stacks/frontend/auth-storage.ts) | `SOC-BOT-<ENV>-AUTH-SESSIONS`, string `PK` only; no sort key, GSI or stream; on-demand billing, AWS-managed DynamoDB encryption, TTL `expires_at`. |
 | [FrontendIdentity](../../infra/lib/stacks/frontend/frontend-identity.ts) | `SOC-BOT-<ENV>-USERS` user pool and `SOC-BOT-<ENV>-WEB` no-secret app client. |
-| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK plus nine exact origin-protected auth routes. |
+| [FrontendApi](../../infra/lib/stacks/frontend/frontend-api.ts) | Regional `SOC-BOT-<ENV>-FRONTEND-API`, stage `dev|demo`, health MOCK, nine exact origin-protected auth routes and session-authenticated POST `/api/chat`. |
 | [FrontendHosting](../../infra/lib/stacks/frontend/frontend-hosting.ts) | Private `soc-bot-<environment>-frontend-<account>-<region>` bucket, named OAC and CloudFront distribution with its generated hostname. |
 | [FrontendWaf](../../infra/lib/stacks/frontend/frontend-waf.ts) | Dev-only `SOC-BOT-DEV-FRONTEND-CLIENTS` and `SOC-BOT-DEV-FRONTEND-ALLOWLIST`, CLOUDFRONT scope in `us-east-1`; one IPv4 `/32`, default BLOCK, metrics enabled and sampling disabled. |
-| [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads only its exact secret and writes its own logs. |
+| [FrontendOriginAccess](../../infra/lib/stacks/frontend/frontend-origin-access.ts) | `SOC-BOT-<ENV>-FRONTEND-ORIGIN-TOKEN` and `SOC-BOT-<ENV>-FRONTEND-ORIGIN-AUTHORIZER`; the runtime reads its exact origin secret and auth-table items, and writes its own logs. |
 | [FrontendAuth](../../infra/lib/stacks/frontend/frontend-auth.ts) | `SOC-BOT-<ENV>-FRONTEND-AUTH`, Node.js 22, 256 MiB, 25 seconds, seven-day logs and an exact-pool/table APPLICATION role; wired after hosting. |
 | [FrontendGoogleLogin](../../infra/lib/stacks/frontend/frontend-google-login.ts) | Dev-only staged empty credential secret/domain; strict activation adds Google, a dedicated code/PKCE client and exact-pool pre-signup guard. See [setup and limits](Google-Login.md). |
 
@@ -66,7 +66,7 @@ revocation semantics.
 hostname with origin path `/dev` or `/demo`, retaining `/api/health`. It returns
 only `{"status":"ok"}` after origin verification. The REQUEST authorizer can read
 Secrets Manager; the health MOCK response exposes no authentication diagnostic.
-API Gateway has no proxy/catch-all or chat route. Invocation permissions
+API Gateway has no proxy/catch-all route; the separate chat method invokes only the AI orchestrator. Invocation permissions
 target only this API/source account: its authorizer and the exact
 stage/method auth integrations, including Google only when dev activation is enabled. Both
 request-validation flags are enabled; this no-input MOCK
@@ -127,8 +127,8 @@ user authentication or a network-private API.
 
 The [authorizer](../../infra/lambdas/frontend/origin-authorizer/handler.ts) uses
 Node.js 22, 128 MiB, a ten-second timeout and seven-day logs. Its APPLICATION role
-has only its exact secret's AWSCURRENT read and log-stream/event writes in its
-own group. The [shared guard](../../infra/lambdas/frontend/shared/origin-guard.ts)
+has only its exact secret's AWSCURRENT read, exact auth-table GetItem for chat
+admission, and log-stream/event writes in its own group. The [shared guard](../../infra/lambdas/frontend/shared/origin-guard.ts)
 keeps one validated token in memory for at most 300 seconds, with at most two SDK
 attempts and a bounded request deadline. Expired-cache refresh failures deny
 access; stale values are never used as an outage fallback. Header names are
@@ -137,10 +137,12 @@ while missing, malformed, repeated or conflicting values are rejected. Fixed
 64-byte buffers are compared with `timingSafeEqual`. No event/header/secret or SDK
 response is logged.
 
-API authorization caching is disabled (TTL zero). Only health and the enabled auth
-routes on the configured account/Region/API/stage can receive an Allow policy
+API authorization caching is disabled (TTL zero). Only health, enabled auth
+routes and the explicit protected chat route on the configured account/Region/API/stage can receive an Allow policy
 for the single incoming method;
-the principal is `cloudfront-origin`, without a Cognito user identity. Invalid
+health/auth keep principal `cloudfront-origin`; chat additionally requires the
+browser Origin and a strongly validated opaque session, returning the Cognito sub
+and bounded authorizer context. See [authorization/errors/ownership](Authenticated-Chat.md). Invalid
 tokens receive a generic denial; configuration/secret failures fail closed
 without diagnostics. Future frontend routes must retain origin verification
 alongside their own authentication requirements.
@@ -166,7 +168,7 @@ Only `CicdFoundationStack` owns the shared Regional API Gateway account setting
 and logging role. The frontend API sets `cloudWatchRole:false`. Foundation adds
 only the two exact frontend access-group names to that role; existing chat and
 execution-group scopes remain. Frontend depends on foundation, **not AI or Data**,
-and has no reverse reference into foundation. Future chat integration must use
+and has no reverse reference into foundation. Authenticated chat uses
 frontend-owned permissions and one-way references to AI.
 
 Within the stack, the stage depends on its execution log group and deployment;
@@ -416,11 +418,11 @@ demo IDs. They use the already synthesized assembly, matching Environment/OIDC
 and execution roles, and sequential dependency-aware CDK deployment. They never
 select foundation. Apply the reviewed administrator-managed foundation IAM and
 shared logging changes separately first: `--exclusively` intentionally excludes
-dependencies from deployment. Frontend still depends only on foundation; no
-artificial AI/Data dependency is added.
+dependencies from deployment. Frontend imports the AI orchestrator; deployment is Data -> AI -> Frontend,
+with no reverse AI -> Frontend reference.
 
 Infrastructure deployment does not publish UI assets, invalidate CloudFront,
-publish an authentication UI or migrate chat. It now includes the reviewed auth Lambda/routes. Origin protection is defined in frontend CDK, not implemented by publishing assets. After a later
+publish an authentication UI or migrate legacy conversations. It now includes the reviewed auth Lambda/routes. Origin protection is defined in frontend CDK, not implemented by publishing assets. After a later
 authorized dev deployment, use the output health URL (`/api/health`); the empty
 website root may fail until assets are published. CloudFront operations may take
 several minutes; existing 30-minute workflow timeouts are unchanged. A timeout
@@ -459,7 +461,7 @@ before requesting AWS credentials, with `ai` still the default:
 
 Frontend failure prevents AI/Data deletion; AI failure prevents Data deletion.
 No failed operation is automatically retried or interpreted as an absent stack.
-If future frontend imports prevent AI-only deletion, review an explicit broader
+If frontend imports prevent AI-only deletion, review an explicit broader
 teardown or remove the dependency; the workflow does not expand scope. Data-only,
 foundation and demo destruction remain excluded. **Dev frontend teardown deletes
 the Cognito pool and its users plus the auth/session table**, not just the empty
@@ -483,7 +485,7 @@ Later product slices must add custom email/password UI,
 demo Google activation, unlinking/replacement, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
-sessions but do not change the orchestrator's temporary identity. MFA and
+sessions; `/api/chat` now uses their verified subject, while legacy `/chat` retains its separate temporary identity. MFA and
 administrator synchronization remain reviewed follow-ups; out-of-band password
 changes/disablement still require deliberate revocation coordination. No session
 refresh/sliding expiry is implemented. Complete those security/abuse controls
@@ -549,9 +551,9 @@ recovery for lost revocation metadata: preserve USER records and review restorat
 before recreating them. Existing sessions can outlive Cognito token expiry and
 out-of-band console sign-out/disablement until application versions are revoked.
 Signup/confirmation/reset UI, demo Google/linking, comprehensive authentication abuse
-controls and chat ownership/Stop integration remain deferred. `/api/auth/me`
-establishes only frontend session identity; it does not change the orchestrator's
-temporary owner. Password deployment needs no Google setting; dev Google uses the
+controls and Stop integration remain deferred; chat ownership is implemented for `/api/chat`. `/api/auth/me`
+reports frontend session identity. Protected `/api/chat` uses that subject;
+legacy `/chat` retains its isolated temporary owner. Password deployment needs no Google setting; dev Google uses the
 explicit activation variable and operator-provisioned secret described above.
 Public demo still requires the remaining security work.
 
@@ -610,7 +612,7 @@ unconfirmed account; wait and use resend rather than deleting/recreating it.
 After a lost confirmation success response, login is the recovery path; a repeated
 confirmation need not return success. Cognito controls expiry and delivery, not
 local timers. Public-demo email/abuse review, demo Google/linking,
-UI and authenticated chat ownership remain separate work.
+UI remains separate; authenticated `/api/chat` ownership is now wired.
 
 ## Later manual password validation
 
@@ -646,4 +648,4 @@ explains safe request-ID correlation, trusted account identification, strict
 metadata inspection, bounded conditional revocation and two-jar validation.
 Missing/malformed records require reviewed investigation, never version-one
 replacement. Automatic durable recovery, global token sign-out, admin-disable
-workflows, authenticated chat, UI and public-demo abuse readiness remain deferred.
+workflows, UI and public-demo abuse readiness remain deferred; authenticated chat is now wired.
