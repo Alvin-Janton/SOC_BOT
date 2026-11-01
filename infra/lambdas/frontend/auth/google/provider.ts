@@ -73,6 +73,7 @@ export async function verifyGoogleLogin(code: string, transaction: OAuthTransact
   try {
     const idToken = await exchangeCode(code, transaction, google, budget);
     const fetcher = new SimpleFetcher();
+
     const jwksCache = new SimpleJwksCache({ fetcher: {
       /** Keeps signature-key retrieval within this callback's original deadline. */
       async fetch(uri, options, data) {
@@ -80,22 +81,29 @@ export async function verifyGoogleLogin(code: string, transaction: OAuthTransact
           timeout: 1_000, responseTimeout: 3_000 }, data);
       },
     } });
+    
     const verifier = CognitoJwtVerifier.create({ userPoolId: auth.userPoolId, clientId: google.clientId, tokenUse: 'id' }, { jwksCache });
     const token = await verifier.verify(idToken);
     const sub = authSubSchema.parse(token.sub);
     const username = z.string().min(1).max(128).parse(token['cognito:username']);
+
     if (typeof token.nonce !== 'string' || !sameOAuthHash(oauthHash(token.nonce), transaction.nonce_hash)
       || token.email_verified !== true || typeof token.exp !== 'number' || !Number.isSafeInteger(token.exp)
       || token.exp <= Math.floor(Date.now() / 1_000)) throw new GoogleLoginError();
+
     const email = googleEmail(token.email);
     const providerId = googleIdentity(token.identities);
+
     const client = new CognitoIdentityProviderClient({ region: 'us-east-1', maxAttempts: 2,
       requestHandler: new NodeHttpHandler({ connectionTimeout: 500, requestTimeout: 3_000 }) });
+
     const profile = await client.send(new AdminGetUserCommand({ UserPoolId: auth.userPoolId, Username: username }), authRequestOptions(budget, 4_000));
+
     if (profile.Enabled !== true || !['EXTERNAL_PROVIDER', 'CONFIRMED'].includes(profile.UserStatus ?? '') || profile.Username !== username
       || profile.PreferredMfaSetting || profile.UserMFASettingList?.length || profile.MFAOptions?.length
       || googleProfileAttribute(profile, 'sub') !== sub || googleProfileAttribute(profile, 'email_verified') !== 'true'
       || googleEmail(googleProfileAttribute(profile, 'email')) !== email || googleProfileIdentity(profile) !== providerId) throw new GoogleLoginError();
+
     return { sub, tokenExpiresAt: token.exp };
   } catch { throw new GoogleLoginError(true); }
 }

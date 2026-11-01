@@ -1,5 +1,13 @@
 # Frontend and authentication foundation
 
+For a function-by-function walkthrough with synthetic HTTP, SDK and DynamoDB
+objects, see [Authentication Execution Flow, passes 1-3](Authentication-Execution-Flow.html).
+It covers registration/confirmation, password login, sessions, me, authenticated chat,
+current-session logout, recovery/reset, password change and multi-device revocation,
+including confirmed partial success and uncertain provider outcomes. It also traces
+opt-in dev Google login, the collision guard and explicit password-to-Google linking
+with temporary proofs, durable ownership fences and reconciliation boundaries.
+
 ## Implemented scope
 
 The stack defines infrastructure and nine email/password authentication routes,

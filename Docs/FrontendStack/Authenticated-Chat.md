@@ -1,5 +1,10 @@
 # Authenticated chat through the Frontend API
 
+The [Authentication Execution Flow](Authentication-Execution-Flow.html) traces
+password login through session storage, me, chat admission/ownership and logout
+using one synthetic session. It distinguishes the plan's limited operator-reported
+successes from documentation checks and remaining browser/denial/race validation.
+
 ## Scope and endpoints
 
 CDK now wires `POST https://<CloudFrontHostname>/api/chat` to the existing AI
