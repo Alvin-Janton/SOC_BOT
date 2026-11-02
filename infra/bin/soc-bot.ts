@@ -5,14 +5,12 @@ import { CicdFoundationStack } from '../lib/stacks/cicd-foundation/cicd-foundati
 import { DataStack } from '../lib/stacks/data/data-stack';
 import { AiStack } from '../lib/stacks/ai/ai-stack';
 import { DEFAULT_QUERY_WINDOW_DAYS, queryWindowDays } from '../lib/stacks/ai/query-contract';
-import { devClientCidr } from '../lib/stacks/ai/chat-api';
 import { FrontendStack } from '../lib/stacks/frontend/frontend-stack';
 import { devFrontendClientCidr } from '../lib/stacks/frontend/frontend-waf';
 import { googleLoginEnabled } from '../lambdas/frontend/auth/google/config';
 
 const app = new App();
 const devGoogleLoginEnabled = googleLoginEnabled(app.node.tryGetContext('devGoogleLoginEnabled'));
-const devAllowedClientCidr = devClientCidr(app.node.tryGetContext('devAllowedClientCidr')).cidr;
 const devFrontendAllowedClientCidr = devFrontendClientCidr(app.node.tryGetContext('devFrontendAllowedClientCidr'));
 
 const foundation = new CicdFoundationStack(app, 'CicdFoundationStack', {
@@ -46,8 +44,7 @@ for (const environment of ['dev', 'demo'] as const) {
     tables: dataStack.tables,
     workgroup: dataStack.workgroup,
     maxQueryWindowDays: queryWindowDays(Number(app.node.tryGetContext('queryMaxTimeSpanDays') ?? DEFAULT_QUERY_WINDOW_DAYS)),
-    devAllowedClientCidr: environment === 'dev' ? devAllowedClientCidr : undefined,
-    description: `SOC Bot ${environment} read-only investigation tools and streaming chat API`,
+    description: `SOC Bot ${environment} read-only investigation tools and chat orchestrator`,
   });
   // The Regional logging account setting is administrator-managed, never recreated by AI.
   aiStack.addStackDependency(foundation);

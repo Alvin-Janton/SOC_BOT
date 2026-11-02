@@ -191,8 +191,8 @@ Build first, then synthesize disabled or enabled using documentation-only CIDRs:
 npm run lint
 npm run build
 npm test
-npm run synth --workspace @soc-bot/infra -- -c devAllowedClientCidr=2001:db8::1/128 -c devFrontendAllowedClientCidr=203.0.113.1/32 -c devGoogleLoginEnabled=false
-npm run synth --workspace @soc-bot/infra -- -c devAllowedClientCidr=2001:db8::1/128 -c devFrontendAllowedClientCidr=203.0.113.1/32 -c devGoogleLoginEnabled=true
+npm run synth --workspace @soc-bot/infra -- -c devFrontendAllowedClientCidr=203.0.113.1/32 -c devGoogleLoginEnabled=false
+npm run synth --workspace @soc-bot/infra -- -c devFrontendAllowedClientCidr=203.0.113.1/32 -c devGoogleLoginEnabled=true
 ```
 
 Neither synthesis resolves Google secret values. Teardown retains its existing

@@ -13,7 +13,7 @@ import { ModelRunner } from '../../../../lambdas/ai/chat-orchestrator/model';
 async function streamedTool(environment: Configuration['environment'], name: string, inputs: readonly string[]) {
   const upper = environment.toUpperCase();
   const config: Configuration = {
-    environment, ownerId: `soc-bot-${environment}-analyst`, tableName: `SOC-BOT-${upper}-CHAT-HISTORY`,
+    environment, tableName: `SOC-BOT-${upper}-CHAT-HISTORY`,
     queryFunction: `SOC-BOT-${upper}-QUERY-TOOL`, ragFunction: `SOC-BOT-${upper}-RAG-TOOL`,
     modelId: 'us.anthropic.claude-sonnet-4-6', region: 'us-east-1', database: `soc_bot_${environment}_security`, maxQueryDays: 30,
   };

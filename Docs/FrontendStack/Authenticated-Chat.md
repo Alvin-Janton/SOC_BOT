@@ -12,12 +12,16 @@ orchestrator in dev and demo. This describes source/CDK implementation, not live
 validation. The frontend UI is still unimplemented. Use a same-origin browser
 request after signing in through the existing password or enabled dev Google flow.
 
-The AI-owned Regional `POST /chat` remains available during validation, with its
-isolated `soc-bot-<environment>-analyst` owner. Dev retains its source-IP WAF;
-legacy demo still has no authentication or WAF and must not be publicly released.
-Authenticated users cannot adopt or replay legacy conversations. No conversation
-data or account ownership is migrated. Removing the legacy API/WAF/IPSet and
-`TEMPORARY_OWNER_ID` is a later slice.
+The AI-owned unauthenticated `POST /chat` and its dev Regional WAF/IPSet/association
+are retired by an application stack update. The separate Frontend API/CloudFront
+WAF, origin/session authorizer and exact chat invocation grant remain. No temporary
+owner or default identity is configured. Existing conversations preserve their
+original owners; no data is reassigned, deleted or migrated. Unrelated signed-in
+users cannot adopt or replay historical shared-owner conversations.
+
+The unchanged evaluator still targets the retired API and is unavailable until
+its separate authentication migration; see the [retirement handoff](../../README.md#legacy-retirement-operator-handoff).
+Import-only CLI compatibility exports do not provide an auth bypass or fallback.
 
 ## Request and response
 
@@ -103,11 +107,10 @@ Frontend-owned invocation permission establishes the source, alongside the
 validated gateway/authorizer contract. Administrative direct Lambda invocation
 can fabricate envelopes and is not an end-user authentication mechanism.
 
-Only the configured, AI-owned legacy API ID with exact `POST /chat` may use
-temporary ownership. Missing or contradictory `/api/chat` context, an unknown
-route, or a bare Lambda-console body cannot fall back to that identity. A legacy
-API ID is never accepted as authenticated Frontend traffic. Viewer headers,
-query fields and body fields cannot select an owner.
+Only the authenticated REST `POST /api/chat` contract is admitted. Retired `/chat`,
+missing/contradictory context, unknown routes and bare Lambda-console bodies fail
+closed; no default identity exists. Viewer headers, query fields and body fields
+cannot select an owner. EXPECTED_ACCOUNT_ID remains independent of any AI-owned API.
 
 Both the normal and cleanup `ConversationStore` use the same resolved owner.
 Existing owner-conditioned metadata reads, writes, leases and replay remain
@@ -180,13 +183,18 @@ The password is prompted privately, never a command argument. This standard-libr
 client is manual developer tooling, not a browser or automated test; supplied
 Origin/cookie handling does not verify browser SameSite, HttpOnly, CSRF or Fetch
 Metadata behavior. Authenticated client implementation is not live validation.
-Auth actions require CloudFront mode; legacy endpoint selection remains explicit
-and never receives cookies/passwords. No session refresh or retry is automatic.
+Every CLI action requires an explicit validated CloudFront --base-url; --api-url
+and the default legacy transport are removed. Omitting --session-file remains
+available for deliberate no-cookie 401 checks, without switching endpoints. No
+session refresh or retry is automatic.
 
 No AWS/browser validation was performed by implementation. Deploy through the
 reviewed application workflow in dependency order, then verify:
 
-1. Password and enabled Google flows, health and legacy dev `/chat` still work.
+1. Password/enabled Google flows and health still work. Verify the old AI API,
+   stage, dev Regional WAF/IPSet/association and old Lambda grant are absent after
+   the stack update; an old URL status alone does not establish cleanup. Preserve
+   all auth/chat data and account for retained demo logs if demo existed.
 2. Signed-in CloudFront `/api/chat` streams an initial turn and a follow-up.
    Resubmit an identical completed request and confirm saved replay.
 3. Missing/malformed/expired cookies, logout, version revocation and disabled user
@@ -199,7 +207,7 @@ reviewed application workflow in dependency order, then verify:
    existing bounds; after reauthentication as the same user, replay its identical
    original request. This is replay, not automatic live-stream/history retrieval.
 
-History/list routes, Stop changes, UI, Python client/evaluator authentication,
+History/list routes, Stop changes, UI, evaluator authentication,
 session renewal, migration and public-demo abuse controls are outside this slice.
 
 API mechanics: [Lambda authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html),

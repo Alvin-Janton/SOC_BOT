@@ -2,9 +2,8 @@
 
 Assistant Markdown is plain stdout text; progress and IDs go to stderr.
 Python 3.11+ standard library only; no retries, redirects or AWS credentials.
-Use --base-url for authenticated CloudFront and --session-file for explicit
+Every action requires --base-url for authenticated CloudFront; --session-file selects explicit
 origin-bound cookie storage; login prompts privately and requires --email.
-Without --base-url, chat retains the legacy shared-identity endpoint.
 Session files contain plaintext bearer credentials: keep them private and
 outside synced directories. This is not browser/security/evaluation testing.
 Exit codes: 0 complete, 1 failure/incomplete, 2 invalid arguments, 3 truncated,
@@ -36,6 +35,8 @@ import uuid
 import warnings
 from typing import TextIO
 
+# Import-only compatibility for the unchanged evaluator, which needs a separate auth migration.
+# This retired endpoint is never selected by the CLI and is not a supported fallback.
 DEFAULT_API_URL = "https://1vg8z8ov16.execute-api.us-east-1.amazonaws.com/dev/chat"
 SOCKET_TIMEOUT_SECONDS = 60
 MAX_LINE_BYTES = 256 * 1024
@@ -319,8 +320,8 @@ class SessionState:
 class HttpsTransport:
     """Make one verified HTTPS request at a time; cookies are never adopted automatically."""
 
-    def __init__(self, session: SessionState | None = None):
-        """Keep the validated origin/session separate from legacy requests and response rendering."""
+    def __init__(self, session: SessionState):
+        """Keep every request bound to its validated CloudFront origin and explicit cookie state."""
         self.session = session
         self.opener = urllib.request.build_opener(NoRedirects())
         self.attempted = False
@@ -331,13 +332,11 @@ class HttpsTransport:
         headers = {"Accept": accept}
         if payload is not None:
             headers["Content-Type"] = "application/json"
-        if self.session is not None:
-            if url not in {self.session.origin + path for path in AUTH_PATHS.values()}:
-                raise ClientError("Refusing a request outside the configured CloudFront origin/routes.")
-            headers["Origin"] = self.session.origin
+        if url not in {self.session.origin + path for path in AUTH_PATHS.values()}:
+            raise ClientError("Refusing a request outside the configured CloudFront origin/routes.")
+        headers["Origin"] = self.session.origin
         request = urllib.request.Request(url, data=payload, method=method, headers=headers)
-        if self.session is not None:
-            self.session.cookie_jar().add_cookie_header(request)
+        self.session.cookie_jar().add_cookie_header(request)
         self.attempted = True
         return self.opener.open(request, timeout=SOCKET_TIMEOUT_SECONDS)
 
@@ -424,7 +423,7 @@ def save_confirmed_session(session: SessionState, cookie: dict | None, outcome: 
 class Renderer:
     """Track stream identity and keep answer bytes separate from readable progress."""
 
-    def __init__(self, turn_id: str, conversation_id: str | None, authenticated: bool = False):
+    def __init__(self, turn_id: str, conversation_id: str | None):
         """Preserve the original request context separately from any returned conversation ID."""
         self.turn_id = turn_id
         self.original_conversation_id = conversation_id
@@ -432,7 +431,6 @@ class Renderer:
         self.answer_started = False
         self.answer_ends_newline = True
         self.console_line_open = False
-        self.authenticated = authenticated
 
     def status(self, message: str) -> None:
         """Print one safe stderr status without inserting characters between stdout deltas."""
@@ -458,8 +456,7 @@ class Renderer:
             self.status("Original request was a new conversation: omit --conversation-id when retrying it.")
         self.status("No retry was sent. A deliberate retry must reuse --turn-id above, "
                     "the exact original message, and original conversation context.")
-        if self.authenticated:
-            self.status("Use the same authenticated account. Reauthentication, if needed, is a separate explicit login.")
+        self.status("Use the same authenticated account. Reauthentication, if needed, is a separate explicit login.")
 
     def check_ids(self, event: dict) -> None:
         """Reject contradictory IDs before rendering event contents or reporting completion."""
@@ -583,12 +580,11 @@ def report_http_error(error: urllib.error.HTTPError, renderer: Renderer) -> None
         renderer.status("No readable bounded API error envelope was available; raw body omitted.")
 
 
-def send_turn(url: str, payload: bytes, renderer: Renderer, transport: HttpsTransport | None = None) -> int:
+def send_turn(url: str, payload: bytes, renderer: Renderer, transport: HttpsTransport) -> int:
     """Send exactly one explicit POST and reliably close its response, including on interruption."""
-    transport = transport or HttpsTransport()
     try:
         with transport.open(url, "POST", payload, "application/x-ndjson") as response:
-            if transport.session is not None and response.headers.get_all("Set-Cookie", []):
+            if response.headers.get_all("Set-Cookie", []):
                 raise ClientError("Chat unexpectedly returned cookies; saved credentials were not changed.")
             return consume_response(response, renderer)
     except urllib.error.HTTPError as error:
@@ -699,15 +695,12 @@ def main() -> int:
     parser.add_argument("--conversation-id", type=conversation_argument, help="Existing conversation; omit for a new conversation.")
     parser.add_argument("--turn-id", type=turn_argument,
                         help="Original UUID for a deliberate retry/replay; otherwise a new UUID is generated.")
-    endpoint = parser.add_mutually_exclusive_group()
-    endpoint.add_argument("--api-url", type=endpoint_argument, help="Complete legacy HTTPS /chat endpoint; excludes --base-url.")
-    endpoint.add_argument("--base-url", type=base_argument, help="Generated CloudFront HTTPS origin; fixed /api routes are derived.")
+    parser.add_argument("--base-url", type=base_argument, required=True,
+                        help="Required generated CloudFront HTTPS origin; fixed /api routes are derived.")
     parser.add_argument("--email", type=email_argument, help="Login email only; password is prompted privately.")
     parser.add_argument("--session-file", type=session_argument,
                         help="Explicit private .soc-bot-chat-session-<label>.json; login may create it, other actions require it to exist.")
     args = parser.parse_args()
-    if (args.action != "chat" or args.session_file is not None) and args.base_url is None:
-        parser.error("Auth actions and --session-file require --base-url; credentials are never sent to the legacy API.")
     if args.action == "chat" and args.message is None:
         parser.error("--message is required for chat.")
     if args.action != "chat" and any(value is not None for value in (args.message, args.conversation_id, args.turn_id)):
@@ -726,20 +719,19 @@ def main() -> int:
         payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(payload) > 32768:
             parser.error("Serialized request exceeds the API's 32768-byte limit.")
-        renderer = Renderer(turn_id, args.conversation_id, authenticated=args.base_url is not None)
+        renderer = Renderer(turn_id, args.conversation_id)
     transport = None
     try:
-        session = SessionState(args.base_url, args.session_file, creating=args.action == "login") if args.base_url else None
+        session = SessionState(args.base_url, args.session_file, creating=args.action == "login")
         transport = HttpsTransport(session)
         if args.action != "chat":
             payload = login_payload(args.email) if args.action == "login" else b"{}" if args.action == "logout" else None
             return send_auth(args.action, transport, payload)
-        renderer.status("CloudFront session mode; no automatic login or renewal." if args.base_url
-                        else "Legacy shared-identity mode; this endpoint does not authenticate individual users.")
+        renderer.status("CloudFront session mode; no automatic login or renewal.")
         renderer.status(f"Turn ID: {turn_id}")
         renderer.status(f"Conversation ID: {args.conversation_id}" if args.conversation_id
                         else "New conversation: the server will return its ID.")
-        url = args.base_url + AUTH_PATHS["chat"] if args.base_url else args.api_url or DEFAULT_API_URL
+        url = args.base_url + AUTH_PATHS["chat"]
         return send_turn(url, payload, renderer, transport)
     except KeyboardInterrupt:
         if renderer:

@@ -68,7 +68,7 @@ export class FrontendHosting extends Construct {
     ]) Validations.of(this.distribution.node.defaultChild!).acknowledge({ id: `AwsSolutions-${rule}`, reason });
     if (environment === 'demo') Validations.of(this.distribution.node.defaultChild!).acknowledge({
       id: 'AwsSolutions-CFR2',
-      reason: 'Demo intentionally has no viewer WAF. Frontend health/auth enforce their origin/BFF rules and /api/chat requires a valid session at admission; public-demo rollout and abuse controls remain deferred. The separate legacy demo /chat endpoint remains unsafe for public release.',
+      reason: 'Demo intentionally has no viewer WAF. Frontend health/auth enforce their origin/BFF rules and /api/chat requires a valid session at admission; public-demo rollout and abuse controls remain deferred.',
     });
   }
 }

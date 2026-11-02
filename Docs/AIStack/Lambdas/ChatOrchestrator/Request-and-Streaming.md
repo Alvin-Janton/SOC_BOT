@@ -25,7 +25,7 @@ The JSON body accepts only:
 
 The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 encoded. Unknown body keys, including client identity or transcript/history, fail validation. Extra proxy-envelope fields do not become trusted identity.
 
-[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) validates environment resources, model/Region, query-window cap and the legacy-only temporary owner. `auth.ts` also validates `EXPECTED_ACCOUNT_ID`, `LEGACY_CHAT_API_ID`, the REST route/context and authenticated principal agreement. `/api/chat` receives its Cognito sub from the frontend origin/session authorizer; only the configured legacy API retains a shared owner. Bare console bodies or missing frontend context cannot fall back. See [authenticated admission, errors and operator checks](../../../FrontendStack/Authenticated-Chat.md). The legacy dev WAF and deferred legacy-demo exposure remain unchanged.
+[config.ts](../../../../infra/lambdas/ai/chat-orchestrator/config.ts) validates environment resources, model/Region and query-window cap. `auth.ts` independently validates `EXPECTED_ACCOUNT_ID`, Region, exact REST POST `/api/chat` route/context and authenticated principal agreement. The Cognito sub comes only from the Frontend origin/session authorizer; bare console bodies, retired `/chat` and absent/contradictory context fail closed with no default owner. See [authenticated admission, errors and operator checks](../../../FrontendStack/Authenticated-Chat.md). The independent dev Frontend CloudFront WAF remains unchanged.
 
 ## Handler lifecycle
 

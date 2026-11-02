@@ -394,7 +394,7 @@ usable old application sessions. Cookie clearing does not resolve that risk.
 For an uncertain Cognito result, first establish the password/account outcome
 through authorized recovery and complete revocation as required; never infer it
 from a cleared cookie. Automatic durable recovery, global Cognito token sign-out,
-other applications' sessions, account-disable workflows, UI/legacy-endpoint removal
+other applications' sessions, account-disable workflows, UI
 and comprehensive public-demo abuse prevention remain deferred.
 
 ## Deadlines, permissions and later validation

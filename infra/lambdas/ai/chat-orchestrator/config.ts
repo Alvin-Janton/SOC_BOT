@@ -9,8 +9,6 @@ export const MAX_OUTPUT_TOKENS = 4_096;
 
 export interface Configuration {
   readonly environment: 'dev' | 'demo';
-  /** Legacy /chat owner only; authenticated requests resolve their owner independently in auth.ts. */
-  readonly ownerId: string;
   readonly tableName: string;
   readonly queryFunction: string;
   readonly ragFunction: string;
@@ -21,12 +19,12 @@ export interface Configuration {
 }
 
 /**
- * Fails closed unless trusted configuration selects environment resources and the isolated legacy identity.
- * auth.ts additionally validates the configured legacy API/account and resolves each invocation's actual owner.
+ * Fails closed unless trusted configuration selects the expected environment resources.
+ * auth.ts additionally validates the account and authenticated gateway context to resolve the invocation owner.
  *
  * Example Input (no arguments; trusted environment variables):
  * {
- *   DEPLOYMENT_ENVIRONMENT: 'dev', TEMPORARY_OWNER_ID: 'soc-bot-dev-analyst',
+ *   DEPLOYMENT_ENVIRONMENT: 'dev',
  *   CHAT_HISTORY_TABLE_NAME: 'SOC-BOT-DEV-CHAT-HISTORY',
  *   QUERY_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-QUERY-TOOL',
  *   RAG_TOOL_FUNCTION_NAME: 'SOC-BOT-DEV-RAG-TOOL',
@@ -35,7 +33,7 @@ export interface Configuration {
  * }
  * Example Output:
  * {
- *   environment: 'dev', ownerId: 'soc-bot-dev-analyst',
+ *   environment: 'dev',
  *   tableName: 'SOC-BOT-DEV-CHAT-HISTORY', queryFunction: 'SOC-BOT-DEV-QUERY-TOOL',
  *   ragFunction: 'SOC-BOT-DEV-RAG-TOOL',
  *   database: 'soc_bot_dev_security', maxQueryDays: 30,
@@ -45,13 +43,12 @@ export interface Configuration {
  */
 export function configuration(): Configuration {
   const environment = process.env.DEPLOYMENT_ENVIRONMENT;
-  const ownerId = process.env.TEMPORARY_OWNER_ID ?? '';
   const tableName = process.env.CHAT_HISTORY_TABLE_NAME ?? '';
   const queryFunction = process.env.QUERY_TOOL_FUNCTION_NAME ?? '';
   const ragFunction = process.env.RAG_TOOL_FUNCTION_NAME ?? '';
   const database = process.env.DATABASE_NAME ?? '';
   const maxQueryDays = Number(process.env.MAX_QUERY_WINDOW_DAYS);
-  if ((environment !== 'dev' && environment !== 'demo') || ownerId !== `soc-bot-${environment}-analyst`
+  if ((environment !== 'dev' && environment !== 'demo')
     || tableName !== `SOC-BOT-${environment.toUpperCase()}-CHAT-HISTORY`
     || queryFunction !== `SOC-BOT-${environment.toUpperCase()}-QUERY-TOOL`
     || ragFunction !== `SOC-BOT-${environment.toUpperCase()}-RAG-TOOL`
@@ -59,7 +56,7 @@ export function configuration(): Configuration {
     || process.env.BEDROCK_REGION !== 'us-east-1' || !Number.isInteger(maxQueryDays) || maxQueryDays < 1 || maxQueryDays > 366) {
     throw new ChatError('CONFIGURATION_ERROR', 'Chat is not available in this environment.', 503, false);
   }
-  return { environment, ownerId, tableName, queryFunction, ragFunction, database, maxQueryDays,
+  return { environment, tableName, queryFunction, ragFunction, database, maxQueryDays,
     modelId: process.env.BEDROCK_MODEL_ID, region: process.env.BEDROCK_REGION };
 }
 

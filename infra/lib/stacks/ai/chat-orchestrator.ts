@@ -84,7 +84,6 @@ export class ChatOrchestrator extends Construct {
       bundling: { bundleAwsSDK: true, externalModules: [], minify: true, target: 'node22' },
       environment: {
         DEPLOYMENT_ENVIRONMENT: environment,
-        TEMPORARY_OWNER_ID: `soc-bot-${environment}-analyst`,
         CHAT_HISTORY_TABLE_NAME: props.chatHistoryTable.tableName,
         QUERY_TOOL_FUNCTION_NAME: props.queryToolFunction.functionName,
         RAG_TOOL_FUNCTION_NAME: props.ragToolFunction.functionName,

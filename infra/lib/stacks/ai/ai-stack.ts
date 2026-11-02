@@ -8,7 +8,6 @@ import { DeploymentEnvironment } from '../../shared/environment';
 import { AthenaQueryTool } from './athena-query-tool';
 import { ChatHistory } from './chat-history';
 import { ChatOrchestrator } from './chat-orchestrator';
-import { ChatApi } from './chat-api';
 import { LakeFormationGrants } from './lake-formation-grants';
 import { RagTool } from './rag-tool';
 
@@ -19,7 +18,6 @@ export interface AiStackProps extends StackProps {
   readonly database: CfnDatabase;
   readonly tables: readonly CfnTable[];
   readonly maxQueryWindowDays?: number;
-  readonly devAllowedClientCidr?: string;
 }
 
 /** Owns private investigation tools, conversation storage, and environment-specific streaming chat. */
@@ -28,7 +26,6 @@ export class AiStack extends Stack {
   public readonly ragTool: RagTool;
   public readonly chatHistoryTable: Table;
   public readonly chatOrchestrator: ChatOrchestrator;
-  public readonly chatApi: ChatApi;
 
   public constructor(scope: Construct, id: string, props: AiStackProps) {
     super(scope, id, props);
@@ -53,13 +50,7 @@ export class AiStack extends Stack {
       databaseName: props.database.ref,
       maxQueryWindowDays: props.maxQueryWindowDays,
     });
-    this.chatApi = new ChatApi(this, 'ChatApi', {
-      deploymentEnvironment: props.deploymentEnvironment,
-      orchestratorFunction: this.chatOrchestrator.function,
-      devAllowedClientCidr: props.devAllowedClientCidr,
-    });
-    // Same-stack legacy identity binding; Frontend must never be imported into AI configuration.
-    this.chatOrchestrator.function.addEnvironment('LEGACY_CHAT_API_ID', this.chatApi.api.restApiId);
+    // Authenticated invocation checks need the account without importing Frontend into AI.
     this.chatOrchestrator.function.addEnvironment('EXPECTED_ACCOUNT_ID', this.account);
     Tags.of(this).add('Project', 'SOC_BOT');
     Tags.of(this).add('Environment', props.deploymentEnvironment);

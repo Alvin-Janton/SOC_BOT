@@ -1,6 +1,6 @@
 # End-to-End Chat Data Flow
 
-This walkthrough retains the **legacy `/chat`** example and its shared owner. New authenticated traffic is explained in the [frontend chat guide](../../../FrontendStack/Authenticated-Chat.md); no legacy data is migrated. This walkthrough follows one illustrative successful `query_events` turn through the dev Lambda. A calling client can use the streaming POST `/chat` API after operator deployment; React integration remains unimplemented. Dev API access uses a temporary WAF source-IP gate and fixed shared owner, not user authentication. The API-proxy snapshots below remain valid; see [AI infrastructure](../../Infra/README.md) for prerequisites and the undeployed-demo security exception. The model proposes an investigation; application code validates and executes it.
+This walkthrough follows one illustrative successful `query_events` turn admitted through authenticated CloudFront `/api/chat`. The [Frontend guide](../../../FrontendStack/Authenticated-Chat.md) explains origin/session admission; the AI-owned legacy API/Regional WAF is retired without migrating existing data. Frontend supplies a verified Cognito sub through API Gateway authorizer context; React integration remains unimplemented. The model proposes an investigation; application code validates and executes it. See [AI infrastructure](../../Infra/README.md) for ownership and operator deployment boundaries.
 
 ```mermaid
 sequenceDiagram
@@ -9,7 +9,7 @@ sequenceDiagram
     participant D as DynamoDB
     participant B as Bedrock
     participant Q as Query Lambda
-    Note over C,H: API Gateway streams /chat; legacy shared owner; authenticated /api/chat is separate
+    Note over C,H: Frontend API streams /api/chat with validated session-authorizer identity
     C->>H: API-proxy-shaped event
     H->>D: Acquire lease and save USER_MESSAGE
     H-->>C: conversation event
@@ -52,21 +52,28 @@ For detailed behavior, use the [overview](README.md), [request/streaming](Reques
 
 ## 1. Client event -> parsed chat request
 
-**Boundary: caller -> Lambda `handler`.** The complete proxy-shaped envelope used here has `body` and `isBase64Encoded`. It is not a claim that an API Gateway route exists or that every optional API Gateway envelope property is required.
+**Boundary: caller -> Lambda `handler`.** This proxy-shaped example shows the current admitted route/context, body and base64 flag; it does not include every optional API Gateway property. The authorizer context is supplied by the trusted gateway integration, never copied from caller JSON.
 
 ```json
 {
   "body": "{\"conversationId\":\"c4e7173b-3075-47b9-9e7d-260921bbc870\",\"turnId\":\"296a0470-b7b7-4a21-a9d7-72fb7be90ac9\",\"message\":\"Show one blocked WAF request from September 11, 2026 UTC, including action, path, and severity_id.\"}",
   "isBase64Encoded": false,
   "httpMethod": "POST",
-  "path": "/chat",
-  "resource": "/chat",
+  "path": "/api/chat",
+  "resource": "/api/chat",
   "requestContext": {
-    "accountId": "<configured account>",
-    "apiId": "<configured LEGACY_CHAT_API_ID>",
+    "accountId": "111122223333",
+    "apiId": "a1b2c3d4e5",
     "stage": "dev",
     "httpMethod": "POST",
-    "resourcePath": "/chat"
+    "resourcePath": "/api/chat",
+    "authorizer": {
+      "authenticationType": "bff-session",
+      "principalId": "44444444-1111-4444-8111-111111111111",
+      "userId": "44444444-1111-4444-8111-111111111111",
+      "apiId": "a1b2c3d4e5",
+      "stage": "dev"
+    }
   }
 }
 ```
@@ -81,7 +88,7 @@ For detailed behavior, use the [overview](README.md), [request/streaming](Reques
 }
 ```
 
-The caller supplies neither owner identity nor history. Only the validated legacy gateway envelope and configured API ID select `soc-bot-dev-analyst`; this fixed shared dev owner is not authentication.
+The caller supplies neither owner identity nor history. `resolveOwner()` verifies the expected account/Region/stage, exact route/method and bff-session principal/sub/API/stage agreement before parsing the chat body or creating either store. Both stores receive the illustrative verified sub `44444444-1111-4444-8111-111111111111`. This updates documentation examples, not ownership of any existing record.
 
 ## 2. Accepted request -> metadata, lease, and user event
 
@@ -96,7 +103,7 @@ Here is the complete metadata item **after** saving sequence 3:
   "entity_type": "CONVERSATION",
   "schema_version": 1,
   "conversation_id": "c4e7173b-3075-47b9-9e7d-260921bbc870",
-  "owner_id": "soc-bot-dev-analyst",
+  "owner_id": "44444444-1111-4444-8111-111111111111",
   "created_at": "2026-10-11T09:59:00.000Z",
   "updated_at": "2026-10-11T10:00:00.100Z",
   "last_event_id": "33333333-3333-4333-8333-333333333333",
@@ -106,7 +113,7 @@ Here is the complete metadata item **after** saving sequence 3:
   "active_attempt_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   "lease_expires_at": 1791713730,
   "title": "Security investigation",
-  "GSI1PK": "USER#soc-bot-dev-analyst",
+  "GSI1PK": "USER#44444444-1111-4444-8111-111111111111",
   "GSI1SK": "CONV#2026-10-11T10:00:00.100Z#c4e7173b-3075-47b9-9e7d-260921bbc870"
 }
 ```
@@ -810,14 +817,14 @@ Token fragments are not extra event items. Once the write succeeds, the handler 
   "entity_type": "CONVERSATION",
   "schema_version": 1,
   "conversation_id": "c4e7173b-3075-47b9-9e7d-260921bbc870",
-  "owner_id": "soc-bot-dev-analyst",
+  "owner_id": "44444444-1111-4444-8111-111111111111",
   "created_at": "2026-10-11T09:59:00.000Z",
   "updated_at": "2026-10-11T10:00:03.100Z",
   "last_event_id": "77777777-7777-4777-8777-777777777777",
   "last_event_sequence": 7,
   "lease_version": 2,
   "title": "Security investigation",
-  "GSI1PK": "USER#soc-bot-dev-analyst",
+  "GSI1PK": "USER#44444444-1111-4444-8111-111111111111",
   "GSI1SK": "CONV#2026-10-11T10:00:03.100Z#c4e7173b-3075-47b9-9e7d-260921bbc870"
 }
 ```

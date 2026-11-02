@@ -27,8 +27,8 @@ identity pool, live user, merging/unlinking, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
-CloudFront IPv4 WAF. The existing dev
-WAF-gated legacy `/chat` retains its isolated shared owner alongside the new session-authenticated CloudFront `/api/chat`. Demo release stays
+CloudFront IPv4 WAF. Authenticated CloudFront `/api/chat` is the supported chat entry;
+the AI-owned legacy API/Regional WAF are retired without migrating conversations. Demo release stays
 deferred until authentication and abuse controls are complete.
 
 ## Constructs and resources
@@ -87,10 +87,10 @@ Gateway. It allows all API methods for later integration, but only the explicit
 health, nine email/password routes and optionally dev Google login/linking routes exist now. Set-Cookie responses are not cached. Unknown
 API paths and error responses are not rewritten to `index.html`.
 
-Both frontend and legacy chat Regional APIs use
+The Frontend Regional API uses
 `SecurityPolicy_TLS13_1_2_2021_06` with endpoint access mode `BASIC`, allowing TLS
-1.2/1.3. Their deployment hashes include both properties so stages redeploy on
-transport changes while REST API logical IDs stay stable. CloudFront's API origin
+1.2/1.3. Its deployment hash includes both properties so the stage redeploys on
+transport changes while the REST API logical ID stays stable. CloudFront's API origin
 uses HTTPS_ONLY and explicitly TLS 1.2. This enhanced policy avoids the unsupported
 legacy `TLS_1_0` -> `TLS_1_2` update. Propagation can take about fifteen minutes;
 STRICT mode needs separate traffic validation. See the
@@ -119,8 +119,8 @@ approval. API access/execution logging remains enabled.
 Dev's CloudFront distribution disables viewer IPv6 and attaches its frontend
 WebACL ARN directly through `WebACLId`, without a WebACLAssociation resource.
 One allow rule checks the actual viewer IPv4 address, without forwarded-header
-trust. Demo keeps viewer IPv6 enabled and has no frontend WAF. The legacy chat
-Regional WAF, its address family and its configured address remain independent.
+trust. Demo keeps viewer IPv6 enabled and has no frontend WAF. The retired AI-owned
+Regional WAF/IPSet does not remove or alter this dev CloudFront gate.
 
 The origin secret is generated during deployment as 64 alphanumeric characters,
 using the AWS-managed Secrets Manager key. Dev destroys it; demo retains it.
@@ -436,22 +436,18 @@ website root may fail until assets are published. CloudFront operations may take
 several minutes; existing 30-minute workflow timeouts are unchanged. A timeout
 does not prove CloudFormation has stopped; inspect live state separately before
 recovery. Dev deployment/destruction share `soc-bot-dev-data`, while demo uses
-`soc-bot-demo-data`, all without cancelling an in-progress run. Dev now forwards both CIDRs unchanged; the operator must migrate the old raw
-chat IPv6 value to its equivalent `/128` and configure a separate public IPv4
-`/32` for frontend. Demo synthesis uses both documentation-only CIDRs and selects
-only demo stacks for deployment.
+`soc-bot-demo-data`, all without cancelling an in-progress run. Dev forwards only the frontend public IPv4 `/32`. Demo synthesis retains the
+reserved frontend CIDR and selects only demo stacks for deployment.
 
-Before enabling the updated dev workflow, migrate `DEV_ALLOWED_CLIENT_CIDR`
-from its raw IPv6 value to the identical address with `/128`, and set
-`DEV_FRONTEND_ALLOWED_CLIENT_CIDR` to the chosen public IPv4 address with `/32`.
-Both are complete CIDRs, forwarded without a forced suffix. They remain
-independent and neither is an origin-secret setting. Apply the foundation IAM
-update as an administrator before the application rollout; demo deployment is
-still deferred. Full-app local synthesis uses only reserved placeholders:
+Dev requires only `DEV_FRONTEND_ALLOWED_CLIENT_CIDR` as a public IPv4 `/32`,
+forwarded without a suffix; it is not an origin secret. The retired AI CIDR input
+is no longer used. Remove its old GitHub variable only after retirement and
+rollback review. Foundation policies/shared Regional logging remain intact;
+public-demo release is still deferred. Full-app offline synthesis uses:
 
 ```console
 npm run build
-npm run synth --workspace @soc-bot/infra -- --lookups=false -c devAllowedClientCidr=2001:db8::1/128 -c devFrontendAllowedClientCidr=203.0.113.1/32
+npm run synth --workspace @soc-bot/infra -- --lookups=false -c devFrontendAllowedClientCidr=203.0.113.1/32
 ```
 
 Disable EC2 metadata discovery and omit live credentials for offline validation.
@@ -493,7 +489,7 @@ Later product slices must add custom email/password UI,
 demo Google activation, unlinking/replacement, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
-sessions; `/api/chat` now uses their verified subject, while legacy `/chat` retains its separate temporary identity. MFA and
+sessions; `/api/chat` now uses their verified subject, without any temporary-owner fallback. MFA and
 administrator synchronization remain reviewed follow-ups; out-of-band password
 changes/disablement still require deliberate revocation coordination. No session
 refresh/sliding expiry is implemented. Complete those security/abuse controls
@@ -561,7 +557,7 @@ out-of-band console sign-out/disablement until application versions are revoked.
 Signup/confirmation/reset UI, demo Google/linking, comprehensive authentication abuse
 controls and Stop integration remain deferred; chat ownership is implemented for `/api/chat`. `/api/auth/me`
 reports frontend session identity. Protected `/api/chat` uses that subject;
-legacy `/chat` retains its isolated temporary owner. Password deployment needs no Google setting; dev Google uses the
+the AI-owned `/chat` is retired without migrating stored conversations. Password deployment needs no Google setting; dev Google uses the
 explicit activation variable and operator-provisioned secret described above.
 Public demo still requires the remaining security work.
 
