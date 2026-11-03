@@ -4,7 +4,7 @@ export interface Session { readonly userId: string; readonly expiresAt: string }
 
 /** Validates the complete public session shape without accepting provider tokens or internal records. */
 function session(value: unknown): Session {
-  
+
   if (!record(value) || Object.keys(value).length !== 2 || typeof value.userId !== 'string'
     || !/^[A-Za-z0-9_-]{1,128}$/.test(value.userId) || typeof value.expiresAt !== 'string'
     || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.expiresAt)
