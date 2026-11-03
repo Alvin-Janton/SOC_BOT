@@ -37,19 +37,18 @@ The runtime must never receive access to hidden evaluation ground truth or infra
 
 ```text
 SOC_BOT/
-|-- apps/
-|   |-- web/
-|   `-- api/
-|-- infra/
-|-- glue/
-|-- packages/
-|-- tests/
-|-- docs/
+|-- frontend/             # Browser UI workspace
+|-- infra/                # CDK, Lambda code and infrastructure checks
+|-- glue/                 # Shared ETL and offline utilities
+|-- playbooks/
+|-- evaluation/           # Evaluator-only, outside runtime assets
+|-- scripts/
+|-- Docs/
 |-- AGENTS.md
 `-- README.md
 ```
 
-The exact layout will evolve as planned MVP components are implemented. Empty directories are not created solely to match this outline.
+The browser application lives in its own root workspace; Lambda runtime code remains under infra/lambdas/. Generated assets and local data remain ignored.
 
 ## Evaluator-only investigation cases
 
@@ -65,7 +64,18 @@ The unchanged evaluator invocation `python -m evaluation.run --chat-table SOC-BO
 
 ## Infrastructure Development
 
-The repository is an npm workspace. The `@soc-bot/infra` workspace contains the TypeScript AWS CDK application and targets Node.js 22.
+The [frontend guide](frontend/README.md) covers the password-login/chat interface,
+streaming/retry limitations and operator validation. From the root,
+`npm run frontend:dev` starts a disconnected Vite visual preview; `/login` makes
+no API requests and `/?preview=chat` is an inert development-only layout.
+`npm run frontend:build` typechecks and builds static output. Production restores
+the cookie-backed session before chat; no browser tokens or conversation state
+are persisted locally. Refresh starts a fresh local view. The default static
+cache is disabled, `/assets/*` uses optimized caching, and identical HTML is
+published at S3 `index.html` and `login` with revalidation headers. No SPA error
+rewrite or localhost authentication exception is introduced.
+
+The repository targets Node.js 22 with a shared root lockfile. `@soc-bot/infra` contains the TypeScript CDK application; `@soc-bot/frontend` contains the Vite/React browser application.
 
 The chat orchestrator uses the `us.anthropic.claude-sonnet-4-6` Bedrock profile from `us-east-1`, with thinking explicitly disabled and temperature zero for investigation, finalization and summaries. Answer bounds remain 4,096 tokens/32 KiB; summaries remain 1,024 tokens/8 KiB. The local evaluator's Sonnet 4.6 judge is unchanged. Operator rollout must update foundation APPLICATION boundaries first through the administrator procedure, then AI through the existing environment workflow; no deployment or live inference is performed by this change. See [model configuration, scoped IAM and rollout prerequisites](Docs/AIStack/Infra/README.md#runtime-permissions).
 
@@ -93,7 +103,7 @@ The foundation stack creates a retained, private `soc-bot-{environment}-glue-fil
 
 The application transformer preserves request and response evidence, request-ID and raw-object provenance, and a safe allowlisted `raw_event` subset. It excludes synthetic `is_malicious`, attack labels, `confidence`, `scenario_id`, and matched-indicator fields from the normalized table. It also excludes `source_file` because source filenames can reveal normal or anomalous traffic classifications, along with `source_line_start` and `source_line_end`; other provenance fields remain unchanged. The inspected source dataset stays outside this repository; this change does not upload it or run a backfill. The Glue job uses default CloudWatch Logs at-rest encryption rather than a new customer-managed KMS key, and bookmarks are disabled because explicit dates control reruns. Both are documented, resource-specific cdk-nag acknowledgments.
 
-The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the matching Data, AI and Frontend stacks; they do not bootstrap or deploy the foundation stack. Apply its approved IAM and shared logging changes before application deployment. AI query bundles use caller credentials and the existing bootstrap file bucket; Data's Glue assets keep their dedicated file bucket. Frontend infrastructure selection does not publish website assets.
+The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the matching Data, AI and Frontend stacks; they do not bootstrap or deploy the foundation stack. Apply its approved IAM and shared logging changes before application deployment. AI query bundles use caller credentials and the existing bootstrap file bucket; Data's Glue assets keep their dedicated file bucket. After those stacks deploy successfully, the same workflows publish the frontend build using validated stack outputs and submit one cache invalidation.
 
 ### Streaming chat APIs and ownership
 
@@ -146,13 +156,13 @@ The Lambda console buffers streaming responses. After the operator deploys dev, 
 
 ### Frontend and authentication foundation
 
-The CDK app defines `devFrontendStack` and `demoFrontendStack` (`SOC-BOT-<ENV>-FRONTEND`) alongside the existing foundation/Data/AI stacks. Each contains empty private SSE-S3 hosting behind CloudFront OAC, a separate Regional health/auth/chat API, an email/password Cognito pool/client, and a dedicated AWS-managed-encrypted `SOC-BOT-<ENV>-AUTH-SESSIONS` table. The API defines `GET /api/health` (fixed MOCK health) plus `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/signup`, `POST /api/auth/confirm-signup` and `POST /api/auth/resend-confirmation`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` and `POST /api/auth/change-password`, all protected by exact-route origin verification. `/api/*` is uncached and forwards cookies/headers/query strings excluding viewer Host; other paths use S3 GET/HEAD without cookies. Frontend now adds a dev-only global IPv4 WAF and an origin-secret REQUEST authorizer in both environments. Authenticated POST `/api/chat` now reuses that API and authorizer; UI assets and SPA fallback remain deferred. Google activation is described below.
+The CDK app defines `devFrontendStack` and `demoFrontendStack` (`SOC-BOT-<ENV>-FRONTEND`) alongside the existing foundation/Data/AI stacks. Each contains private SSE-S3 hosting behind CloudFront OAC, a separate Regional health/auth/chat API, an email/password Cognito pool/client, and a dedicated AWS-managed-encrypted `SOC-BOT-<ENV>-AUTH-SESSIONS` table. The API defines `GET /api/health` (fixed MOCK health) plus `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/signup`, `POST /api/auth/confirm-signup` and `POST /api/auth/resend-confirmation`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` and `POST /api/auth/change-password`, all protected by exact-route origin verification. `/api/*` is uncached and forwards cookies/headers/query strings excluding viewer Host; other paths use S3 GET/HEAD without cookies. Frontend now adds a dev-only global IPv4 WAF and an origin-secret REQUEST authorizer in both environments. Authenticated POST `/api/chat` now reuses that API and authorizer; The two-route password-login/chat UI is published by the application workflows; arbitrary SPA fallback remains excluded. Google activation is described below.
 
 The frontend auth Lambda uses independent fixed twelve-hour opaque sessions, `__Host-soc_bot_session` Secure/HttpOnly/SameSite=Lax cookies and strongly consistent user-version/disablement checks. Permanent `USER#sub` metadata and TTL-expiring `SESSION#sha256` records share the dedicated PK-only table. Trusted pre-authentication context and conditional session creation prevent adopting a newer version after stale authentication; AdminGetUser resolves canonical identity and conditionally initializes only genuinely absent metadata before verification. Recovery from lost metadata remains operator work. The new auth role has exact-pool AdminGetUser, exact-table Get/Put/Delete/ConditionCheckItem and its own log writes, without Secrets Manager or investigation access.
 
 Frontend imports the AI orchestrator for authenticated chat, establishing Data -> AI -> Frontend order, and retains its foundation dependency for shared Regional logging. AI has no reverse Frontend reference. The foundation adds exact frontend access-log grants and scoped Cognito lifecycle/tag permissions; its five execution-policy attachments are unchanged. Cognito statements move into the existing AI/application execution policy to remain below managed-policy size limits. Cognito alone accepts the three exact CloudFormation system-tag keys; protected ownership-tag removal (including mixed requests) is explicitly denied. Other services' conditions remain unchanged. The APPLICATION boundary now adds exact-auth-table ConditionCheckItem and ownership-tagged pool AdminGetUser; QUERY/GLUE and other runtime identity grants are unchanged.
 
-Deployment workflows now explicitly include the matching Frontend stack alongside Data and AI. Manual dev teardown supports frontend-only, AI-only, or all three in Frontend -> AI -> Data order, with exact confirmations described below. Deploy approved administrator-owned foundation changes first; `--exclusively` intentionally excludes that dependency. UI assets remain separate work. The frontend authorizer binds the sole supported `/api/chat` entry point to the verified session sub; the AI-owned `/chat` is retired without migrating data. After a later authorized dev deployment, check `/api/health`; the empty website root may fail until assets exist. Dev state is disposable without automatic bucket emptying, demo state is retained, and auth PITR/MFA/paid Cognito protection and public-demo email/abuse review remain deferred. Authenticated chat validation uses CloudFront `/api/chat`; the Frontend IPv4 WAF remains in dev. See the [frontend guide](Docs/FrontendStack/README.md) for names, item contracts, security acknowledgments, outputs and activation prerequisites.
+Deployment workflows now explicitly include the matching Frontend stack alongside Data and AI. Manual dev teardown supports frontend-only, AI-only, or all three in Frontend -> AI -> Data order, with exact confirmations described below. Deploy approved administrator-owned foundation changes first; `--exclusively` intentionally excludes that dependency. The frontend build is published only after successful stack deployment. The frontend authorizer binds the sole supported `/api/chat` entry point to the verified session sub; the AI-owned `/chat` is retired without migrating data. After a later authorized dev deployment, check `/api/health`; refresh `/` and `/login` after asset publication. Dev state is disposable without automatic bucket emptying, demo state is retained, and auth PITR/MFA/paid Cognito protection and public-demo email/abuse review remain deferred. Authenticated chat validation uses CloudFront `/api/chat`; the Frontend IPv4 WAF remains in dev. See the [frontend guide](Docs/FrontendStack/README.md) for names, item contracts, security acknowledgments, outputs and activation prerequisites.
 
 Frontend entry-point hardening uses dev-only CLOUDFRONT WAF resources with one IPv4 `/32` allow rule and dev viewer IPv6 disabled. Demo retains IPv6 and has no frontend WAF. Both environments generate a 64-character Secrets Manager origin token; only the API origin injects `X-Soc-Bot-Origin` through a CloudFormation dynamic reference. A zero-cache REQUEST authorizer verifies health and enabled auth routes, and additionally resolves a durable session for protected `/api/chat`, returning permission for the single incoming method using AWSCURRENT, a maximum five-minute in-memory token cache and fixed-length timing-safe comparison. Missing/wrong headers and expired-cache refresh failures deny access. Among runtime identities, only the authorizer receives exact-secret read access; the model and existing investigation roles receive none.
 
@@ -357,7 +367,7 @@ The comparison is manual and offline; it does not download from S3, invoke Glue,
 No AWS cleanup or live verification is claimed by this implementation. Retirement does not change table ownership or reassign historical shared-owner conversations.
 
 
-- A push to `dev` deploys `devDataStack`, `devAiStack` and `devFrontendStack` (`SOC-BOT-DEV-DATA`, `SOC-BOT-DEV-AI`, `SOC-BOT-DEV-FRONTEND`) through the `dev` GitHub Environment. A push to `main` deploys the corresponding `demoDataStack`, `demoAiStack` and `demoFrontendStack` through the `demo` Environment. Both workflows lint, build and synthesize before assuming the role, then deploy the existing `infra/cdk.out` assembly with explicit IDs and `--exclusively`. Default sequential, dependency-aware deployment keeps Data before AI; Frontend imports AI, so deployment order is Data -> AI -> Frontend.
+- A push to `dev` deploys `devDataStack`, `devAiStack` and `devFrontendStack` (`SOC-BOT-DEV-DATA`, `SOC-BOT-DEV-AI`, `SOC-BOT-DEV-FRONTEND`) through the `dev` GitHub Environment. A push to `main` deploys the corresponding `demoDataStack`, `demoAiStack` and `demoFrontendStack` through the `demo` Environment. Both workflows lint, typecheck/build frontend, build infrastructure and synthesize before assuming the role, then deploy the existing `infra/cdk.out` assembly with explicit IDs and `--exclusively`. Default sequential, dependency-aware deployment keeps Data before AI; Frontend imports AI, so deployment order is Data -> AI -> Frontend.
 - Each Environment must supply an `AWS_ROLE_ARN` variable naming its exact `SOC_BOT_<ENV>_DEPLOY` role and restrict deployment to its matching branch. The workflows assume that role through GitHub OIDC and pass only the matching `SOC_BOT_<ENV>_CFN_EXEC` role to CloudFormation. CDK uses current OIDC credentials for stack operations and publishing Data assets to the dedicated Glue file bucket and AI assets to the existing bootstrap bucket. The account must already be bootstrapped; the workflows never run `cdk bootstrap`.
 - Dev requires only `DEV_FRONTEND_ALLOWED_CLIENT_CIDR`, a public IPv4 `/32`. PR/demo/teardown synthesis retains reserved `203.0.113.1/32` for that independent Frontend context. Demo-only deployment selection and teardown behavior are unchanged. The old `DEV_ALLOWED_CLIENT_CIDR` variable is unused; remove it only after the operator has completed retirement and decided rollback requirements. Foundation permissions/shared logging remain unchanged in this update.
 - Main still automatically deploys the explicit demo application stacks; public-demo release remains deferred pending the remaining authentication abuse, email and security review. Retirement removes the unauthenticated AI API rather than broadening demo access. Local validation neither deploys demo nor changes GitHub Environment protections.
@@ -373,7 +383,7 @@ No AWS cleanup or live verification is claimed by this implementation. Retiremen
 
 Each command targets only its literal stack ID with `--exclusively`. Frontend failure stops the run before AI/Data deletion; AI failure stops it before Data deletion. AI-only never expands to frontend deletion: if frontend imports block it, review a broader scope or dependency removal first. Data-only, foundation teardown and demo teardown are excluded; arbitrary stack names and `--all` are not accepted.
 
-**Dev frontend teardown deletes its Cognito pool/users and auth/session table, not just hosting.** No automatic S3 emptying or separate user/session cleanup is performed. A nonempty frontend or Data bucket can block stack deletion; deliberately review and empty that bucket with administrator access before retrying. Partial teardown may already have deleted other resources. The dev OIDC and resource-policy smoke workflows remain separate, manual diagnostics. UI publication, CloudFront invalidation, admin recovery workflows are deferred; `/api/health` is the intended later dev check while the empty website root may fail.
+**Dev frontend teardown deletes its Cognito pool/users and auth/session table, not just hosting.** No automatic S3 emptying or separate user/session cleanup is performed. A nonempty frontend or Data bucket can block stack deletion; deliberately review and empty that bucket with administrator access before retrying. Partial teardown may already have deleted other resources. The dev OIDC and resource-policy smoke workflows remain separate, manual diagnostics. Frontend publication retains old hashed assets, copies the HTML entries last and submits a cache invalidation. Admin recovery and stale-asset cleanup remain deferred; validate the website and authenticated flows after deployment.
 
 ### Lake Formation governance and operator rollout
 

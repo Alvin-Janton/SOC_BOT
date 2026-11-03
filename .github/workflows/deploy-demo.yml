@@ -56,6 +56,9 @@ jobs:
       - name: Lint TypeScript
         run: npm run lint
 
+      - name: Typecheck and build frontend
+        run: npm run frontend:build
+
       - name: Compile infrastructure
         run: npm run build
 
@@ -85,3 +88,9 @@ jobs:
             --require-approval never \
             --exclusively \
             --ci
+
+      - name: Publish frontend and submit cache invalidation
+        env:
+          DEPLOYMENT_ENVIRONMENT: demo
+          EXPECTED_ACCOUNT_ID: ${{ steps.expected.outputs.account }}
+        run: node frontend/scripts/publish.mjs

@@ -13,7 +13,7 @@ with temporary proofs, durable ownership fences and reconciliation boundaries.
 The stack defines infrastructure and nine email/password authentication routes,
 plus [operator-activated dev Google login](Google-Login.md) and
 [explicit password-to-Google linking](Google-Linking.md).
-[Authenticated chat](Authenticated-Chat.md) is wired through the existing authorizer to the AI orchestrator; frontend UI remains separate. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
+[Authenticated chat](Authenticated-Chat.md) is wired through the existing authorizer to the AI orchestrator. The [frontend workspace](../../frontend/README.md) supplies password login and streaming chat at `/login` and `/`. The [CDK entry point](../../infra/bin/soc-bot.ts) registers
 `devFrontendStack` (`SOC-BOT-DEV-FRONTEND`) and `demoFrontendStack`
 (`SOC-BOT-DEMO-FRONTEND`) in `us-east-1`. Both use caller-credential synthesis and
 standard `Project=SOC_BOT`, `Environment=dev|demo`, `ManagedBy=CDK` tags on taggable
@@ -22,8 +22,8 @@ resources. Account/Region values are CDK tokens, not committed account IDs.
 Dev stages an empty Google credential secret and Cognito domain; explicit activation
 adds a dedicated client/provider, pre-creation guard, two login GET routes and
 explicit linking POST/GET routes under `/api/auth/link/google/`.
-Demo Google stays disabled. No frontend UI/assets,
-identity pool, live user, merging/unlinking, DNS or custom
+Demo Google stays disabled. The UI has no Google, registration or recovery controls.
+No identity pool, live user, merging/unlinking, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
 origin token and REQUEST authorizer in both environments, plus a dev-only
@@ -99,8 +99,14 @@ STRICT mode needs separate traffic validation. See the
 The default S3 behavior allows GET/HEAD, redirects viewers to HTTPS and forwards
 no cookies. The private bucket blocks public access, uses SSE-S3, enforces TLS and
 has no website endpoint. OAC signs origin access; the bucket policy limits reads
-to this distribution. `defaultRootObject=index.html` does not publish that file:
-the empty root is expected to fail until a later asset-publication slice.
+to this distribution. The default behavior disables caching; `/assets/*` reuses
+the same S3/OAC origin with optimized caching. The existing deployment workflows
+publish identical HTML at `index.html` and extensionless `login` with explicit
+`text/html` and revalidation headers, so `/` and `/login` refresh directly.
+Hashed assets are immutable, uploaded before entries and retained across releases.
+One `/*` invalidation is submitted after upload without a polling waiter. See the
+[frontend publishing guide](../../frontend/README.md#publishing-and-serving) for
+strict output validation, ordering/failure limits and dev bucket emptying.
 [CDK's OAC-backed origin](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins.S3BucketOrigin.html)
 does not require a public bucket or auto-delete custom resource.
 
@@ -429,10 +435,13 @@ shared logging changes separately first: `--exclusively` intentionally excludes
 dependencies from deployment. Frontend imports the AI orchestrator; deployment is Data -> AI -> Frontend,
 with no reverse AI -> Frontend reference.
 
-Infrastructure deployment does not publish UI assets, invalidate CloudFront,
-publish an authentication UI or migrate legacy conversations. It now includes the reviewed auth Lambda/routes. Origin protection is defined in frontend CDK, not implemented by publishing assets. After a later
-authorized dev deployment, use the output health URL (`/api/health`); the empty
-website root may fail until assets are published. CloudFront operations may take
+After stack deployment succeeds, the same workflow publishes the password-login/
+chat build to the validated frontend bucket and submits a CloudFront invalidation.
+No legacy conversations are migrated. Origin protection remains defined in CDK,
+independent of published assets. After an authorized deployment, validate `/`,
+`/login`, `/api/health` and the authenticated flows using the
+[frontend checklist](../../frontend/README.md#operator-validation-after-deployment).
+CloudFront operations may take
 several minutes; existing 30-minute workflow timeouts are unchanged. A timeout
 does not prove CloudFormation has stopped; inspect live state separately before
 recovery. Dev deployment/destruction share `soc-bot-dev-data`, while demo uses
