@@ -79,6 +79,9 @@ jobs:
       - name: Lint TypeScript
         run: npm run lint
 
+      - name: Typecheck and build frontend
+        run: npm run frontend:build
+
       - name: Compile infrastructure
         run: npm run build
 

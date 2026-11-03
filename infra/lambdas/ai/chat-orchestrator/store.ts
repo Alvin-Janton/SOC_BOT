@@ -8,6 +8,18 @@ import { ToolValidation, validToolValidation } from '../../../lib/shared/tool-va
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
 
+/** Derives a write-once display title: eight words and at most 60 Unicode code points, including an ASCII ellipsis. */
+function conversationTitle(message: string): string {
+  const clean = message.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if (!clean) return 'Security investigation';
+  const words = clean.split(' ');
+  const points = Array.from(words.slice(0, 8).join(' '));
+  if (words.length <= 8 && points.length <= 60) return points.join('');
+  let head = points.slice(0, 57).join('');
+  if (points.length > 57 && head.lastIndexOf(' ') > 0) head = head.slice(0, head.lastIndexOf(' '));
+  return `${head.trimEnd()}...`;
+}
+
 const TOOL_REJECTION_CODES = ['INVALID_TOOL', 'INVALID_TOOL_INPUT', 'TOOL_LIMIT_REACHED', 'FINALIZATION_REQUIRED'] as const;
 export type ToolRejectionCode = typeof TOOL_REJECTION_CODES[number];
 export type ToolPreparation = { status: 'approved' }
@@ -320,7 +332,7 @@ export class ConversationStore {
 
     if (!Number.isInteger(leaseExpiresAtSeconds) || leaseExpiresAtSeconds <= Math.floor(Date.now() / 1000)) throw new StoreError('INVALID_INPUT', 'Turn lease expiry is invalid.');
     const id = conversationId ?? this.initialConversationId(turnId);
-    if (conversationId === undefined) await this.createConversation(id);
+    if (conversationId === undefined) await this.createConversation(id, message);
     const before = await this.metadata(id);
     const initialEvents = await this.events(id);
     const completed = this.checkTurn(initialEvents, turnId, message);
@@ -532,19 +544,19 @@ export class ConversationStore {
   /**
    * Conditionally creates only metadata; existing items are authorized by the subsequent read.
    *
-   * Example Input: createConversation('conversation-A'), on the trusted dev analyst's store
+   * Example Input: createConversation('conversation-A', 'Describe waf_events.'), on the trusted user's store
    * Example Output: resolves to undefined; a new item has these selected fields:
    * { PK: 'CONV#conversation-A', SK: 'META', entity_type: 'CONVERSATION', schema_version: 1,
    *   conversation_id: 'conversation-A', owner_id: 'soc-bot-dev-analyst', last_event_sequence: 0,
-   *   lease_version: 0, title: 'Security investigation', GSI1PK: 'USER#soc-bot-dev-analyst', GSI1SK: 'CONV#<created-at>#conversation-A', ... }
+   *   lease_version: 0, title: 'Describe waf_events.', GSI1PK: 'USER#soc-bot-dev-analyst', GSI1SK: 'CONV#<created-at>#conversation-A', ... }
    * An existing item is not overwritten; subsequent metadata() still checks its trusted ownership.
    */
-  private async createConversation(conversationId: string): Promise<void> {
+  private async createConversation(conversationId: string, message: string): Promise<void> {
     const createdAt = new Date().toISOString();
     const item: ConversationMetadata = {
       PK: `CONV#${conversationId}`, SK: 'META', entity_type: 'CONVERSATION', schema_version: 1,
       conversation_id: conversationId, owner_id: this.trustedOwnerId, created_at: createdAt, updated_at: createdAt,
-      last_event_sequence: 0, lease_version: 0, title: 'Security investigation', GSI1PK: `USER#${this.trustedOwnerId}`, GSI1SK: `CONV#${createdAt}#${conversationId}`,
+      last_event_sequence: 0, lease_version: 0, title: conversationTitle(message), GSI1PK: `USER#${this.trustedOwnerId}`, GSI1SK: `CONV#${createdAt}#${conversationId}`,
     };
     try { await this.client.send(new PutCommand({ TableName: this.tableName, Item: item, ConditionExpression: 'attribute_not_exists(PK)' }), { abortSignal: this.requestSignal() }); }
     catch (error) { if (!conditionalFailure(error)) throw error; }

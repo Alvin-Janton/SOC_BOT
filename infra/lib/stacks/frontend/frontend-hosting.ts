@@ -15,7 +15,7 @@ export interface FrontendHostingProps {
   readonly webAclArn?: string;
 }
 
-/** Owns empty private hosting and one-way /api/* routing without a dependency on API deployment. */
+/** Serves two static entry routes and fingerprinted assets alongside one-way /api/* routing. */
 export class FrontendHosting extends Construct {
   public readonly bucket: Bucket;
   public readonly distribution: Distribution;
@@ -31,6 +31,7 @@ export class FrontendHosting extends Construct {
     const oac = new S3OriginAccessControl(this, 'OriginAccessControl', {
       originAccessControlName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND-S3`,
     });
+    const staticOrigin = S3BucketOrigin.withOriginAccessControl(this.bucket, { originAccessControl: oac });
     this.distribution = new Distribution(this, 'Distribution', {
       comment: `SOC-BOT-${environment.toUpperCase()}-FRONTEND`, defaultRootObject: 'index.html',
       // The generated hostname uses CloudFront's fixed default-certificate security policy.
@@ -40,10 +41,10 @@ export class FrontendHosting extends Construct {
       errorResponses: [400, 403, 404, 405, 414, 500, 501, 502, 503, 504]
         .map(httpStatus => ({ httpStatus, ttl: Duration.seconds(0) })),
       defaultBehavior: {
-        origin: S3BucketOrigin.withOriginAccessControl(this.bucket, { originAccessControl: oac }),
+        origin: staticOrigin,
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: AllowedMethods.ALLOW_GET_HEAD, cachedMethods: CachedMethods.CACHE_GET_HEAD,
-        cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+        cachePolicy: CachePolicy.CACHING_DISABLED,
       },
       additionalBehaviors: {
         '/api/*': {
@@ -57,10 +58,16 @@ export class FrontendHosting extends Construct {
           cachePolicy: CachePolicy.CACHING_DISABLED,
           originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         },
+        '/assets/*': {
+          origin: staticOrigin,
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: AllowedMethods.ALLOW_GET_HEAD, cachedMethods: CachedMethods.CACHE_GET_HEAD,
+          cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+        },
       },
     });
     Validations.of(this.bucket.node.defaultChild!).acknowledge({ id: 'AwsSolutions-S1',
-      reason: 'Access-log storage/retention is deferred in this initial private frontend bucket; no application assets or user data are published by this slice.' });
+      reason: 'Access-log storage/retention is deferred pending privacy review. This private bucket contains only published static frontend files, never conversations or user records.' });
     for (const [rule, reason] of [
       ['CFR1', 'No geography-based access assumption is approved; dev uses an explicit IPv4 viewer gate and auth routes independently enforce origin/session checks.'],
       ['CFR3', 'CloudFront access logging is intentionally deferred pending storage/retention and privacy review; API metadata-only logs are enabled.'],

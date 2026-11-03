@@ -14,7 +14,7 @@ All records for a conversation use `PK = CONV#<conversationId>` and schema versi
 | Event variant | `EVT#<UTC-created_at>#<10-digit-event_sequence>#<eventId>` | One immutable user/assistant/tool/outcome event. |
 | `CONTEXT_SUMMARY` | `SUMMARY#<UTC-created_at>#<10-digit-covered-sequence>#<summaryId>` | Bounded summary text and exact `covers_through_sk` checkpoint. |
 
-Only metadata carries `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<updated_at>#<conversationId>`. The sparse index exists for future listing, but this Lambda has neither index-query nor scan permissions and implements no listing endpoint. The current writer creates the default title `Security investigation`; it does not generate incident titles or a separate structured incident-state model.
+Only metadata carries `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<updated_at>#<conversationId>`. The sparse index exists for future listing, but this Lambda has neither index-query nor scan permissions and implements no listing endpoint. The existing conditional metadata Put derives a title from the first message: collapse whitespace/control characters, keep up to eight words and sixty Unicode code points including ASCII `...` when shortened, prefer a word boundary, and fall back to `Security investigation` for no displayable text. This write-once rule matches the frontend's initial title; follow-ups, retries and conditional-create conflicts cannot overwrite it. No backfill, model-generated title or separate structured incident-state model is introduced.
 
 Event variants are:
 

@@ -9,8 +9,10 @@ successes from documentation checks and remaining browser/denial/race validation
 
 CDK now wires `POST https://<CloudFrontHostname>/api/chat` to the existing AI
 orchestrator in dev and demo. This describes source/CDK implementation, not live
-validation. The frontend UI is still unimplemented. Use a same-origin browser
-request after signing in through the existing password or enabled dev Google flow.
+validation. The [frontend workspace](../../frontend/README.md) implements password
+login, session restoration and streaming chat through same-origin browser requests.
+Google UI and history recovery remain deferred; the separately enabled dev Google
+backend flow is unchanged.
 
 The AI-owned unauthenticated `POST /chat` and its dev Regional WAF/IPSet/association
 are retired by an application stack update. The separate Frontend API/CloudFront
@@ -207,7 +209,7 @@ reviewed application workflow in dependency order, then verify:
    existing bounds; after reauthentication as the same user, replay its identical
    original request. This is replay, not automatic live-stream/history retrieval.
 
-History/list routes, Stop changes, UI, evaluator authentication,
+History/list routes, Stop changes, additional authentication UI, evaluator authentication,
 session renewal, migration and public-demo abuse controls are outside this slice.
 
 API mechanics: [Lambda authorizers](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-use-lambda-authorizer.html),
