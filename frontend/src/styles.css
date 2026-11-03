@@ -45,6 +45,13 @@ button svg { flex-shrink: 0; }
 .text-button { border: 0; background: none; color: #b0d5c5; padding: .6rem 0 0; text-decoration: underline; text-underline-offset: .2rem; }
 .form-error, .notice { font-size: .8125rem; line-height: 1.6; border-left: 2px solid #9ba998; padding: .7rem .9rem; background: #2b312b; color: #d6dfd1; border-radius: .2rem; }
 .notice { margin: 0 0 1.4rem; }
+.notice-warning { border-color: #c6ad85; color: #e5dccb; background: #333027; }
+.auth-links { display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: .5rem 1rem; margin-top: 1.3rem; font-size: .8125rem; }
+.form-error:empty { display: none; }
+.login-intro h1:focus { outline: none; }
+.account-signout { margin-top: 2rem; border-top: 1px solid #3d443f; padding-top: 1rem; }
+.account-signout .secondary-button { width: 100%; justify-content: center; }
+.login-main > .fine { margin: 0 0 1.25rem; }
 .form-error p { margin: 0; }
 .login-security { display: flex; align-items: center; justify-content: center; gap: .5rem; color: #9da79d; font-size: .75rem; margin: 1.7rem 0 0; }
 .login-footer { display: flex; justify-content: space-between; padding: 1.6rem 2.5rem; gap: 1rem; border-top: 1px solid #303631; color: #8e988f; font-size: .6875rem; }
