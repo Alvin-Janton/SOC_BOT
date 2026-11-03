@@ -1,5 +1,7 @@
-type ApiPath = '/api/auth/me' | '/api/auth/login' | '/api/auth/logout' | '/api/chat';
-type Context = 'session' | 'login' | 'logout' | 'chat';
+type ApiPath = '/api/auth/me' | '/api/auth/login' | '/api/auth/logout' | '/api/chat'
+  | '/api/auth/signup' | '/api/auth/confirm-signup' | '/api/auth/resend-confirmation'
+  | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password';
+type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change';
 
 /** Carries bounded public failure metadata; raw bodies and provider diagnostics are never displayed. */
 export class ApiError extends Error {
@@ -54,6 +56,16 @@ const AUTH_MESSAGES: Record<string, string> = {
   AUTHENTICATION_CHALLENGE: 'This account needs an additional sign-in step that this interface does not support.',
   THROTTLED: 'Too many requests. Wait a moment before trying again.',
   INVALID_INPUT: 'The request was not accepted. Check the entered values.',
+  INVALID_SIGNUP_PASSWORD: 'Use a password of 15 to 256 characters without whitespace.',
+  CONFIRMATION_FAILED: 'The code could not be confirmed. Check it or request another code. If already confirmed, sign in.',
+  REGISTRATION_UNAVAILABLE: 'Account confirmation is temporarily unavailable. Wait, then request another code if needed.',
+  REGISTRATION_THROTTLED: 'Confirmation requests are temporarily limited. Wait, then request another code if needed.',
+  INVALID_NEW_PASSWORD: 'Use a new password of 15 to 256 characters without whitespace.',
+  PASSWORD_RESET_FAILED: 'The password could not be reset. Check the code or request another reset code.',
+  PASSWORD_CHANGE_FAILED: 'The current password could not be verified.',
+  PASSWORD_SERVICE_UNAVAILABLE: 'Password services are temporarily unavailable. Try again later.',
+  PASSWORD_UPDATE_UNCONFIRMED: 'Your password update could not be confirmed. Verify sign-in access, request a fresh recovery code, or contact the administrator instead of repeating this request.',
+  PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED: 'Your password was changed, but signing out existing sessions could not be confirmed. Contact the administrator.',
 };
 
 /** Interprets known authored/gateway errors without mistaking HTML, outages or 403 for session expiry. */
@@ -66,8 +78,14 @@ export async function responseError(response: Response, context: Context): Promi
   }
   const error = record(body) && record(body.error) ? body.error : undefined;
   const code = typeof error?.code === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(error.code) ? error.code : undefined;
+  if (['registration', 'recovery', 'password-reset', 'password-change'].includes(context)
+    && (!record(body) || Object.keys(body).length !== 2 || !error || Object.keys(error).length !== 2
+      || !code || !/^[A-Z_]+$/.test(code) || typeof error.message !== 'string' || !error.message || error.message.length > 2048
+      || typeof body.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.requestId))) {
+    return new ApiError('The operation response could not be verified.', 'INVALID_RESPONSE', response.status);
+  }
   const gateway = record(body) && Object.keys(body).length === 1 && body.message === 'Request could not be authorized or processed.';
-  const authRequired = response.status === 401 && context !== 'login'
+  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change'].includes(context)
     && (code === 'AUTHENTICATION_REQUIRED' || (context === 'chat' && (code === 'UNAUTHORIZED' || gateway)));
   const id = record(body) ? body.correlationId ?? body.requestId : undefined;
   const correlation = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;

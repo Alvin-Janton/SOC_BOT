@@ -6,6 +6,7 @@ import { useChat, Turn } from '../chat/useChat';
 import { ActivityList } from '../components/ActivityList';
 import { Answer } from '../components/Answer';
 import { Brand } from '../components/Brand';
+import { Notice } from '../components/AuthLayout';
 import { Composer } from '../components/Composer';
 import { PreviewTranscript } from './PreviewTranscript';
 
@@ -33,10 +34,11 @@ function TurnView({ turn, last, retry }: { turn: Turn; last: boolean; retry(): v
   </div>;
 }
 
-interface ChatProps { session?: Session; expired(message: string): void; signOut(): Promise<void>; preview?: boolean }
+interface ChatProps { session?: Session; expired(message: string): void; signOut(): Promise<void>; preview?: boolean;
+  account?(): void; navigationBusy?(busy: boolean): void; visible?: boolean; notice?: Notice }
 
 /** Renders the account-scoped transcript and composer; local preview never acquires an identity or dispatches work. */
-export function ChatPage({ session, expired, signOut, preview = false }: ChatProps) {
+export function ChatPage({ session, expired, signOut, preview = false, account, navigationBusy, visible = true, notice }: ChatProps) {
   const chat = useChat(session?.userId, expired, import.meta.env.DEV);
   const [loggingOut, setLoggingOut] = useState(false);
   const leaving = useRef(false);
@@ -45,8 +47,12 @@ export function ChatPage({ session, expired, signOut, preview = false }: ChatPro
   const scroll = useRef<HTMLDivElement>(null);
   const form = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (following && scroll.current) scroll.current.scrollTo({ top: scroll.current.scrollHeight, behavior: 'auto' });
-  }, [chat.turns, following]);
+    if (visible && following && scroll.current) scroll.current.scrollTo({ top: scroll.current.scrollHeight, behavior: 'auto' });
+  }, [chat.turns, following, visible]);
+  useEffect(() => {
+    navigationBusy?.(chat.busy || loggingOut);
+    return () => navigationBusy?.(false);
+  }, [chat.busy, loggingOut, navigationBusy]);
 
   async function leave() {
     if (chat.busy || leaving.current || preview) return;
@@ -62,10 +68,12 @@ export function ChatPage({ session, expired, signOut, preview = false }: ChatPro
       <div className="header-actions"><button className="header-button" disabled={chat.busy || loggingOut || preview} title="New conversation — clears only this local view" onClick={() => { if (!leaving.current) { chat.reset(); setFollowing(true); } }}><Plus size={17} aria-hidden="true" /><span className="button-label">New conversation</span></button>
         <details className="account-menu"><summary aria-label="Account menu" title={preview ? 'Disconnected preview' : 'Account menu'}><span className="account-dot" /><span className="account-label">{preview ? 'Preview' : 'Account'}</span><ChevronDown size={13} aria-hidden="true" /></summary>
           <div className="account-popover"><p>{session ? 'Signed in' : 'Disconnected preview'}</p>{session && <p className="fine">Session expires {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(session.expiresAt))}</p>}
+            <button className="account-logout" disabled={chat.busy || loggingOut || preview} onClick={() => { if (!leaving.current) account?.(); }}>Account settings</button>
             <button className="account-logout" disabled={chat.busy || loggingOut || preview} onClick={() => { void leave(); }}><LogOut size={15} aria-hidden="true" />{loggingOut ? 'Signing out…' : 'Sign out'}</button></div>
         </details>
       </div></header>
     {import.meta.env.DEV && preview && <div className="preview-bar">Development-only layout preview · no session, API connection or active send.</div>}
+    {notice && <div className="page-notice" role={notice.warning ? 'alert' : 'status'}>{notice.message}</div>}
     {logoutError && <div className="page-notice" role="alert">{logoutError} Your local view was retained because logout was not confirmed.</div>}
     <div className="chat-body"><div className="chat-scroll" ref={scroll} onScroll={() => { const element = scroll.current; if (element) setFollowing(element.scrollHeight - element.scrollTop - element.clientHeight < 96); }}>
       {import.meta.env.DEV && preview ? <PreviewTranscript /> : chat.turns.length ? <main className="transcript-column" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions">

@@ -27,14 +27,20 @@ export function useSession() {
   }, []);
   useEffect(() => { void restore(); return () => { generation.current++; checking.current?.abort(); }; }, [restore]);
 
+  const invalidateRestore = useCallback(() => { generation.current++; checking.current?.abort(); }, []);
   const signIn = useCallback(async (email: string, password: string) => {
     const session = await login(email, password);
+    invalidateRestore();
     setState({ status: 'signedIn', session });
-  }, []);
+  }, [invalidateRestore]);
   const signOut = useCallback(async () => {
     await logout();
+    invalidateRestore();
     setState({ status: 'signedOut', notice: 'You have been signed out.' });
-  }, []);
-  const expired = useCallback((message: string) => { setState({ status: 'signedOut', notice: message }); }, []);
+  }, [invalidateRestore]);
+  const expired = useCallback((message: string) => {
+    invalidateRestore();
+    setState({ status: 'signedOut', notice: message });
+  }, [invalidateRestore]);
   return { state, restore, signIn, signOut, expired };
 }

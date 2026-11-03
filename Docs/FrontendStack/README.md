@@ -22,7 +22,9 @@ resources. Account/Region values are CDK tokens, not committed account IDs.
 Dev stages an empty Google credential secret and Cognito domain; explicit activation
 adds a dedicated client/provider, pre-creation guard, two login GET routes and
 explicit linking POST/GET routes under `/api/auth/link/google/`.
-Demo Google stays disabled. The UI has no Google, registration or recovery controls.
+Demo Google stays disabled. The UI supports email/password registration,
+confirmation/resend, recovery/reset and protected account/password settings;
+Google controls remain absent. See [page/API and uncertainty handling](../../frontend/README.md#emailpassword-account-pages).
 No identity pool, live user, merging/unlinking, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
@@ -101,7 +103,8 @@ no cookies. The private bucket blocks public access, uses SSE-S3, enforces TLS a
 has no website endpoint. OAC signs origin access; the bucket policy limits reads
 to this distribution. The default behavior disables caching; `/assets/*` reuses
 the same S3/OAC origin with optimized caching. The existing deployment workflows
-publish identical HTML at `index.html` and extensionless `login` with explicit
+publish identical HTML at `index.html` and extensionless `login`, `signup`,
+`confirm-signup`, `forgot-password`, `reset-password` and `account` with explicit
 `text/html` and revalidation headers, so `/` and `/login` refresh directly.
 Hashed assets are immutable, uploaded before entries and retained across releases.
 One `/*` invalidation is submitted after upload without a polling waiter. See the
@@ -435,8 +438,8 @@ shared logging changes separately first: `--exclusively` intentionally excludes
 dependencies from deployment. Frontend imports the AI orchestrator; deployment is Data -> AI -> Frontend,
 with no reverse AI -> Frontend reference.
 
-After stack deployment succeeds, the same workflow publishes the password-login/
-chat build to the validated frontend bucket and submits a CloudFront invalidation.
+After stack deployment succeeds, the same workflow publishes the email/password
+account/chat build to the validated frontend bucket and submits a CloudFront invalidation.
 No legacy conversations are migrated. Origin protection remains defined in CDK,
 independent of published assets. After an authorized deployment, validate `/`,
 `/login`, `/api/health` and the authenticated flows using the

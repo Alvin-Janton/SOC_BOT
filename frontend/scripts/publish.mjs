@@ -3,6 +3,9 @@ import { lstatSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Exact frontend entries; keep aligned with PAGE_PATHS in src/routing.ts. There is no catch-all rewrite.
+const HTML_ENTRIES = ['index.html', 'login', 'signup', 'confirm-signup', 'forgot-password', 'reset-password', 'account'];
+
 /** Invokes the runner's AWS CLI with discrete arguments; no shell, discovery API, or credential output. */
 function aws(...args) {
   return execFileSync('aws', [...args, '--region', 'us-east-1', '--no-cli-pager'], {
@@ -60,9 +63,9 @@ function publish() {
   }
   const revalidate = 'no-cache,max-age=0,must-revalidate';
   aws('s3', 'sync', assets, `s3://${bucket}/assets/`, '--cache-control', 'public,max-age=31536000,immutable', '--no-progress', '--only-show-errors');
-  aws('s3', 'sync', dist, `s3://${bucket}/`, '--exclude', 'assets/*', '--exclude', 'index.html', '--exclude', 'login',
+  aws('s3', 'sync', dist, `s3://${bucket}/`, '--exclude', 'assets/*', ...HTML_ENTRIES.flatMap(entry => ['--exclude', entry]),
     '--cache-control', revalidate, '--no-progress', '--only-show-errors');
-  for (const entry of ['index.html', 'login']) {
+  for (const entry of HTML_ENTRIES) {
     aws('s3', 'cp', index, `s3://${bucket}/${entry}`, '--content-type', 'text/html', '--cache-control', revalidate, '--no-progress', '--only-show-errors');
   }
   // The literal wildcard is one argument, never expanded by a shell. Submission requires no polling permissions.
