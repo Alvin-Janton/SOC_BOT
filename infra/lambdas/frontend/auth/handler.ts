@@ -12,7 +12,6 @@ import { GoogleLoginError, oauthCookie } from './google/oauth-transactions';
 import { createGoogleLinking } from './google/linking';
 import { GoogleLinkError, googleLinkCookie } from './google/link-state';
 import { googleBrowserResult, googleFailureResult } from './google/browser-result';
-import { createGoogleLoginDiagnostics, GoogleLoginDiagnostics, googleLoginFailureCategory } from './google/login-diagnostics';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
@@ -27,7 +26,6 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     ? context.awsRequestId : randomUUID();
 
   let request: AuthHttpRequest | undefined;
-  let googleDiagnostics: GoogleLoginDiagnostics | undefined;
   let outcome = 'SESSION_UNAVAILABLE';
   const googleRoute = raw !== null && typeof raw === 'object' && 'resource' in raw && typeof raw.resource === 'string'
     && ['/api/auth/google/start', '/api/auth/google/callback', '/api/auth/link/google/start', '/api/auth/link/google/callback'].includes(raw.resource);
@@ -39,7 +37,6 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     const budget = createAuthRequestBudget(context.getRemainingTimeInMillis());
     const config = authHttpConfiguration();
     request = parseAuthHttpRequest(raw, config);
-    if (config.stage === 'dev' && request.route === 'google-callback') googleDiagnostics = createGoogleLoginDiagnostics(requestId, startedAt);
 
     switch (request.route) {
       case 'google-link-start': {
@@ -59,7 +56,7 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
         return response;
       }
       case 'google-callback': {
-        const response = await createGoogleLogin(config, budget, googleDiagnostics).callback(request.query, request.cookieHeader);
+        const response = await createGoogleLogin(config, budget).callback(request.query, request.cookieHeader);
         outcome = 'GOOGLE_LOGIN_SUCCEEDED';
         return response;
       }
@@ -115,7 +112,6 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
   }
 
   catch (error) {
-    googleDiagnostics?.failure(googleLoginFailureCategory(error));
     const safe = error instanceof BffAuthError ? error : linkingRoute ? new GoogleLinkError('google_link_unavailable')
       : googleRoute ? new GoogleLoginError() : new BffAuthError('session_unavailable');
     outcome = safe.code.toUpperCase();
@@ -141,6 +137,5 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     // Never log bodies, identities, headers, cookies, hashes, provider failures or token values.
     console.info(JSON.stringify({ event: 'frontend_auth', requestId, route: request?.route ?? 'unvalidated', outcome,
       durationMs: Date.now() - startedAt }));
-    googleDiagnostics?.emit(outcome === 'GOOGLE_LOGIN_SUCCEEDED' || outcome === 'SIGN_OUT_REQUIRED' ? outcome : 'GOOGLE_LOGIN_FAILED');
   }
 }

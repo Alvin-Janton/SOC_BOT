@@ -8,7 +8,6 @@ import { createOAuthTransactions, GoogleLoginError, oauthCookie, readOAuthCookie
 import { createAuthSessionStore } from '../sessions';
 import { createUserAuthStateStore } from '../user-state';
 import { googleBrowserResult } from './browser-result';
-import { GoogleLoginObserver, googleLoginFailureCategory } from './login-diagnostics';
 
 /** Emits redirects with independent cookies and no cache/referrer disclosure of the callback URL. */
 function redirect(statusCode: 302 | 303, location: string, cookies: string[]): AuthHttpResponse {
@@ -17,7 +16,7 @@ function redirect(statusCode: 302 | 303, location: string, cookies: string[]): A
 }
 
 /** Builds an isolated Google browser flow that reuses the existing subject/version session contract. */
-export function createGoogleLogin(config: AuthHttpConfiguration, budget: AuthRequestBudget, diagnostics?: GoogleLoginObserver) {
+export function createGoogleLogin(config: AuthHttpConfiguration, budget: AuthRequestBudget) {
   const google = config.google;
   if (!google) throw new GoogleLoginError();
   const transactions = createOAuthTransactions(config.auth, google, budget);
@@ -27,18 +26,11 @@ export function createGoogleLogin(config: AuthHttpConfiguration, budget: AuthReq
   async function requireSignedOut(cookieHeader?: string, owned = false): Promise<void> {
 
     try {
-      if (cookieHeader?.split(';').some(entry => entry.trim() === AUTH_SESSION_COOKIE_NAME)) {
-        diagnostics?.failure('validation_rejected', 'session_cookie_invalid');
-        throw new GoogleLoginError(owned);
-      }
-      if (await bff.resolveSession(cookieHeader)) {
-        diagnostics?.failure('validation_rejected', 'session_already_active');
-        throw new GoogleLoginError(owned, true);
-      }
+      if (cookieHeader?.split(';').some(entry => entry.trim() === AUTH_SESSION_COOKIE_NAME)) throw new GoogleLoginError(owned);
+      if (await bff.resolveSession(cookieHeader)) throw new GoogleLoginError(owned, true);
     }
 
     catch (error) {
-      diagnostics?.failure(googleLoginFailureCategory(error));
       if (error instanceof GoogleLoginError) throw error;
       throw new GoogleLoginError(owned);
     }
@@ -61,54 +53,27 @@ export function createGoogleLogin(config: AuthHttpConfiguration, budget: AuthReq
     /** Consumes one owned attempt, verifies Cognito, and persists a session before issuing its cookie. */
     async callback(query: GoogleCallbackQuery, cookieHeader?: string): Promise<AuthHttpResponse> {
 
-      diagnostics?.phase('transaction_consume');
       const transaction = await transactions.consume(query.state, readOAuthCookie(cookieHeader));
-      diagnostics?.completed('transaction_consume');
 
       try {
-        diagnostics?.phase('signed_out_check');
         await requireSignedOut(cookieHeader, true);
-        diagnostics?.completed('signed_out_check');
-        diagnostics?.phase('callback_authorization');
-        if (query.error || !query.code) {
-          diagnostics?.failure('validation_rejected', query.error === 'access_denied' ? 'provider_cancelled' : 'callback_authorization_rejected');
-          throw new GoogleLoginError(true, false, query.error === 'access_denied');
-        }
-        diagnostics?.completed('callback_authorization');
-        const identity = await verifyGoogleLogin(query.code, transaction, config.auth, google, budget, diagnostics);
-        diagnostics?.phase('user_state_read');
+        if (query.error || !query.code) throw new GoogleLoginError(true, false, query.error === 'access_denied');
+        const identity = await verifyGoogleLogin(query.code, transaction, config.auth, google, budget);
         const users = createUserAuthStateStore(config.auth, undefined, budget);
         const existing = await users.readForProvisioning(identity.sub);
-        diagnostics?.completed('user_state_read');
 
         if (!existing) {
-          diagnostics?.phase('user_state_initialize');
-          try {
-            await users.initialize(identity.sub);
-            diagnostics?.completed('user_state_initialize');
-          }
+          try { await users.initialize(identity.sub); }
           catch (error) {
             // Only a confirmed create-only race permits one strong reread; no reset or version adoption.
-            if (!(error instanceof AuthStateInitializationConflict)) throw error;
-            diagnostics?.phase('user_state_reread');
-            if (!(await users.readForProvisioning(identity.sub))) throw error;
-            diagnostics?.completed('user_state_reread');
+            if (!(error instanceof AuthStateInitializationConflict) || !(await users.readForProvisioning(identity.sub))) throw error;
           }
         }
 
-        diagnostics?.phase('user_auth_snapshot');
         const snapshot = await users.readForAuthentication(identity.sub);
-        diagnostics?.completed('user_auth_snapshot');
-        diagnostics?.phase('session_create');
         const session = await createAuthSessionStore(config.auth, undefined, undefined, budget).create(identity, snapshot);
-        diagnostics?.completed('session_create');
-        diagnostics?.phase('response_construction');
-        const response = googleBrowserResult('login_complete', [createSessionCookie(session.token, session.expiresAt, session.createdAt, config.auth.sameSite), oauthCookie()]);
-        diagnostics?.phase('response_ready');
-        diagnostics?.completed('response_ready');
-        return response;
+        return googleBrowserResult('login_complete', [createSessionCookie(session.token, session.expiresAt, session.createdAt, config.auth.sameSite), oauthCookie()]);
       } catch (error) {
-        diagnostics?.failure(googleLoginFailureCategory(error));
         if (error instanceof GoogleLoginError) throw error;
         throw new GoogleLoginError(true);
       }
