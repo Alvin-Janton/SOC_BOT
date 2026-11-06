@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export const PAGE_PATHS = ['/', '/login', '/signup', '/confirm-signup', '/forgot-password', '/reset-password', '/account'] as const;
+export const PAGE_PATHS = ['/', '/login', '/signup', '/confirm-signup', '/forgot-password', '/reset-password', '/account', '/auth/result'] as const;
 export type PagePath = typeof PAGE_PATHS[number];
 export type Navigate = (next: PagePath, replace?: boolean) => boolean;
+
+/** Result pages retain only their clean path, never untrusted callback-result query data in a history guard. */
+function currentPath(): string {
+  return window.location.pathname === '/auth/result' ? '/auth/result' : window.location.pathname + window.location.search + window.location.hash;
+}
 
 /** Tracks exact page routes without storing form data; active work blocks route changes, including back/forward. */
 export function useRoute() {
   const [path, setPath] = useState(window.location.pathname);
   const locks = useRef(new Set<'chat' | 'auth'>());
-  const current = useRef(window.location.pathname + window.location.search + window.location.hash);
+  const current = useRef(currentPath());
   const lockNavigation = useCallback((owner: 'chat' | 'auth', busy: boolean) => {
     if (busy) locks.current.add(owner); else locks.current.delete(owner);
   }, []);
@@ -18,7 +23,7 @@ export function useRoute() {
         window.history.pushState(null, '', current.current);
         return;
       }
-      current.current = window.location.pathname + window.location.search + window.location.hash;
+      current.current = currentPath();
       setPath(window.location.pathname);
     };
     window.addEventListener('popstate', update);

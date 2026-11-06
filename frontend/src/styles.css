@@ -50,6 +50,15 @@ button svg { flex-shrink: 0; }
 .form-error:empty { display: none; }
 .login-intro h1:focus { outline: none; }
 .account-signout { margin-top: 2rem; border-top: 1px solid #3d443f; padding-top: 1rem; }
+.google-button { width: 100%; min-height: 3.05rem; display: flex; align-items: center; gap: .75rem; padding: .2rem .6rem; border: 1px solid #8e918f; background: #131314; color: #e3e3e3; font-size: .875rem; font-weight: 500; }
+.google-button img { flex-shrink: 0; border-radius: .25rem; }
+.google-button span { flex: 1; text-align: center; padding-right: 2.5rem; }
+.google-button:hover:not(:disabled) { background: #252627; }
+.auth-separator { display: flex; align-items: center; gap: .8rem; color: #9da79d; font-size: .75rem; margin: 1.25rem 0; }
+.auth-separator::before, .auth-separator::after { content: ''; height: 1px; flex: 1; background: #3d443f; }
+.google-link-section { border-top: 1px solid #3d443f; margin-top: 2rem; padding-top: 1.5rem; }
+.google-link-section h2 { font-size: 1.125rem; margin: 0 0 .8rem; }
+.google-link-section > p, .auth-result > p { font-size: .8125rem; line-height: 1.8; margin: 0 0 1rem; }
 .account-signout .secondary-button { width: 100%; justify-content: center; }
 .login-main > .fine { margin: 0 0 1.25rem; }
 .form-error p { margin: 0; }

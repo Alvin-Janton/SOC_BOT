@@ -1,8 +1,9 @@
 # Dev Google login through Cognito
 
 This is source/CDK wiring for an operator-activated dev flow, not a report of live
-browser verification. Demo Google, frontend UI and authenticated
-chat ownership remain separate work. The existing password client, its verifier
+browser verification. The [frontend UI](../../frontend/README.md#google-login-linking-and-browser-returns)
+now exposes Google controls for dev, and authenticated chat ownership is wired.
+Demo Google stays disabled. The existing password client, its verifier
 audience, pool sign-in settings, session keys and origin/WAF protections are preserved.
 See the [frontend overview](README.md) and [auth runtime guide](../../infra/lambdas/frontend/auth/README.md).
 
@@ -72,13 +73,19 @@ Only enabled dev exposes `GET /api/auth/google/start` and
 `GET /api/auth/google/callback`. Both require the existing exact-route origin
 authorizer and CloudFront secret, WAF gates and TLS. No direct API bypass is added.
 All Google responses use no-store and `Referrer-Policy: no-referrer`.
-Google flow failures use fixed `GOOGLE_LOGIN_FAILED` guidance (401), and a valid
-existing session uses `SIGN_OUT_REQUIRED` (409). HTTP validation/origin/configuration
-errors retain their authored 400/403/503 responses; no provider diagnostic is exposed.
+Handler-owned Google browser GET failures now use 303 to the fixed same-origin
+`/auth/result?outcome=<code>`, with an empty body, no-store/no-referrer/nosniff and
+independent cookies. Authored generic `GOOGLE_LOGIN_FAILED` maps to `login_failed`;
+`SIGN_OUT_REQUIRED` maps to `sign_out_required`. Only a consumed, bound attempt
+with provider `access_denied` maps to `login_cancelled`; invalid/unowned callbacks
+remain failed. Configuration/availability/throttling categories map to
+`unavailable`. No provider diagnostic or callback value is exposed. Gateway/WAF
+denials before the handler retain their gateway responses. JSON auth APIs,
+including linking POST start, keep their status/code contracts.
 
 Start accepts no body or query. Same-origin/direct top-level navigation is allowed;
 explicit hostile Origin/cross-site initiation is rejected. A valid application
-session returns safe 409/sign-out-first guidance. Malformed/ambiguous session
+session returns sign-out-first result guidance without clearing that session. Malformed/ambiguous session
 cookies or backend failures do not permit account switching. Well-formed expired
 or revoked sessions may start again.
 
@@ -140,7 +147,11 @@ The existing branded enabled/version snapshot and retry-idempotent conditional
 session transaction are reused without adopting a fresh version after conflict.
 Only confirmed persistence returns two independent Set-Cookie headers through
 REST `multiValueHeaders`: the existing fixed twelve-hour application cookie and
-OAuth-cookie clearing. Success is HTTP 303 to `/api/auth/me`. Tokens remain
+OAuth-cookie clearing. Success is HTTP 303 to
+`/auth/result?outcome=login_complete`. The frontend clears the query hint from the
+address and opens chat only after a fresh `/api/auth/me` verifies a session.
+A 401 means sign-in was not confirmed; a service error remains unknown with an
+explicit session-check retry. Tokens remain
 request-local; no refresh tokens or sliding renewal are persisted.
 
 An intervening login visible in the callback's cookies is refused, preserving that
@@ -148,6 +159,16 @@ session. Cookie checks cannot atomically reserve the entire browser against a
 different tab's later concurrent response. A lost response can leave an inaccessible
 session until normal expiry; it is not grounds to fabricate successful issuance.
 Logout remains application-session logout, not Google/Cognito-browser global logout.
+
+The UI uses explicit top-level navigation to `/api/auth/google/start`, not fetch
+across redirects or browser OAuth exchange. It clears the password and shares the
+existing action/navigation locks. Controls have no frontend feature flag; the
+backend activation checks remain authoritative and demo is not Google-ready.
+The public result code is a forgeable presentation hint, not session/link proof
+or permission to mutate anything. Refresh of clean `/auth/result` is neutral.
+See the [full outcome mapping and operator checklist](../../frontend/README.md#google-login-linking-and-browser-returns).
+No new provider callback registration is required; retain the Cognito federation
+callback and existing direct-link API callback, never add `/auth/result` as one.
 
 ## Pre-creation collision check and its justification
 

@@ -43,7 +43,7 @@ export const GOOGLE_LINK_COOKIE_NAME = '__Host-soc_bot_google_link';
 /** Carries only authored errors and permission to clear this validated flow's cookies. */
 export class GoogleLinkError extends BffAuthError {
   public constructor(code: BffAuthErrorCode = 'google_link_failed', public readonly clearLinkCookie = false,
-    public readonly clearApplicationCookie = false) { super(code); }
+    public readonly clearApplicationCookie = false, public readonly cancelled = false) { super(code); }
 }
 
 /** Returns epoch seconds for the bounded proof window and DynamoDB conditions. */

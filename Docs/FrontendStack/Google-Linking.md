@@ -53,13 +53,18 @@ Cognito provider refresh after credential rotation.
 | Route | Requirements | Success |
 | --- | --- | --- |
 | POST `/api/auth/link/google/start` | Exact configured browser Origin, JSON body with only `currentPassword` (unchanged 1–256-character password bounds), valid opaque session, no query/path parameters. | 200 with only `authorizationUrl` and ISO UTC `expiresAt`, plus the linking cookie. |
-| GET `/api/auth/link/google/callback` | Exact trusted API/stage/account/origin-authorizer context, original session cookie, matching linking cookie/state, one code or provider error, live server transaction. | Fixed 200 success/no-op body, independent cookie headers; no external redirect or resources. |
+| GET `/api/auth/link/google/callback` | Exact trusted API/stage/account/origin-authorizer context, original session cookie, matching linking cookie/state, one code or provider error, live server transaction. | Fixed same-origin 303 `/auth/result?outcome=link_complete` or `link_already_linked`, independent cookie headers, empty body. |
 
-Start returns JSON so a later same-origin UI can POST the password, accept its
+Start returns JSON so the protected Account UI can POST only the fresh password, accept its
 HttpOnly linking cookie, then explicitly navigate to authorizationUrl. It does
 not redirect a password-bearing POST across origins. Keep the same browser/private
 cookie jar for both hops; pasting the URL into a different browser cannot complete
-linking. No UI or new manual-test script is supplied here.
+linking. The UI validates the exact response shape, five-minute future expiry
+and HTTPS `accounts.google.com/o/oauth2/v2/auth` destination with no credentials,
+nondefault port or fragment before immediate navigation. It preserves the
+server-generated parameters and clears the password without storing/logging the
+URL. Linking shares password-change/logout locks; it never auto-retries.
+Current-password `GOOGLE_LINK_FAILED` is not session expiry.
 
 Authorization uses Google's fixed endpoint with only openid/email/profile,
 authorization code, state, nonce and S256 PKCE. `prompt=select_account` permits
@@ -147,8 +152,11 @@ boolean coercion is used. Ordinary Google login's strict one-Google-identity
 validation is unchanged; existing link/recovery records are not repaired by this
 parser compatibility fix.
 
-- Exactly the same identity already linked: fixed 200 `{"message":"This Google account is already linked."}`; no link, USER version or session mutation.
-- Different/multiple Google identities, standalone provider profile or another recorded owner: 409, without deletion, reassignment or replacement.
+- Exactly the same identity already linked: 303 `link_already_linked`; clear only
+  the owned linking cookie, with no link, USER version or session mutation. The
+  result page checks `/me` before offering Account settings; no forced logout.
+- Different/multiple Google identities, standalone provider profile or another
+  recorded owner: 303 `link_conflict`, without deletion, reassignment or replacement.
 - New eligible identity: atomically replace the owned PENDING guard with a
   nonexpiring DISPATCHED fence and reserve that Google subject for this destination,
   while checking the original session/USER again. DISPATCHED records dispatch
@@ -165,7 +173,7 @@ next-version update, preserving disabled/identity fields. The identical DynamoDB
 transaction/token survives SDK retries and atomically marks the guard COMPLETED,
 owner LINKED and USER version incremented. It never blindly ADDs or infers this
 operation's completion from someone else's higher version. Only confirmed
-completion returns `{"message":"Google sign-in linked. Sign in again."}` and
+completion returns 303 `link_complete` and
 clears application/linking cookies as independent Set-Cookie headers. No new
 application session is issued. Completed-guard cleanup follows confirmation;
 cleanup failure retains the successful response plus a fixed CLEANUP/PENDING log,
@@ -175,10 +183,29 @@ requiring later owner-matched cleanup instead of concealing the completed link.
 
 | Outcome | Response/cookies/recovery |
 | --- | --- |
-| Invalid input, session/proof failure, conflict before dispatch | Authored 400/401/403/409; known throttling/backend errors use 429/503. No usable application cookie clearing or version increment. Only a validated owned linking cookie may be cleared. |
-| Dispatch preparation/API result/association unconfirmed | 503 GOOGLE_LINK_OUTCOME_UNCONFIRMED. Clear only the owned linking cookie; preserve the application cookie. Retain any committed nonexpiring fence/reservation for administrator review before retrying. No negative read proves noncommit. |
-| Association confirmed, application revocation unconfirmed | 503 GOOGLE_LINKED_SESSION_REVOCATION_UNCONFIRMED: “Google sign-in was linked, but signing out existing sessions could not be confirmed. Contact the administrator.” Clear current application/linking cookies; other sessions may remain usable. Retain reconciliation records. |
-| Link and revocation confirmed | 200, clear application/linking cookies and require login again. Version checks reject old sessions on later protected requests, not work already authorized. |
+| Invalid input, session/proof failure, conflict before dispatch | Browser GET: 303 `link_failed` or `link_conflict`; availability/throttling: `unavailable`. Only a bound, consumed attempt with the original session validated and provider `access_denied` becomes `link_cancelled`. No usable application cookie clearing or version increment. Only a validated owned linking cookie may be cleared. |
+| Dispatch preparation/API result/association unconfirmed | Browser GET: 303 `link_unconfirmed` (authored GOOGLE_LINK_OUTCOME_UNCONFIRMED). Clear only the owned linking cookie; preserve the application cookie. Retain any committed nonexpiring fence/reservation for administrator review before retrying. No negative read proves noncommit. |
+| Association confirmed, application revocation unconfirmed | Browser GET: 303 `link_revocation_unconfirmed` (authored GOOGLE_LINKED_SESSION_REVOCATION_UNCONFIRMED). Clear current application/linking cookies; other sessions may remain usable. The result warns that revocation is unconfirmed and requires administrator review. Retain reconciliation records. |
+| Link and revocation confirmed | Browser GET: 303 `link_complete`, clear application/linking cookies and require login again. Version checks reject old sessions on later protected requests, not work already authorized. |
+
+Only navigation presentation changed. Linking POST start retains 200 JSON and its
+authored 400/401/403/409/429/503 errors; gateway denials before the handler remain
+gateway responses. Browser result redirects are empty-body, no-store/no-referrer/
+nosniff, with independently separated cookies and no copied provider data. Existing
+clearLinkCookie/clearApplicationCookie flags still govern cleanup; invalid/unowned
+callbacks cannot clear another session or be promoted to a cancellation.
+
+The [frontend result page](../../frontend/README.md#google-login-linking-and-browser-returns)
+treats codes as forgeable hints, immediately removes the query and independently
+checks `/me`. It neither verifies a durable provider link nor exposes a linked
+badge; session outages do not hide partial-success warnings. It never reruns a
+link, revokes sessions or repairs bookkeeping. A new link and matching no-op have
+different session effects. A clean refresh is neutral, and full-page navigation
+discards memory-only drafts/transcripts without deleting server conversations.
+No new Google redirect URI is needed: retain the existing Cognito federation
+and direct-link API callbacks; `/auth/result` is static, never a provider callback.
+Google controls are visible for this dev-only rollout without a frontend toggle;
+the backend's existing activation remains authoritative and demo remains disabled.
 
 After the durable dispatch fence, failures are conservatively retained for manual
 review, including cases where dispatch itself cannot be confirmed. Never rerun

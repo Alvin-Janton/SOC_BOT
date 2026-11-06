@@ -1,7 +1,7 @@
 type ApiPath = '/api/auth/me' | '/api/auth/login' | '/api/auth/logout' | '/api/chat'
   | '/api/auth/signup' | '/api/auth/confirm-signup' | '/api/auth/resend-confirmation'
-  | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password';
-type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change';
+  | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password' | '/api/auth/link/google/start';
+type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change' | 'google-link';
 
 /** Carries bounded public failure metadata; raw bodies and provider diagnostics are never displayed. */
 export class ApiError extends Error {
@@ -66,6 +66,11 @@ const AUTH_MESSAGES: Record<string, string> = {
   PASSWORD_SERVICE_UNAVAILABLE: 'Password services are temporarily unavailable. Try again later.',
   PASSWORD_UPDATE_UNCONFIRMED: 'Your password update could not be confirmed. Verify sign-in access, request a fresh recovery code, or contact the administrator instead of repeating this request.',
   PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED: 'Your password was changed, but signing out existing sessions could not be confirmed. Contact the administrator.',
+  GOOGLE_LINK_FAILED: 'Google linking could not be started. Check your current password and use your existing sign-in method.',
+  GOOGLE_LINK_CONFLICT: 'Google linking conflicts with an existing account or operation. Contact the administrator before retrying.',
+  GOOGLE_LINK_UNAVAILABLE: 'Google linking is temporarily unavailable. Wait, then start a fresh attempt after the issue is resolved.',
+  GOOGLE_LINK_OUTCOME_UNCONFIRMED: 'The Google association outcome is unknown. Do not repeat linking; contact the administrator.',
+  GOOGLE_LINKED_SESSION_REVOCATION_UNCONFIRMED: 'The server reported a Google association, but session revocation is unconfirmed. Contact the administrator before continuing.',
 };
 
 /** Interprets known authored/gateway errors without mistaking HTML, outages or 403 for session expiry. */
@@ -78,14 +83,14 @@ export async function responseError(response: Response, context: Context): Promi
   }
   const error = record(body) && record(body.error) ? body.error : undefined;
   const code = typeof error?.code === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(error.code) ? error.code : undefined;
-  if (['registration', 'recovery', 'password-reset', 'password-change'].includes(context)
+  if (['registration', 'recovery', 'password-reset', 'password-change', 'google-link'].includes(context)
     && (!record(body) || Object.keys(body).length !== 2 || !error || Object.keys(error).length !== 2
       || !code || !/^[A-Z_]+$/.test(code) || typeof error.message !== 'string' || !error.message || error.message.length > 2048
       || typeof body.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.requestId))) {
     return new ApiError('The operation response could not be verified.', 'INVALID_RESPONSE', response.status);
   }
   const gateway = record(body) && Object.keys(body).length === 1 && body.message === 'Request could not be authorized or processed.';
-  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change'].includes(context)
+  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change', 'google-link'].includes(context)
     && (code === 'AUTHENTICATION_REQUIRED' || (context === 'chat' && (code === 'UNAUTHORIZED' || gateway)));
   const id = record(body) ? body.correlationId ?? body.requestId : undefined;
   const correlation = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;

@@ -3,7 +3,8 @@
 This Node.js 22 workspace provides email/password login, registration,
 confirmation, recovery and protected account settings alongside authenticated
 streaming investigations. It uses React, TypeScript, Vite, Tailwind and lucide
-icons. Google UI, history, Stop, title editing and automatic message queues remain deferred.
+icons. It also provides Google login and explicit account linking for the current
+dev-only rollout. History, Stop, title editing and automatic message queues remain deferred.
 
 ## Local development
 
@@ -27,7 +28,8 @@ is disabled in Vite development. `/?preview=chat` shows inert presentation conte
 without a simulated identity or backend result. `/?preview=account` likewise shows
 an inert, identity-free account form with all mutations disabled. These branches are excluded from the
 production build. There is no local proxy, mock API, CORS exception or credential
-configuration. Do not use `vite preview` to validate authentication: a production
+configuration. Google departure is also blocked locally; the controls and
+`/auth/result` can be inspected without starting authorization. Do not use `vite preview` to validate authentication: a production
 build calls relative APIs and must be served through its configured CloudFront
 origin for authenticated operation.
 
@@ -137,6 +139,80 @@ passwords/codes as well. Refresh loses transient outcomes and email, and closing
 the page cannot determine a mutation's remote result. There is no durable recovery,
 provider lookup, profile endpoint, session repair or new backend behavior here.
 
+## Google login, linking and browser returns
+
+Google controls are always visible in this dev-only UI slice. There is no frontend
+feature flag, Google SDK, client ID or secret configuration. The existing backend
+`devGoogleLoginEnabled` / `DEV_GOOGLE_LOGIN_ENABLED` setting remains authoritative;
+demo Google stays disabled. A future demo release must separately resolve backend
+enablement or conditional control visibility. This shared UI is not demo-ready.
+
+- **Login:** Continue with Google clears the password and navigates at top level
+  to the exact same-origin `/api/auth/google/start`. Its 302 begins the existing
+  Cognito flow. It is not a fetch that follows an external redirect. An existing
+  verified session opens the workspace instead; starting another method requires
+  deliberate logout, never silent account switching.
+- **Link:** protected Account settings has a separate fresh-current-password
+  form, serialized with password change and logout. It posts only
+  `{currentPassword}` to `/api/auth/link/google/start`. The bounded 200 response
+  must contain exactly `authorizationUrl` and `expiresAt`, with a future ISO UTC
+  expiry within five minutes. Before immediate top-level navigation, the URL must
+  use HTTPS, exact `accounts.google.com`, `/o/oauth2/v2/auth`, no credentials,
+  nondefault port or fragment. The server parameters remain unchanged. Passwords
+  are cleared on every outcome; the URL is never logged or retained in React
+  state, history state or browser storage. There is no automatic retry.
+
+Linking requires the same verified email, fresh proof of the existing native
+password and a new Google authorization flow. An existing Google SSO session may
+satisfy authorization; Google does not always ask for its password. Only one
+identity can be linked; unlinking/replacement and adding a password to a Google-only
+account are not offered. `/me` still returns only userId/expiry, so the UI displays
+no inferred linked-provider badge or email. Incorrect proof (`GOOGLE_LINK_FAILED`)
+does not expire the session; `401 AUTHENTICATION_REQUIRED` uses existing expiry
+handling. Generic 403, service errors and malformed responses do not establish expiry.
+
+Successful login and GET callback failures now navigate to fixed same-origin
+`/auth/result?outcome=<code>` rather than raw JSON. Linking **POST start remains
+JSON**, including its existing error status/code contract. Handler-owned Google
+GET results use 303, empty body, no-store/no-referrer/nosniff and separate
+Set-Cookie headers. Authorizer/WAF denials before the handler keep their gateway
+response. No new provider redirect URI is needed: retain the existing Cognito
+federation and direct-link API callbacks; `/auth/result` is never a provider callback.
+
+| Result hint | Meaning and next step |
+| --- | --- |
+| `login_complete` | Check `/me`; open chat only after a fresh verified session. A 401 means sign-in was not confirmed. |
+| `login_cancelled` | Bound authorization reported `access_denied`; return deliberately to login. |
+| `login_failed` | Generic failure; existing-password login and Account linking may be appropriate, without asserting an account/collision exists. |
+| `sign_out_required` | Check the existing session, then offer the authenticated UI and deliberate logout. |
+| `link_complete` | Server confirmed association and revocation; sign in again. The result page itself does not verify that claim or revoke anything. |
+| `link_already_linked` | Matching-identity no-op; only the linking cookie is cleared, with no session/version mutation. Check `/me` before offering Account settings. |
+| `link_cancelled` / `link_failed` | Cancelled bound flow / ordinary failure; check the session before safe navigation. An unowned callback is never called cancelled. |
+| `link_conflict` | Administrator review before another attempt; no replacement/reassignment. |
+| `link_unconfirmed` | Association unknown; do not repeat linking or repair it from this page. Administrator reconciliation is required. |
+| `link_revocation_unconfirmed` | Association reported confirmed but session revocation unconfirmed. Do not assume all sessions were revoked; contact the administrator. |
+| `unavailable` | Auth service/configuration/throttling category; check the session and seek administrator help if persistent. |
+
+These codes are **forgeable display hints**, not proof of identity, linking or
+revocation. Even a syntactically valid forged code cannot grant access or trigger
+a mutation. Missing, extra, unknown, duplicate, encoded or malformed hints show a
+neutral result; the page never displays raw query/provider data. It snapshots only
+an allowlisted bounded code in memory, immediately cleans the address to
+`/auth/result`, and independently checks `/me`. Refresh then shows a neutral result.
+An unavailable session check remains unknown with an explicit retry; it cannot
+overwrite a partial-success warning. There is no OAuth restart, linking repair or
+redundant logout/global-signout from the result page.
+
+A newly completed link clears the application/linking cookies only after the
+existing server confirmation; already-linked leaves the application session
+alone. Uncertain outcomes retain their existing ownership-based cookie behavior.
+Entering the result page drops the old local chat view. Full-page OAuth also loses
+memory-only drafts/transcripts; server history remains stored but cannot yet be
+reopened by a history UI. Returning a page from browser back/forward cache triggers
+a fresh session check before protected content is used. Active chat/form requests
+continue to lock account navigation. See the [login](../Docs/FrontendStack/Google-Login.md)
+and [linking](../Docs/FrontendStack/Google-Linking.md) security and recovery details.
+
 ## Publishing and serving
 
 The existing dev/main workflows build this workspace **before** OIDC credentials,
@@ -151,7 +227,7 @@ are needed.
 | Path/key | Serving/cache behavior |
 | --- | --- |
 | `/` -> S3 `index.html` | Existing default root, caching disabled, HTML with revalidation headers. |
-| `/login`, `/signup`, `/confirm-signup`, `/forgot-password`, `/reset-password`, `/account` | Identical extensionless HTML objects, explicit `text/html`, caching disabled; `/account` is a frontend page, not an API. |
+| `/login`, `/signup`, `/confirm-signup`, `/forgot-password`, `/reset-password`, `/account`, `/auth/result` | Identical extensionless HTML objects, explicit `text/html`, caching disabled; `/account` and `/auth/result` are frontend pages, not APIs. |
 | `/assets/*` | Same private S3/OAC origin; optimized CloudFront cache; fingerprinted assets published with `public,max-age=31536000,immutable`. |
 | Other public files | Default uncached S3 behavior; published with revalidation headers. |
 | `/api/*` | Existing separate API behavior, caching disabled and cookie/header/query forwarding unchanged. |
@@ -161,7 +237,9 @@ errors retain their actual failures. Static GET/HEAD requests forward no session
 cookie to S3. API-origin verification secrets are never browser configuration.
 
 Publishing validates build files, uploads assets first, other public files next,
-and all seven exact HTML entry copies last. It retains old hashes, never uses
+and all eight exact HTML entry copies last, including S3 key `auth/result`. It
+rejects a standalone build file named `auth` before any AWS call; no `auth` object
+is published. It retains old hashes, never uses
 `sync --delete`, and submits one literal `/*` invalidation only after uploads
 succeed. The workflow reports its ID without polling completion. Publishing is
 ordered rather than transactional: failure between entry copies can temporarily
@@ -179,7 +257,7 @@ and [workflow/teardown procedures](../README.md#application-stack-deployment-and
 Local verification does not validate live authentication or streaming APIs. After
 review and deployment through the existing workflow:
 
-1. Open and refresh all seven routes; verify their HTML MIME/cache headers and rooted JS/CSS.
+1. Open and refresh all eight routes; verify their HTML MIME/cache headers and rooted JS/CSS.
    Confirm the private S3 URL and direct API cannot bypass origin/session controls.
 2. Sign in with an existing confirmed password account; verify `/me`, chat,
    follow-up, account-bound ownership and a write-once title in DynamoDB. Refresh
@@ -199,5 +277,38 @@ review and deployment through the existing workflow:
    navigation and unchanged chat/logout behavior. Inspect partial/unknown outcomes
    only when safely available; do not introduce cloud failures to demonstrate them.
 
-This UI does not make public demo ready: Google UI, additional abuse
+### Google login operator checklist (enabled dev only)
+
+Use designated accounts after deployment; local visual checks do not prove OAuth
+or session issuance. Do not copy authorization URLs, cookies or codes into reports.
+
+1. Start from signed out, choose Continue with Google, complete the existing
+   Cognito flow and confirm `/auth/result` checks `/me` before chat opens.
+   Return with the same Google subject and confirm stable userId/history ownership.
+2. With a valid session, verify login does not silently switch accounts. A direct
+   start refusal should offer the existing authenticated UI and explicit logout.
+3. Check cancellation and ordinary failure safely. Failure/collision copy stays
+   generic; callbacks never show raw JSON/provider diagnostics. Invalid/unowned
+   callbacks must not clear another usable application session.
+4. Refresh clean `/auth/result` and check malformed/duplicate hints: neutral
+   guidance, no repeated OAuth or access without `/me`. Inspect mobile/keyboard
+   navigation and unchanged email/password/chat/logout behavior.
+
+### Google linking operator checklist (enabled dev only)
+
+1. Use an eligible confirmed native-password account and the same verified Google
+   email. Review the documented no-historical/manual-links prerequisite first.
+   Incorrect fresh password must stay a proof error, not session expiry.
+2. Explicitly start linking, complete authorization and confirm sign-in-again
+   guidance. Verify the old session is rejected; log in separately with each
+   method and confirm both resolve to the original destination sub/history owner.
+3. Repeat only the known, fully resolved matching identity to verify the
+   already-linked no-op keeps the application session/version and offers Account
+   settings after `/me`. Verify cancel does not revoke the session.
+4. Review conflict and partial/unknown guidance only when safely available. Do
+   not deliberately create destructive failures or retry an unconfirmed association;
+   retain administrator-only reconciliation. Neither result hints nor `/me` prove
+   a durable provider association.
+
+This UI does not make public demo ready: demo Google availability, additional abuse
 controls, history recovery, cancellation and operational rollback remain separate work.

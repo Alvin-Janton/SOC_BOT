@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkSession, login, logout, Session } from '../api/auth';
 import { failure } from '../api/http';
 
-type AuthState = { status: 'checking' } | { status: 'signedOut'; notice?: string }
+export type AuthState = { status: 'checking' } | { status: 'signedOut'; notice?: string }
   | { status: 'signedIn'; session: Session } | { status: 'unavailable'; message: string };
 
 /** Restores only cookie-backed identity; outages remain unknown, and no conversation state survives account changes. */
-export function useSession() {
+export function useSession(restoreOnMount = true) {
+  const initialRestore = useRef(restoreOnMount);
   const [state, setState] = useState<AuthState>(import.meta.env.DEV ? { status: 'signedOut' } : { status: 'checking' });
   const generation = useRef(0);
   const checking = useRef<AbortController | undefined>(undefined);
@@ -25,7 +26,13 @@ export function useSession() {
       setState(safe.authenticationRequired ? { status: 'signedOut' } : { status: 'unavailable', message: safe.message });
     }
   }, []);
-  useEffect(() => { void restore(); return () => { generation.current++; checking.current?.abort(); }; }, [restore]);
+  useEffect(() => {
+    if (initialRestore.current) void restore();
+    // A full-page OAuth return can restore an old page from bfcache; discard its stale account view before rechecking.
+    const resume = (event: PageTransitionEvent) => { if (event.persisted) void restore(); };
+    window.addEventListener('pageshow', resume);
+    return () => { window.removeEventListener('pageshow', resume); generation.current++; checking.current?.abort(); };
+  }, [restore]);
 
   const invalidateRestore = useCallback(() => { generation.current++; checking.current?.abort(); }, []);
   const signIn = useCallback(async (email: string, password: string) => {

@@ -24,7 +24,15 @@ adds a dedicated client/provider, pre-creation guard, two login GET routes and
 explicit linking POST/GET routes under `/api/auth/link/google/`.
 Demo Google stays disabled. The UI supports email/password registration,
 confirmation/resend, recovery/reset and protected account/password settings;
-Google controls remain absent. See [page/API and uncertainty handling](../../frontend/README.md#emailpassword-account-pages).
+Google controls are visible for the current dev-only rollout, with no frontend
+toggle; backend activation remains authoritative. The shared UI is not
+Google-ready in demo. See [page/API and uncertainty handling](../../frontend/README.md#emailpassword-account-pages)
+and [Google browser outcomes](../../frontend/README.md#google-login-linking-and-browser-returns).
+Login uses top-level GET start; protected linking POSTs only fresh password proof
+before immediate navigation to the validated Google URL. Callback presentation
+uses a bounded, same-origin 303 result page; `/me` alone establishes a usable
+session, not provider-link status. New-link revocation and matching no-op remain
+distinct. No resource, permission or provider callback registration is added.
 No identity pool, live user, merging/unlinking, DNS or custom
 certificate is created. One frontend-owned Lambda implements login, me, logout,
 signup, code confirmation/resend and password recovery/change. Frontend owns a generated
@@ -497,8 +505,8 @@ credentials or actual session records. This slice's lint/build/existing-test and
 offline synthesis results do not establish live AWS, email, cookie/browser or
 authentication correctness.
 
-Later product slices must add custom email/password UI,
-demo Google activation, unlinking/replacement, comprehensive
+Later product slices must address
+demo Google availability, unlinking/replacement, comprehensive
 authentication abuse controls, uniform browser 401/startup/focus handling and
 frontend-owned AI integration. Current routes enforce origin/CSRF and durable
 sessions; `/api/chat` now uses their verified subject, without any temporary-owner fallback. MFA and
@@ -566,7 +574,7 @@ outcomes from local compilation/synthesis. First-login initialization is not
 recovery for lost revocation metadata: preserve USER records and review restoration
 before recreating them. Existing sessions can outlive Cognito token expiry and
 out-of-band console sign-out/disablement until application versions are revoked.
-Signup/confirmation/reset UI, demo Google/linking, comprehensive authentication abuse
+Demo Google/linking, comprehensive authentication abuse
 controls and Stop integration remain deferred; chat ownership is implemented for `/api/chat`. `/api/auth/me`
 reports frontend session identity. Protected `/api/chat` uses that subject;
 the AI-owned `/chat` is retired without migrating stored conversations. Password deployment needs no Google setting; dev Google uses the
@@ -627,8 +635,8 @@ checks or from 202 alone. Signup delivery/quota errors may already have created 
 unconfirmed account; wait and use resend rather than deleting/recreating it.
 After a lost confirmation success response, login is the recovery path; a repeated
 confirmation need not return success. Cognito controls expiry and delivery, not
-local timers. Public-demo email/abuse review, demo Google/linking,
-UI remains separate; authenticated `/api/chat` ownership is now wired.
+local timers. Public-demo email/abuse review and demo Google/linking remain
+separate; the account UI and authenticated `/api/chat` ownership are now wired.
 
 ## Later manual password validation
 

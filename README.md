@@ -65,6 +65,7 @@ The unchanged evaluator invocation `python -m evaluation.run --chat-table SOC-BO
 ## Infrastructure Development
 
 The [frontend guide](frontend/README.md) covers the password-login/chat interface,
+dev-only Google login/account-linking controls and bounded browser result page,
 streaming/retry limitations and operator validation. From the root,
 `npm run frontend:dev` starts a disconnected Vite visual preview; `/login` makes
 no API requests and `/?preview=chat` is an inert development-only layout.
@@ -72,7 +73,8 @@ no API requests and `/?preview=chat` is an inert development-only layout.
 the cookie-backed session before chat; no browser tokens or conversation state
 are persisted locally. Refresh starts a fresh local view. The default static
 cache is disabled, `/assets/*` uses optimized caching, and identical HTML is
-published at the seven exact page entries with revalidation headers; see the frontend guide for account/recovery routes. No SPA error
+published at the eight exact page entries with revalidation headers, including
+`auth/result`; see the frontend guide for account/recovery and Google result routes. No SPA error
 rewrite or localhost authentication exception is introduced.
 
 The repository targets Node.js 22 with a shared root lockfile. `@soc-bot/infra` contains the TypeScript CDK application; `@soc-bot/frontend` contains the Vite/React browser application.

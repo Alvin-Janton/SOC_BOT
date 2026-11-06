@@ -34,6 +34,7 @@ entry point under `google/`. The CDK construct remains under `infra/lib/stacks/f
 | [google/link-provider.ts](google/link-provider.ts) | Fixed Google linking proof endpoints, credential reads and exact-pool Cognito association operations. |
 | [google/link-state.ts](google/link-state.ts) | Session-bound linking transactions, cookies, destination guards and provider ownership records. |
 | [google/linking.ts](google/linking.ts) | Fresh-proof linking flow, no-op/conflict handling and confirmed session revocation. |
+| [google/browser-result.ts](google/browser-result.ts) | Fixed same-origin browser result redirects and authored failure-category mapping, with independently separated cookies. |
 
 ## HTTP contracts
 
@@ -65,7 +66,25 @@ linking callback are the only routes accepting expected cross-site navigation. B
 no-store and no-referrer; callback consumes state once before exchange and never
 overwrites a valid session. HTTP 303 success issues the existing twelve-hour
 cookie plus independent OAuth-cookie clearing via multiValueHeaders, then goes
-to `/api/auth/me`. Existing single-cookie password responses remain unchanged.
+to `/auth/result?outcome=login_complete`. Existing single-cookie password responses remain unchanged.
+
+Handler-owned errors on the three exact Google browser GET routes also use empty
+303 responses with no-store/no-referrer/nosniff, fixed allowlisted result hints and
+the original ownership-based cookie-clear flags. A provider `access_denied` becomes
+cancelled only after its bound transaction/original-session checks succeed; an
+invalid/unowned callback remains failed and cannot clear another valid session.
+Linking callback success uses `link_complete` or the distinct `link_already_linked`
+no-op. The former clears application/linking cookies after confirmed revocation;
+the latter clears only the linking cookie. Partial association/revocation
+outcomes retain different warnings and administrator recovery boundaries.
+No callback query, identity or provider diagnostic enters Location/body/logs.
+
+Linking POST start remains 200 JSON authorizationUrl/expiresAt and retains its
+existing error codes/statuses; all other JSON APIs and pre-handler gateway denials
+are unchanged. The frontend result page cleans its query and checks `/me` before
+authenticated navigation. Result hints are forgeable display data, not session/
+link evidence or mutation authority. No new Google redirect URI is required.
+See the [outcome mapping and dev operator checklists](../../../../frontend/README.md#google-login-linking-and-browser-returns).
 
 See [Google setup, collision justification and limits](../../../../Docs/FrontendStack/Google-Login.md)
 for staged provisioning, transaction fields and later operator validation.
@@ -104,7 +123,7 @@ Login/me success JSON contains only these fields (illustrative values):
 {"userId":"example-verified-sub","expiresAt":"2026-10-29T12:00:00.000Z"}
 ```
 
-Errors have one safe public shape:
+JSON API errors have one safe public shape (Google browser GETs instead redirect as described above):
 
 ```json
 {"error":{"code":"AUTHENTICATION_FAILED","message":"Email or password is incorrect."},"requestId":"example-request-id"}
@@ -116,7 +135,7 @@ Errors have one safe public shape:
 | 413 | Decoded body exceeds 8 KiB. |
 | 415 | POST content type is not supported JSON. |
 | 401 | Denied credentials, absent/invalid/revoked session, or an `AUTHENTICATION_CHALLENGE` this slice cannot complete. |
-| 409 | Google start/callback sees a valid application session; sign out first. |
+| 409 | Authored JSON conflict; Google browser sign-out-first guidance is presented by 303 `sign_out_required`. |
 | 403 | Invalid browser/trusted origin, or `ACCOUNT_NOT_CONFIRMED`. |
 | 429 | Known provider throttling. |
 | 503 | Configuration, storage, service or JWKS availability failure. |

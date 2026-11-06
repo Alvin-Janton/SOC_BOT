@@ -6,13 +6,14 @@ import { Brand } from './components/Brand';
 import { AccountPage } from './pages/AccountPage';
 import { ChatPage } from './pages/ChatPage';
 import { LoginPage } from './pages/LoginPage';
+import { AuthResultPage } from './pages/AuthResultPage';
 import { OpenAccount, PublicAccountPage, PublicAccountPath } from './pages/PublicAccountPage';
 import { PAGE_PATHS, PagePath, useRoute } from './routing';
 
 /** Coordinates guarded account pages, transient email/outcome handoff and the retained in-memory chat view. */
 export function App() {
-  const auth = useSession();
   const { path, navigate, lockNavigation } = useRoute();
+  const auth = useSession(path !== '/auth/result');
   const [email, setEmail] = useState('');
   const [notice, setNotice] = useState<Notice>();
   const lockChat = useCallback((busy: boolean) => lockNavigation('chat', busy), [lockNavigation]);
@@ -34,13 +35,15 @@ export function App() {
   const protectedPage = path === '/' || path === '/account';
   const publicPage = ['/signup', '/confirm-signup', '/forgot-password', '/reset-password'].includes(path);
   useEffect(() => {
-    if (!PAGE_PATHS.includes(path as PagePath) || preview) return;
+    if (!PAGE_PATHS.includes(path as PagePath) || preview || path === '/auth/result') return;
     if (auth.state.status === 'signedIn' && path === '/login') navigate('/', true);
     if (auth.state.status === 'signedOut' && protectedPage) navigate('/login', true);
   }, [auth.state.status, path, navigate, preview, protectedPage]);
 
   if (import.meta.env.DEV && preview === 'chat') return <ChatPage preview expired={() => undefined} signOut={async () => undefined} />;
   if (import.meta.env.DEV && preview === 'account') return <AccountPage preview open={open} lock={lockAuth} finished={passwordFinished} expired={auth.expired} signOut={auth.signOut} />;
+  // Entering a full-page callback result drops the old local chat view; hints never mutate server sessions or identities.
+  if (path === '/auth/result') return <AuthResultPage state={auth.state} restore={auth.restore} open={open} />;
   if (!PAGE_PATHS.includes(path as PagePath)) return <div className="session-gate"><Brand /><h1>Page not found</h1><button className="secondary-button" onClick={() => open('/')}>Return to workspace</button></div>;
 
   let page;

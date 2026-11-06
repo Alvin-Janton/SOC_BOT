@@ -7,6 +7,7 @@ import { AuthHttpConfiguration, AuthHttpResponse, GoogleCallbackQuery } from '..
 import { createOAuthTransactions, GoogleLoginError, oauthCookie, readOAuthCookie } from './oauth-transactions';
 import { createAuthSessionStore } from '../sessions';
 import { createUserAuthStateStore } from '../user-state';
+import { googleBrowserResult } from './browser-result';
 
 /** Emits redirects with independent cookies and no cache/referrer disclosure of the callback URL. */
 function redirect(statusCode: 302 | 303, location: string, cookies: string[]): AuthHttpResponse {
@@ -56,7 +57,7 @@ export function createGoogleLogin(config: AuthHttpConfiguration, budget: AuthReq
 
       try {
         await requireSignedOut(cookieHeader, true);
-        if (query.error || !query.code) throw new GoogleLoginError(true);
+        if (query.error || !query.code) throw new GoogleLoginError(true, false, query.error === 'access_denied');
         const identity = await verifyGoogleLogin(query.code, transaction, config.auth, google, budget);
         const users = createUserAuthStateStore(config.auth, undefined, budget);
         const existing = await users.readForProvisioning(identity.sub);
@@ -71,7 +72,7 @@ export function createGoogleLogin(config: AuthHttpConfiguration, budget: AuthReq
 
         const snapshot = await users.readForAuthentication(identity.sub);
         const session = await createAuthSessionStore(config.auth, undefined, undefined, budget).create(identity, snapshot);
-        return redirect(303, '/api/auth/me', [createSessionCookie(session.token, session.expiresAt, session.createdAt, config.auth.sameSite), oauthCookie()]);
+        return googleBrowserResult('login_complete', [createSessionCookie(session.token, session.expiresAt, session.createdAt, config.auth.sameSite), oauthCookie()]);
       } catch (error) {
         if (error instanceof GoogleLoginError) throw error;
         throw new GoogleLoginError(true);

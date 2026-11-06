@@ -11,6 +11,7 @@ import { createGoogleLogin } from './google/login';
 import { GoogleLoginError, oauthCookie } from './google/oauth-transactions';
 import { createGoogleLinking } from './google/linking';
 import { GoogleLinkError, googleLinkCookie } from './google/link-state';
+import { googleBrowserResult, googleFailureResult } from './google/browser-result';
 
 /** Exposes only the verified subject and absolute UTC expiry, never internal authentication records. */
 function publicSession(session: AuthSession): { userId: string; expiresAt: string } {
@@ -29,6 +30,8 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
   const googleRoute = raw !== null && typeof raw === 'object' && 'resource' in raw && typeof raw.resource === 'string'
     && ['/api/auth/google/start', '/api/auth/google/callback', '/api/auth/link/google/start', '/api/auth/link/google/callback'].includes(raw.resource);
   const linkingRoute = googleRoute && typeof raw.resource === 'string' && raw.resource.startsWith('/api/auth/link/');
+  const googleNavigation = googleRoute && typeof raw.resource === 'string' && 'httpMethod' in raw && raw.httpMethod === 'GET'
+    && ['/api/auth/google/start', '/api/auth/google/callback', '/api/auth/link/google/callback'].includes(raw.resource);
 
   try {
     const budget = createAuthRequestBudget(context.getRemainingTimeInMillis());
@@ -116,11 +119,18 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
       && (request.invalidCookie || request.cookieHeader !== undefined);
     const clearPasswordPartial = (request?.route === 'reset-password' || request?.route === 'change-password')
       && safe.code === 'password_changed_session_revocation_unconfirmed';
-    const response = authHttpResponse(safe.statusCode, { error: { code: outcome, message: safe.message }, requestId },
+    let response = authHttpResponse(safe.statusCode, { error: { code: outcome, message: safe.message }, requestId },
       clearInvalid || clearPasswordPartial ? clearSessionCookie('Lax') : error instanceof GoogleLoginError && error.clearOAuthCookie ? oauthCookie() : undefined);
     if (error instanceof GoogleLinkError && error.clearLinkCookie) {
-      return { ...response, headers: { ...response.headers, 'Referrer-Policy': 'no-referrer' },
+      response = { ...response, headers: { ...response.headers, 'Referrer-Policy': 'no-referrer' },
         multiValueHeaders: { 'Set-Cookie': [...(error.clearApplicationCookie ? [clearSessionCookie('Lax')] : []), googleLinkCookie()] } };
+    }
+    if (googleNavigation) {
+      const cookies = [...(response.headers['Set-Cookie'] === undefined ? [] : [response.headers['Set-Cookie']]),
+        ...(response.multiValueHeaders?.['Set-Cookie'] ?? [])];
+      const cancelled = (error instanceof GoogleLoginError && error.clearOAuthCookie && error.cancelled)
+        || (error instanceof GoogleLinkError && error.clearLinkCookie && error.cancelled);
+      return googleBrowserResult(googleFailureResult(safe.code, linkingRoute, cancelled), cookies);
     }
     return googleRoute ? { ...response, headers: { ...response.headers, 'Referrer-Policy': 'no-referrer' } } : response;
   } finally {
