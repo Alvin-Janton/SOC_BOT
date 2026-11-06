@@ -9,6 +9,7 @@ import { parseConfirmationResend } from '../contracts';
 import { GoogleLoginConfiguration } from './config';
 import { GoogleLoginError, oauthHash, OAuthTransaction, sameOAuthHash } from './oauth-transactions';
 import { authSubSchema } from '../user-state';
+import { GoogleLoginFailedCheck, GoogleLoginObserver, googleLoginFailureCategory } from './login-diagnostics';
 
 const providerIdentitySchema = z.array(z.object({ providerName: z.string(), providerType: z.string(), userId: z.string().min(1).max(256) })).min(1).max(10);
 
@@ -42,36 +43,58 @@ export function googleProfileIdentity(result: AdminGetUserCommandOutput): string
 }
 
 /** Exchanges one code without redirects/retries, returning only a request-local ID token. */
-async function exchangeCode(code: string, transaction: OAuthTransaction, google: GoogleLoginConfiguration, budget: AuthRequestBudget): Promise<string> {
-  const { abortSignal } = authRequestOptions(budget, 6_000);
-  const response = await fetch(`${google.domain}/oauth2/token`, { method: 'POST', redirect: 'error', signal: abortSignal,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    body: new URLSearchParams({ grant_type: 'authorization_code', client_id: google.clientId, redirect_uri: google.redirectUri,
-      code, code_verifier: transaction.pkce_verifier }).toString() });
-  if (!response.ok || !response.body) { await response.body?.cancel(); throw new GoogleLoginError(); }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
+async function exchangeCode(code: string, transaction: OAuthTransaction, google: GoogleLoginConfiguration,
+  budget: AuthRequestBudget, diagnostics?: GoogleLoginObserver): Promise<string> {
   try {
-    while (true) {
-      const part = await reader.read();
-      if (part.done) break;
-      size += part.value.byteLength;
-      if (size > 65_536) throw new GoogleLoginError();
-      chunks.push(part.value);
+    const { abortSignal } = authRequestOptions(budget, 6_000);
+    const response = await fetch(`${google.domain}/oauth2/token`, { method: 'POST', redirect: 'error', signal: abortSignal,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', client_id: google.clientId, redirect_uri: google.redirectUri,
+        code, code_verifier: transaction.pkce_verifier }).toString() });
+    diagnostics?.exchangeStatus(response.status);
+    if (!response.ok || !response.body) {
+      diagnostics?.failure(response.ok ? 'upstream_body_missing' : 'upstream_http_rejected');
+      await response.body?.cancel(); throw new GoogleLoginError();
     }
-    const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
-    const parsed = z.object({ id_token: z.string().min(1).max(32_768), token_type: z.literal('Bearer') }).safeParse(body);
-    if (!parsed.success) throw new GoogleLoginError();
-    return parsed.data.id_token;
-  } finally { await reader.cancel().catch(() => undefined); }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        size += part.value.byteLength;
+        if (size > 65_536) { diagnostics?.failure('upstream_body_too_large'); throw new GoogleLoginError(); }
+        chunks.push(part.value);
+      }
+      let body: unknown;
+      try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
+      catch (error) { diagnostics?.failure('upstream_body_invalid'); throw error; }
+      const parsed = z.object({ id_token: z.string().min(1).max(32_768), token_type: z.literal('Bearer') }).safeParse(body);
+      if (!parsed.success) { diagnostics?.failure('upstream_body_invalid'); throw new GoogleLoginError(); }
+      return parsed.data.id_token;
+    } finally { await reader.cancel().catch(() => undefined); }
+  } catch (error) {
+    const category = googleLoginFailureCategory(error);
+    diagnostics?.failure(category === 'deadline_or_transport' ? 'upstream_transport_failure' : category);
+    throw error;
+  }
+}
+
+/** Observes an existing synchronous check before its error is generically wrapped; never logs the checked value. */
+function loginValue<T>(diagnostics: GoogleLoginObserver | undefined, check: GoogleLoginFailedCheck, read: () => T): T {
+  try { return read(); }
+  catch (error) { diagnostics?.failure(googleLoginFailureCategory(error), check); throw error; }
 }
 
 /** Verifies the dedicated Google client, nonce and enabled canonical destination before returning its sub. */
 export async function verifyGoogleLogin(code: string, transaction: OAuthTransaction, auth: BffAuthConfig,
-  google: GoogleLoginConfiguration, budget: AuthRequestBudget): Promise<{ sub: string; tokenExpiresAt: number }> {
+  google: GoogleLoginConfiguration, budget: AuthRequestBudget, diagnostics?: GoogleLoginObserver): Promise<{ sub: string; tokenExpiresAt: number }> {
   try {
-    const idToken = await exchangeCode(code, transaction, google, budget);
+    diagnostics?.phase('code_exchange');
+    const idToken = await exchangeCode(code, transaction, google, budget, diagnostics);
+    diagnostics?.completed('code_exchange');
+    diagnostics?.phase('jwt_verification');
     const fetcher = new SimpleFetcher();
 
     const jwksCache = new SimpleJwksCache({ fetcher: {
@@ -81,29 +104,70 @@ export async function verifyGoogleLogin(code: string, transaction: OAuthTransact
           timeout: 1_000, responseTimeout: 3_000 }, data);
       },
     } });
-    
+
     const verifier = CognitoJwtVerifier.create({ userPoolId: auth.userPoolId, clientId: google.clientId, tokenUse: 'id' }, { jwksCache });
     const token = await verifier.verify(idToken);
-    const sub = authSubSchema.parse(token.sub);
-    const username = z.string().min(1).max(128).parse(token['cognito:username']);
+    diagnostics?.completed('jwt_verification');
+    diagnostics?.phase('token_subject');
+    const sub = loginValue(diagnostics, 'subject_invalid', () => authSubSchema.parse(token.sub));
+    diagnostics?.completed('token_subject');
+    diagnostics?.phase('token_username');
+    const username = loginValue(diagnostics, 'username_invalid', () => z.string().min(1).max(128).parse(token['cognito:username']));
+    diagnostics?.completed('token_username');
 
-    if (typeof token.nonce !== 'string' || !sameOAuthHash(oauthHash(token.nonce), transaction.nonce_hash)
-      || token.email_verified !== true || typeof token.exp !== 'number' || !Number.isSafeInteger(token.exp)
-      || token.exp <= Math.floor(Date.now() / 1_000)) throw new GoogleLoginError();
+    // Preserve the original left-to-right short circuit; later metadata/checks are never read after a rejection.
+    diagnostics?.phase('token_claims');
+    if (typeof token.nonce !== 'string') { diagnostics?.failure('validation_rejected', 'nonce_type'); throw new GoogleLoginError(); }
+    if (!sameOAuthHash(oauthHash(token.nonce), transaction.nonce_hash)) {
+      diagnostics?.failure('validation_rejected', 'nonce_mismatch'); throw new GoogleLoginError();
+    }
+    diagnostics?.emailVerified(typeof token.email_verified === 'boolean' ? 'boolean' : typeof token.email_verified === 'string' ? 'string'
+      : token.email_verified === undefined ? 'missing' : 'other', token.email_verified === true);
+    if (token.email_verified !== true) { diagnostics?.failure('validation_rejected', 'email_not_verified'); throw new GoogleLoginError(); }
+    if (typeof token.exp !== 'number' || !Number.isSafeInteger(token.exp) || token.exp <= Math.floor(Date.now() / 1_000)) {
+      diagnostics?.failure('validation_rejected', 'expiry_invalid'); throw new GoogleLoginError();
+    }
+    diagnostics?.completed('token_claims');
 
-    const email = googleEmail(token.email);
-    const providerId = googleIdentity(token.identities);
+    diagnostics?.phase('token_email');
+    const email = loginValue(diagnostics, 'token_email_invalid', () => googleEmail(token.email));
+    diagnostics?.completed('token_email');
+    diagnostics?.phase('token_google_identity');
+    diagnostics?.identities(Array.isArray(token.identities) ? 'array' : typeof token.identities === 'string' ? 'string'
+      : token.identities === undefined ? 'missing' : 'other');
+    const providerId = loginValue(diagnostics, 'token_identity_shape', () => googleIdentity(token.identities));
+    diagnostics?.completed('token_google_identity');
 
+    diagnostics?.phase('profile_lookup');
     const client = new CognitoIdentityProviderClient({ region: 'us-east-1', maxAttempts: 2,
       requestHandler: new NodeHttpHandler({ connectionTimeout: 500, requestTimeout: 3_000 }) });
 
     const profile = await client.send(new AdminGetUserCommand({ UserPoolId: auth.userPoolId, Username: username }), authRequestOptions(budget, 4_000));
+    diagnostics?.completed('profile_lookup');
 
-    if (profile.Enabled !== true || !['EXTERNAL_PROVIDER', 'CONFIRMED'].includes(profile.UserStatus ?? '') || profile.Username !== username
-      || profile.PreferredMfaSetting || profile.UserMFASettingList?.length || profile.MFAOptions?.length
-      || googleProfileAttribute(profile, 'sub') !== sub || googleProfileAttribute(profile, 'email_verified') !== 'true'
-      || googleEmail(googleProfileAttribute(profile, 'email')) !== email || googleProfileIdentity(profile) !== providerId) throw new GoogleLoginError();
+    diagnostics?.phase('profile_validation');
+    if (profile.Enabled !== true) { diagnostics?.failure('validation_rejected', 'profile_disabled'); throw new GoogleLoginError(); }
+    if (!['EXTERNAL_PROVIDER', 'CONFIRMED'].includes(profile.UserStatus ?? '')) {
+      diagnostics?.failure('validation_rejected', 'profile_status_unsupported'); throw new GoogleLoginError();
+    }
+    if (profile.Username !== username) { diagnostics?.failure('validation_rejected', 'profile_username_mismatch'); throw new GoogleLoginError(); }
+    if (profile.PreferredMfaSetting || profile.UserMFASettingList?.length || profile.MFAOptions?.length) {
+      diagnostics?.failure('validation_rejected', 'profile_mfa_present'); throw new GoogleLoginError();
+    }
+    if (loginValue(diagnostics, 'profile_attribute_invalid', () => googleProfileAttribute(profile, 'sub')) !== sub) {
+      diagnostics?.failure('validation_rejected', 'profile_subject_mismatch'); throw new GoogleLoginError();
+    }
+    if (loginValue(diagnostics, 'profile_attribute_invalid', () => googleProfileAttribute(profile, 'email_verified')) !== 'true') {
+      diagnostics?.failure('validation_rejected', 'profile_email_unverified'); throw new GoogleLoginError();
+    }
+    if (loginValue(diagnostics, 'profile_attribute_invalid', () => googleEmail(googleProfileAttribute(profile, 'email'))) !== email) {
+      diagnostics?.failure('validation_rejected', 'profile_email_mismatch'); throw new GoogleLoginError();
+    }
+    if (loginValue(diagnostics, 'profile_identity_mismatch', () => googleProfileIdentity(profile)) !== providerId) {
+      diagnostics?.failure('validation_rejected', 'profile_identity_mismatch'); throw new GoogleLoginError();
+    }
+    diagnostics?.completed('profile_validation');
 
     return { sub, tokenExpiresAt: token.exp };
-  } catch { throw new GoogleLoginError(true); }
+  } catch (error) { diagnostics?.failure(googleLoginFailureCategory(error)); throw new GoogleLoginError(true); }
 }
