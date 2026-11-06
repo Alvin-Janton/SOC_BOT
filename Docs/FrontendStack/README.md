@@ -10,6 +10,17 @@ with temporary proofs, durable ownership fences and reconciliation boundaries.
 
 ## Implemented scope
 
+The Frontend-owned [conversation list API](../../infra/lambdas/frontend/conversation-history/README.md)
+adds authenticated `GET /api/conversations`, returning at most 20 metadata-only
+entries and an owner/environment-bound continuation cursor. It reads only AI's
+existing `GSI1`; Frontend imports the table reference with no reverse AI dependency,
+table/index replacement or foundation permission change. Eventual consistency and
+mutable recency ordering apply. The existing session authorizer now validates
+protected requests by their matched method: GET can omit Origin, while POST chat
+still requires exact Origin. Static publishing, CloudFront API forwarding, UI and
+workflows are unchanged. Sidebar, transcript retrieval and client caching remain
+future work; see the runtime guide for the contract and operator checks.
+
 The stack defines infrastructure and nine email/password authentication routes,
 plus [operator-activated dev Google login](Google-Login.md) and
 [explicit password-to-Google linking](Google-Linking.md).
@@ -192,9 +203,10 @@ one request/second with burst two (best effort, not a budget or concurrency cap)
 Only `CicdFoundationStack` owns the shared Regional API Gateway account setting
 and logging role. The frontend API sets `cloudWatchRole:false`. Foundation adds
 only the two exact frontend access-group names to that role; existing chat and
-execution-group scopes remain. Frontend depends on foundation, **not AI or Data**,
-and has no reverse reference into foundation. Authenticated chat uses
-frontend-owned permissions and one-way references to AI.
+execution-group scopes remain. Frontend depends on foundation and AI (which
+depends on Data), with no reverse references into foundation or from AI to
+Frontend. Authenticated chat and conversation listing use frontend-owned
+permissions and one-way references to AI's orchestrator and history table.
 
 Within the stack, the stage depends on its execution log group and deployment;
 CloudFront's HTTP origin uses the REST API ID/hostname, not its deployment. OAC
@@ -443,7 +455,7 @@ demo IDs. They use the already synthesized assembly, matching Environment/OIDC
 and execution roles, and sequential dependency-aware CDK deployment. They never
 select foundation. Apply the reviewed administrator-managed foundation IAM and
 shared logging changes separately first: `--exclusively` intentionally excludes
-dependencies from deployment. Frontend imports the AI orchestrator; deployment is Data -> AI -> Frontend,
+dependencies from deployment. Frontend imports the AI orchestrator and history table; deployment is Data -> AI -> Frontend,
 with no reverse AI -> Frontend reference.
 
 After stack deployment succeeds, the same workflow publishes the email/password

@@ -49,7 +49,7 @@ function configuration(): OriginConfiguration {
 let guard: ReturnType<typeof createOriginGuard> | undefined;
 let guardedSecretArn: string | undefined;
 
-/** Builds an exact-method policy; only session-authenticated chat includes user context. */
+/** Builds an exact-method policy; session-protected routes include only validated user context. */
 function policy(methodArn: string, allowed: boolean, principalId = 'cloudfront-origin',
   context?: AuthorizerPolicy['context']): AuthorizerPolicy {
   return { principalId, ...(context ? { context } : {}), policyDocument: {
@@ -57,7 +57,7 @@ function policy(methodArn: string, allowed: boolean, principalId = 'cloudfront-o
   } };
 }
 
-/** Authenticates chat once at admission; health/auth keep origin-only authorization and error behavior. */
+/** Authenticates protected requests at admission; health/auth retain origin-only behavior. */
 export async function handler(raw: unknown, context: { getRemainingTimeInMillis(): number }): Promise<AuthorizerPolicy> {
   const event = record(raw);
   const protectedRoute = FRONTEND_PROTECTED_ROUTES.find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
@@ -101,7 +101,7 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
       || auth.sessionTableName !== `SOC-BOT-${config.stage.toUpperCase()}-AUTH-SESSIONS`) throw new Error('Invalid configuration');
 
     try {
-      browserRequest(event, 'POST', browserOrigin);
+      browserRequest(event, protectedRoute.method, browserOrigin);
       const mode = header(event, 'Sec-Fetch-Mode');
       const destination = header(event, 'Sec-Fetch-Dest');
       if ((mode !== undefined && !['cors', 'same-origin'].includes(mode))

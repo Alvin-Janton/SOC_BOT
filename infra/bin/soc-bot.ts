@@ -50,6 +50,7 @@ for (const environment of ['dev', 'demo'] as const) {
   aiStack.addStackDependency(foundation);
   const frontendStack = new FrontendStack(app, `${environment}FrontendStack`, {
     orchestratorFunction: aiStack.chatOrchestrator.function,
+    chatHistoryTable: aiStack.chatHistoryTable,
     deploymentEnvironment: environment, stackName: `SOC-BOT-${environment.toUpperCase()}-FRONTEND`,
     devFrontendAllowedClientCidr: environment === 'dev' ? devFrontendAllowedClientCidr : undefined,
     devGoogleLoginEnabled: environment === 'dev' ? devGoogleLoginEnabled : undefined,

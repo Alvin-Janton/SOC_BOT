@@ -15,6 +15,7 @@ export const FRONTEND_ORIGIN_ROUTES = [
 /** Session-protected application routes, deliberately excluded from auth-Lambda route registration. */
 export const FRONTEND_PROTECTED_ROUTES = [
   { route: 'chat', method: 'POST', resource: '/api/chat' },
+  { route: 'conversations', method: 'GET', resource: '/api/conversations' },
 ] as const;
 
 const GOOGLE_ORIGIN_ROUTES = [

@@ -1,6 +1,7 @@
 import { CfnOutput, Stack, StackProps, Tags } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { IFunction } from 'aws-cdk-lib/aws-lambda';
+import { ITable } from 'aws-cdk-lib/aws-dynamodb';
 import { DeploymentEnvironment } from '../../shared/environment';
 import { AuthStorage } from './auth-storage';
 import { FrontendApi } from './frontend-api';
@@ -11,12 +12,14 @@ import { devFrontendClientCidr, FrontendWaf } from './frontend-waf';
 import { FrontendAuth } from './frontend-auth';
 import { FrontendGoogleLogin } from './frontend-google-login';
 import { FrontendChat } from './frontend-chat';
+import { ConversationHistory } from './conversation-history';
 
 export interface FrontendStackProps extends StackProps {
   readonly deploymentEnvironment: DeploymentEnvironment;
   readonly devFrontendAllowedClientCidr?: string;
   readonly devGoogleLoginEnabled?: boolean;
   readonly orchestratorFunction: IFunction;
+  readonly chatHistoryTable: ITable;
 }
 
 /** Owns frontend hosting, session routes and authenticated access to the existing AI orchestrator. */
@@ -27,6 +30,7 @@ export class FrontendStack extends Stack {
   public readonly hosting: FrontendHosting;
   public readonly auth: FrontendAuth;
   public readonly chat: FrontendChat;
+  public readonly conversationHistory: ConversationHistory;
 
   public constructor(scope: Construct, id: string, props: FrontendStackProps) {
     super(scope, id, props);
@@ -47,6 +51,10 @@ export class FrontendStack extends Stack {
     this.chat = new FrontendChat(this, 'Chat', {
       environment, api: this.api.api, authorizer: this.api.originAuthorizer,
       requestValidator: this.api.requestValidator, orchestratorFunction: props.orchestratorFunction,
+    });
+    this.conversationHistory = new ConversationHistory(this, 'ConversationHistory', {
+      environment, api: this.api.api, authorizer: this.api.originAuthorizer,
+      requestValidator: this.api.requestValidator, chatHistoryTable: props.chatHistoryTable,
     });
     // Hosting references only the API ID, so the integration can safely reference its generated hostname.
     const google = environment === 'dev' ? new FrontendGoogleLogin(this, 'GoogleLogin', {
