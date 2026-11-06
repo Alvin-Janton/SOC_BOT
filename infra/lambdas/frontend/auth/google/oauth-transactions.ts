@@ -19,7 +19,7 @@ export const OAUTH_COOKIE_NAME = '__Host-soc_bot_oauth';
 
 /** Carries a fixed public error and permission to clear only a validated, browser-owned OAuth flow. */
 export class GoogleLoginError extends BffAuthError {
-  public constructor(public readonly clearOAuthCookie = false, signOutRequired = false) {
+  public constructor(public readonly clearOAuthCookie = false, signOutRequired = false, public readonly cancelled = false) {
     super(signOutRequired ? 'sign_out_required' : 'google_login_failed');
   }
 }

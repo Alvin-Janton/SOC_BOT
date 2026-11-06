@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Exact frontend entries; keep aligned with PAGE_PATHS in src/routing.ts. There is no catch-all rewrite.
-const HTML_ENTRIES = ['index.html', 'login', 'signup', 'confirm-signup', 'forgot-password', 'reset-password', 'account'];
+const HTML_ENTRIES = ['index.html', 'login', 'signup', 'confirm-signup', 'forgot-password', 'reset-password', 'account', 'auth/result'];
 
 /** Invokes the runner's AWS CLI with discrete arguments; no shell, discovery API, or credential output. */
 function aws(...args) {
@@ -34,6 +34,7 @@ function publish() {
   }
   const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
   const files = buildFiles(dist);
+  if (files.includes(join(dist, 'auth'))) throw new Error('A standalone auth object would conflict with the nested result entry.');
   const index = join(dist, 'index.html');
   const assets = join(dist, 'assets');
   if (!files.includes(index) || !lstatSync(index).size || !lstatSync(assets).isDirectory()

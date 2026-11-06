@@ -10,6 +10,7 @@ import { AuthHttpConfiguration, AuthHttpResponse, GoogleCallbackQuery } from '..
 import { oauthHash, sameOAuthHash } from './oauth-transactions';
 import { AuthSessionProof, createAuthSessionStore } from '../sessions';
 import { createUserAuthStateStore } from '../user-state';
+import { googleBrowserResult } from './browser-result';
 
 const inputSchema = z.strictObject({ currentPassword: z.string().min(1).max(256) });
 
@@ -20,7 +21,7 @@ export function parseGoogleLinkStart(value: unknown): { currentPassword: string 
   return parsed.data;
 }
 
-/** Returns fixed JSON with isolated cookie headers and no external redirect/resources on callback output. */
+/** Returns only the linking-start JSON contract with independent cookie output. */
 function linkResponse(body: unknown, cookies: string[]): AuthHttpResponse {
   return { statusCode: 200, headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
     'Content-Type': 'application/json; charset=utf-8', 'X-Content-Type-Options': 'nosniff' },
@@ -84,7 +85,7 @@ export function createGoogleLinking(config: AuthHttpConfiguration, budget: AuthR
         const transaction = await state.consume(query.state, readGoogleLinkCookie(cookieHeader), linking.redirectUri, value => { owned = value; });
         const original = await sessionProof(cookieHeader);
         requireLinkSession(transaction, original);
-        if (query.error || !query.code) throw new GoogleLinkError();
+        if (query.error || !query.code) throw new GoogleLinkError('google_link_failed', true, false, query.error === 'access_denied');
         const credentials = await readGoogleLinkCredentials(linking.secretArn, budget);
         const identity = await verifyGoogleLinkCode(query.code, transaction, credentials, budget);
         if (!sameOAuthHash(oauthHash(identity.email), transaction.email_hash)) throw new GoogleLinkError();
@@ -99,7 +100,7 @@ export function createGoogleLinking(config: AuthHttpConfiguration, budget: AuthR
           const released = await state.releasePending(transaction);
           phase('NOOP', 'CONFIRMED');
           if (!released) phase('CLEANUP', 'PENDING');
-          return linkResponse({ message: 'This Google account is already linked.' }, [googleLinkCookie()]);
+          return googleBrowserResult('link_already_linked', [googleLinkCookie()]);
         }
         if (local.googleSub !== undefined || owner) throw new GoogleLinkError('google_link_conflict');
         // This lookup detects standalone provider profiles. Historical/out-of-band links require the operator prerequisite.
@@ -129,7 +130,7 @@ export function createGoogleLinking(config: AuthHttpConfiguration, budget: AuthR
         const cleaned = await state.releaseCompleted(completed);
         phase('CLEANUP', cleaned ? 'CONFIRMED' : 'PENDING');
         // Cleanup uncertainty does not conceal the already confirmed link and revocation.
-        return linkResponse({ message: 'Google sign-in linked. Sign in again.' }, [clearSessionCookie(config.auth.sameSite), googleLinkCookie()]);
+        return googleBrowserResult('link_complete', [clearSessionCookie(config.auth.sameSite), googleLinkCookie()]);
       } catch (error) {
         if (dispatchPrepared) {
           phase(associationConfirmed ? 'REVOCATION' : 'ASSOCIATION', 'UNCONFIRMED');
@@ -141,7 +142,8 @@ export function createGoogleLinking(config: AuthHttpConfiguration, budget: AuthR
         }
         const safe = error instanceof GoogleLinkError ? error : serviceAuthError(error);
         throw new GoogleLinkError(safe.code === 'throttled' || safe.code === 'authentication_required' || safe.code === 'google_link_conflict' ? safe.code
-          : safe.statusCode < 500 ? 'google_link_failed' : 'google_link_unavailable', owned !== undefined);
+          : safe.statusCode < 500 ? 'google_link_failed' : 'google_link_unavailable', owned !== undefined, false,
+          safe instanceof GoogleLinkError && safe.cancelled);
       }
     },
   };

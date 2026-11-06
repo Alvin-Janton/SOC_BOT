@@ -5,12 +5,12 @@ import { Brand } from './Brand';
 export interface Notice { readonly message: string; readonly warning?: boolean }
 
 /** Reuses the compact login presentation and provides a keyboard-focus target after route transitions. */
-export function AuthLayout({ title, description, notice, children, footer }: {
-  title: ReactNode; description: string; notice?: Notice; children: ReactNode; footer?: ReactNode;
+export function AuthLayout({ title, description, notice, children, footer, skipLabel = 'Skip to form' }: {
+  title: ReactNode; description: string; notice?: Notice; children: ReactNode; footer?: ReactNode; skipLabel?: string;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
-  return <div className="login-page"><a className="skip-link" href="#account-form">Skip to form</a>
+  return <div className="login-page"><a className="skip-link" href="#account-form">{skipLabel}</a>
     <header className="login-header"><Brand /><span className="workspace-label">Security investigation workspace</span></header>
     <main className="login-main"><div className="login-intro"><span className="eyebrow"><span className="status-dot" /> Your SOC_BOT account</span>
       <h1 ref={heading} tabIndex={-1}>{title}</h1><p>{description}</p></div>
