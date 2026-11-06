@@ -54,7 +54,8 @@ The record has fixed fields; absent optional fields are omitted:
 | `event`, `route`, `requestId`, `outcome` | Fixed event/route, existing request ID (1–128 safe characters), and authored callback success/failure/sign-out-required outcome. |
 | `phase`, `lastCompletedPhase` | Current operation and last confirmed completion. The first failure freezes the phase and reason; outer wrappers cannot overwrite them. |
 | `failureCategory`, `failedCheck` | First allowlisted category/check, never exception names/messages/issues. Omitted on success. |
-| `exchangeHttpStatus` | Optional integer 100–599 from the existing token exchange response; no extra body read. |
+| `exchangeHttpStatus` | Optional integer 100–599 from the existing token exchange response. |
+| `exchangeOAuthError` | Dev observer only, on non-success HTTP responses: `invalid_request`, `invalid_client`, `invalid_grant`, `unauthorized_client`, `unsupported_grant_type`, `invalid_scope` or `unrecognized`. Reads at most 4 KiB within the original exchange deadline; unknown, malformed, oversized or unreadable input becomes `unrecognized`. |
 | `tokenEmailVerifiedKind`, `tokenEmailVerifiedStrictTrue` | Kind `boolean`, `string`, `missing` or `other`, and whether the unchanged strict boolean-true check passed. Evaluated only after the preceding nonce checks pass. |
 | `tokenIdentitiesKind` | Kind `array`, `string`, `missing` or `other`, observed only when that existing identity check is reached. |
 | `durationMs` | Integer elapsed time clamped to 0–60,000; complete record is strictly below 4 KiB. |
@@ -76,6 +77,12 @@ exchange transport/body/HTTP categories, with unknown exceptions mapped to
 `unexpected`. Check labels identify the failed nonce/email/expiry/identity,
 canonical-profile, cookie/session or owned-callback authorization check. This
 does not change validation order, accepted claim representations or public errors.
+
+Error-response classification reads only the parsed `error` field for the
+allowlist; it never records the body, `error_description`, headers or request
+parameters. It is best effort and preserves the original HTTP failure category,
+error and cookie/redirect behavior. Without the dev observer, including demo,
+the original immediate body cancellation remains unchanged. No exchange is retried.
 
 No passwords, codes, tokens/decoded JWTs, cookies/hashes, state/nonce/PKCE, email,
 sub/username/provider identifiers, client IDs, URLs/queries, DynamoDB items/keys,

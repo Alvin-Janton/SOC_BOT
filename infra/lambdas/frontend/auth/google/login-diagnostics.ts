@@ -23,6 +23,14 @@ export type GoogleLoginFailedCheck = typeof CHECKS[number];
 type EmailVerifiedKind = 'boolean' | 'string' | 'missing' | 'other';
 type IdentitiesKind = 'array' | 'string' | 'missing' | 'other';
 type CallbackOutcome = 'GOOGLE_LOGIN_SUCCEEDED' | 'GOOGLE_LOGIN_FAILED' | 'SIGN_OUT_REQUIRED';
+const EXCHANGE_OAUTH_ERRORS = ['invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client',
+  'unsupported_grant_type', 'invalid_scope', 'unrecognized'] as const;
+export type ExchangeOAuthError = typeof EXCHANGE_OAUTH_ERRORS[number];
+
+/** Reduces the endpoint's error field to fixed diagnostic labels without retaining its original value. */
+export function exchangeOAuthError(value: unknown): ExchangeOAuthError {
+  return typeof value === 'string' && EXCHANGE_OAUTH_ERRORS.includes(value as ExchangeOAuthError) ? value as ExchangeOAuthError : 'unrecognized';
+}
 
 /** Optional request-local observation only; callers supply authored labels, never token/profile values. */
 export interface GoogleLoginObserver {
@@ -30,6 +38,7 @@ export interface GoogleLoginObserver {
   completed(value: GoogleLoginPhase): void;
   failure(category: GoogleLoginFailureCategory, check?: GoogleLoginFailedCheck): void;
   exchangeStatus(value: number): void;
+  exchangeError(value: ExchangeOAuthError): void;
   emailVerified(kind: EmailVerifiedKind, strictTrue: boolean): void;
   identities(kind: IdentitiesKind): void;
 }
@@ -70,6 +79,7 @@ export function createGoogleLoginDiagnostics(requestId: string, startedAt: numbe
   let failureCategory: GoogleLoginFailureCategory | undefined;
   let failedCheck: GoogleLoginFailedCheck | undefined;
   let exchangeHttpStatus: number | undefined;
+  let exchangeOAuthErrorCode: ExchangeOAuthError | undefined;
   let tokenEmailVerifiedKind: EmailVerifiedKind | undefined;
   let tokenEmailVerifiedStrictTrue: boolean | undefined;
   let tokenIdentitiesKind: IdentitiesKind | undefined;
@@ -83,6 +93,7 @@ export function createGoogleLoginDiagnostics(requestId: string, startedAt: numbe
       if (check !== undefined && CHECKS.includes(check)) failedCheck = check;
     },
     exchangeStatus(value) { if (Number.isInteger(value) && value >= 100 && value <= 599) exchangeHttpStatus = value; },
+    exchangeError(value) { exchangeOAuthErrorCode = exchangeOAuthError(value); },
     emailVerified(kind, strictTrue) {
       if (['boolean', 'string', 'missing', 'other'].includes(kind) && typeof strictTrue === 'boolean') {
         tokenEmailVerifiedKind = kind; tokenEmailVerifiedStrictTrue = strictTrue;
@@ -96,7 +107,7 @@ export function createGoogleLoginDiagnostics(requestId: string, startedAt: numbe
         const elapsed = Date.now() - startedAt;
         const record = JSON.stringify({ event: 'dev_google_login_diagnostic', requestId, route: 'google-callback',
           outcome: ['GOOGLE_LOGIN_SUCCEEDED', 'GOOGLE_LOGIN_FAILED', 'SIGN_OUT_REQUIRED'].includes(outcome) ? outcome : 'GOOGLE_LOGIN_FAILED',
-          phase, lastCompletedPhase, failureCategory, failedCheck, exchangeHttpStatus, tokenEmailVerifiedKind,
+          phase, lastCompletedPhase, failureCategory, failedCheck, exchangeHttpStatus, exchangeOAuthError: exchangeOAuthErrorCode, tokenEmailVerifiedKind,
           tokenEmailVerifiedStrictTrue, tokenIdentitiesKind,
           durationMs: Number.isFinite(elapsed) ? Math.min(60_000, Math.max(0, Math.floor(elapsed))) : 0 });
         if (Buffer.byteLength(record, 'utf8') < 4_096) console.info(record);

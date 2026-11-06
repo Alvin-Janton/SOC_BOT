@@ -210,7 +210,8 @@ Temporary dev-only callback diagnostics now distinguish transaction admission,
 exchange/verifier checks, canonical profile, user-state and session-creation
 phases before generic error wrapping. The request-local
 `dev_google_login_diagnostic` event uses the existing `frontend_auth` request ID,
-fixed labels, bounded HTTP status and limited shape/boolean metadata; it never
+fixed labels, bounded HTTP status, allowlisted `exchangeOAuthError` on rejected
+token exchanges, and limited shape/boolean metadata; it never
 logs token/profile/identity values. Demo and other routes emit none. See the
 [permitted fields, privacy boundaries and removal procedure](../../infra/lambdas/frontend/auth/README.md#temporary-dev-google-login-diagnostics).
 After operator deployment, collect both bounded records from one fresh login of

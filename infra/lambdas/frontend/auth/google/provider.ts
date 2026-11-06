@@ -9,7 +9,7 @@ import { parseConfirmationResend } from '../contracts';
 import { GoogleLoginConfiguration } from './config';
 import { GoogleLoginError, oauthHash, OAuthTransaction, sameOAuthHash } from './oauth-transactions';
 import { authSubSchema } from '../user-state';
-import { GoogleLoginFailedCheck, GoogleLoginObserver, googleLoginFailureCategory } from './login-diagnostics';
+import { ExchangeOAuthError, exchangeOAuthError, GoogleLoginFailedCheck, GoogleLoginObserver, googleLoginFailureCategory } from './login-diagnostics';
 
 const providerIdentitySchema = z.array(z.object({ providerName: z.string(), providerType: z.string(), userId: z.string().min(1).max(256) })).min(1).max(10);
 
@@ -42,6 +42,39 @@ export function googleProfileIdentity(result: AdminGetUserCommandOutput): string
   catch { throw new GoogleLoginError(); }
 }
 
+/** Best-effort dev-only classification of at most 4 KiB, bounded by the original exchange signal. */
+async function readExchangeOAuthError(response: Response, signal: AbortSignal): Promise<ExchangeOAuthError> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    if (!response.body || signal.aborted) return 'unrecognized';
+    reader = response.body.getReader();
+    const aborted = new Promise<undefined>(resolve => {
+      onAbort = () => resolve(undefined);
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const part = await Promise.race([reader.read(), aborted]);
+      if (!part || signal.aborted) return 'unrecognized';
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 4_096) return 'unrecognized';
+      chunks.push(part.value);
+    }
+    const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+    if (signal.aborted || parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return 'unrecognized';
+    return exchangeOAuthError('error' in parsed ? parsed.error : undefined);
+  } catch { return 'unrecognized'; }
+  finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+    // Leave cancellation to the original HTTP-rejection path, even after an aborted/pending read.
+    try { reader?.releaseLock(); } catch { /* Diagnostic cleanup cannot replace the original failure. */ }
+  }
+}
+
 /** Exchanges one code without redirects/retries, returning only a request-local ID token. */
 async function exchangeCode(code: string, transaction: OAuthTransaction, google: GoogleLoginConfiguration,
   budget: AuthRequestBudget, diagnostics?: GoogleLoginObserver): Promise<string> {
@@ -54,6 +87,12 @@ async function exchangeCode(code: string, transaction: OAuthTransaction, google:
     diagnostics?.exchangeStatus(response.status);
     if (!response.ok || !response.body) {
       diagnostics?.failure(response.ok ? 'upstream_body_missing' : 'upstream_http_rejected');
+      if (!response.ok && diagnostics) {
+        diagnostics.exchangeError(await readExchangeOAuthError(response, abortSignal));
+        // The diagnostic read can leave an aborted stream; cleanup must still yield the original HTTP rejection.
+        await response.body?.cancel().catch(() => undefined);
+        throw new GoogleLoginError();
+      }
       await response.body?.cancel(); throw new GoogleLoginError();
     }
     const reader = response.body.getReader();
