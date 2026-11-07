@@ -12,7 +12,7 @@ import { PAGE_PATHS, PagePath, useRoute } from './routing';
 
 /** Coordinates guarded account pages, transient email/outcome handoff and the retained in-memory chat view. */
 export function App() {
-  const { path, navigate, lockNavigation } = useRoute();
+  const { path, selection, navigate, lockNavigation, selectConversation, assignConversation, clearSelection } = useRoute();
   const auth = useSession(path !== '/auth/result');
   const [email, setEmail] = useState('');
   const [notice, setNotice] = useState<Notice>();
@@ -39,8 +39,10 @@ export function App() {
     if (auth.state.status === 'signedIn' && path === '/login') navigate('/', true);
     if (auth.state.status === 'signedOut' && protectedPage) navigate('/login', true);
   }, [auth.state.status, path, navigate, preview, protectedPage]);
+  useEffect(() => { if (auth.state.status === 'signedOut' && !preview) clearSelection(); }, [auth.state.status, preview, clearSelection]);
 
-  if (import.meta.env.DEV && preview === 'chat') return <ChatPage preview expired={() => undefined} signOut={async () => undefined} />;
+  if (import.meta.env.DEV && preview === 'chat') return <ChatPage preview expired={() => undefined} signOut={async () => undefined}
+    selection={selection} selectConversation={selectConversation} assignConversation={assignConversation} />;
   if (import.meta.env.DEV && preview === 'account') return <AccountPage preview open={open} lock={lockAuth} finished={passwordFinished} expired={auth.expired} signOut={auth.signOut} />;
   // Entering a full-page callback result drops the old local chat view; hints never mutate server sessions or identities.
   if (path === '/auth/result') return <AuthResultPage state={auth.state} restore={auth.restore} open={open} />;
@@ -63,6 +65,7 @@ export function App() {
 
   return <>{auth.state.status === 'signedIn' && <div hidden={path !== '/'}>
     <ChatPage key={auth.state.session.userId} session={auth.state.session} expired={auth.expired} signOut={auth.signOut}
-      account={() => open('/account')} navigationBusy={lockChat} visible={path === '/'} notice={notice} />
+      account={() => open('/account')} navigationBusy={lockChat} visible={path === '/'} notice={notice}
+      selection={selection} selectConversation={selectConversation} assignConversation={assignConversation} />
   </div>}{page}</>;
 }

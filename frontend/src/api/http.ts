@@ -1,7 +1,7 @@
 type ApiPath = '/api/auth/me' | '/api/auth/login' | '/api/auth/logout' | '/api/chat'
   | '/api/auth/signup' | '/api/auth/confirm-signup' | '/api/auth/resend-confirmation'
-  | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password' | '/api/auth/link/google/start';
-type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change' | 'google-link';
+  | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password' | '/api/auth/link/google/start' | '/api/conversations';
+type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change' | 'google-link' | 'history';
 
 /** Carries bounded public failure metadata; raw bodies and provider diagnostics are never displayed. */
 export class ApiError extends Error {
@@ -44,9 +44,11 @@ export async function jsonResponse(response: Response, maximumBytes = 8192): Pro
 }
 
 /** Issues only fixed same-origin routes; Vite development never dispatches application requests. */
-export function request(path: ApiPath, options: RequestInit = {}): Promise<Response> {
+export function request(path: ApiPath, options: RequestInit = {}, cursor?: string): Promise<Response> {
   if (import.meta.env.DEV) throw new ApiError('Local preview is disconnected. Sign-in and chat are available after CloudFront deployment.', 'LOCAL_PREVIEW', 0, false);
-  return fetch(path, { ...options, credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+  if (cursor !== undefined && (path !== '/api/conversations' || !cursor.length || cursor.length > 2048 || /[^A-Za-z0-9_-]/.test(cursor))) throw new ApiError('Invalid history continuation.', 'INVALID_INPUT', 400, false);
+  const url = cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`;
+  return fetch(url, { ...options, credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
 }
 
 const AUTH_MESSAGES: Record<string, string> = {
@@ -90,12 +92,14 @@ export async function responseError(response: Response, context: Context): Promi
     return new ApiError('The operation response could not be verified.', 'INVALID_RESPONSE', response.status);
   }
   const gateway = record(body) && Object.keys(body).length === 1 && body.message === 'Request could not be authorized or processed.';
-  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change', 'google-link'].includes(context)
-    && (code === 'AUTHENTICATION_REQUIRED' || (context === 'chat' && (code === 'UNAUTHORIZED' || gateway)));
+  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change', 'google-link', 'history'].includes(context)
+    && (code === 'AUTHENTICATION_REQUIRED' || ((context === 'chat' || context === 'history') && (code === 'UNAUTHORIZED' || gateway)));
   const id = record(body) ? body.correlationId ?? body.requestId : undefined;
   const correlation = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
   if (authRequired) return new ApiError('Your session could not be authorized. Sign in again; no request will be resent.', 'AUTHENTICATION_REQUIRED', 401, false, true, correlation);
-  const safeMessage = code && Object.hasOwn(AUTH_MESSAGES, code) ? AUTH_MESSAGES[code] : undefined;
+  const historyMessage = context === 'history' && code === 'SERVICE_UNAVAILABLE' ? 'Conversation history is temporarily unavailable. Your current chat was retained.'
+    : context === 'history' && code === 'INVALID_INPUT' ? 'The list request was rejected. Refresh the conversation list before loading more.' : undefined;
+  const safeMessage = historyMessage ?? (code && Object.hasOwn(AUTH_MESSAGES, code) ? AUTH_MESSAGES[code] : undefined);
   return new ApiError(safeMessage ?? (response.status === 403 ? 'Access was denied. Check your connection or contact the administrator.'
     : response.status === 429 ? 'Requests are temporarily limited. Wait before retrying.'
       : context === 'chat' ? 'This turn could not be completed. Its outcome may still need to be resolved.'

@@ -4,7 +4,8 @@ This Node.js 22 workspace provides email/password login, registration,
 confirmation, recovery and protected account settings alongside authenticated
 streaming investigations. It uses React, TypeScript, Vite, Tailwind and lucide
 icons. It also provides Google login and explicit account linking for the current
-dev-only rollout. History, Stop, title editing and automatic message queues remain deferred.
+dev-only rollout. Conversation metadata browsing and selection are implemented;
+historical transcript retrieval, Stop, title editing and automatic queues remain deferred.
 
 ## Local development
 
@@ -46,10 +47,11 @@ origin for authenticated operation.
   Login sends only email/password and clears the submitted password. Logout sends
   `{}` and clears account-scoped UI only after confirmed empty 204. An ambiguous
   logout retains the local view; checking the session again can resolve it.
-- `src/chat/` keeps the transcript, draft, conversation ID and immutable original
-  request in memory, scoped to the verified account. Refresh loses that view;
-  authentication restoration does not fetch prior conversations. A new conversation
-  clears the view only, without cancelling or deleting backend work.
+- `src/chat/` keeps separate current-session turns, drafts, titles and immutable
+  original requests for each selected conversation, scoped to the verified account.
+  Refresh restores only the selected ID from the root URL, then reloads session
+  and metadata; it loses local turns/drafts/retry state. It does not fetch prior
+  messages. New chat is a separate local workspace and never cancels/deletes backend work.
   Navigating to account settings and back retains this idle in-memory chat view;
   confirmed logout/password revocation or a different account removes it. Account
   navigation and browser back/forward route changes are blocked during an active
@@ -82,6 +84,89 @@ shortened. It prefers a word boundary and falls back to `Security investigation`
 for no displayable text. The backend applies the same rule in the existing
 conditional conversation-metadata Put, once only. Follow-ups, retries and create
 conflicts never replace a stored title. There is no model-generated title or backfill.
+
+## Conversation list and selection
+
+The start gate for this slice was explicitly operator-confirmed: the preceding
+list API was reviewed, deployed and validated through CloudFront. This frontend
+change makes no new live API verification claim.
+
+After a verified session, `src/conversations/useConversations.ts` fetches one
+metadata page from GET `/api/conversations`. It retains the list during idle
+account-settings navigation. Responses use the existing four public fields
+(`conversationId`, `title`, `createdAt`, `updatedAt`) and string-or-null nextCursor,
+with at most 20 rows and a 32-KiB read bound. Invalid JSON/shapes are errors, never
+empty history. Cookies/no-store/redirect rejection remain in the existing client;
+only recognized protected-history 401 forms expire the session. Generic 403,
+400/429, malformed responses and outages retain the current chat and identity.
+
+The sidebar distinguishes initial loading, confirmed empty history, refresh and
+page errors, and preserves usable rows on failure. Load more passes back the exact
+opaque server cursor using URLSearchParams; cursors are never decoded, logged or
+put in the page URL. Entries merge by ID using the newest observed updatedAt and
+descending ID tie-break. Concurrent page loads and circular continuation chains
+are prevented. Successful page-one refresh replaces the page chain and its cursor;
+failure retains usable metadata. Older selected workspaces remain available even
+when omitted by the currently loaded pages. No local metadata row is fabricated
+for a newly assigned conversation ID; its workspace/title remain local until the
+server lists it.
+
+The client refreshes page one after each confirmed `complete`, including truncated
+completion, and on explicit refresh. EOF, deltas and activity do not refresh it.
+There is no polling, all-pages prefetch or automatic chat retry. Reads are aborted
+or ignored on superseding refresh, unmount or account change. Logout/expiry/account
+change clears metadata and all conversation workspaces; uncertain logout retains
+the current view.
+
+Chat URLs are `/` or `/?conversationId=<encoded-id>`. Selection/New chat push a
+history entry, and query-only Back/Forward changes are observable. Duplicate,
+empty, overlong, malformed or unexpected root parameters show a navigation error
+and block sending until explicit valid selection/New chat. The ID follows the
+existing bounded ASCII chat grammar, not a new UUID restriction. It is untrusted
+navigation, not ownership proof: an ID absent from loaded pages stays selected.
+Only the backend authorizes it. No message is automatically sent on navigation.
+
+Each conversation keeps its own draft, displayed current-session turns, input/error
+state and exact retry snapshot. Selecting an existing ID with no local messages
+shows an explicit selected-conversation view and sends that ID on a follow-up;
+it neither shows a fabricated transcript/new-chat welcome nor renames the stored
+conversation from the follow-up. A neutral title is used until metadata is known.
+Switching back restores that workspace, including unresolved errors. Selecting
+New chat from an existing conversation returns to the separate idle new-chat draft;
+selecting it again while already in New chat deliberately resets that local context.
+
+One stream holds the immediate global send/navigation lock. Selection/New chat,
+account changes and Back/Forward are blocked while active or leaving; drafts remain
+editable. Incoming events update their captured workspace/account/turn. The first
+validated initial server ID associates the same workspace with that ID and replaces
+the current root URL while retaining the lock. The frozen initial request still
+omits conversationId, so its explicit retry remains identical after URL assignment.
+Retrying replaces that turn's partial response; it never moves to another workspace
+or silently falls back to a new conversation after an unavailable/unauthorized ID.
+
+Account settings return preserves root selection. Refresh rechecks `/me`, fetches
+page one and seeds the workspace from the URL without waiting for every list page.
+This restores selection only: drafts, displayed turns and durable retry recovery
+are not reconstructed. A reload during work does not prove accepted backend work
+stopped; existing lease/idempotency errors remain authoritative. Conversation IDs
+can appear in browser address/history; cookies, text, cursors and user IDs do not.
+
+GSI pages are eventually consistent and are not snapshots. An updated conversation
+can move above a continuation boundary and be missed until page-one refresh; a
+cursor does not guarantee a nonempty following page. Deduplication does not turn
+pagination into a snapshot. See the [validated API contract](../infra/lambdas/frontend/conversation-history/README.md).
+
+Desktop uses an inline metadata sidebar; narrow screens use a named drawer with
+focus containment, Escape/close and return focus. The existing Vite
+`/?preview=chat` includes clearly labeled development-only presentation rows so
+selection and per-conversation drafting can be inspected without an identity,
+active send or API. Preview data/branches are excluded from production; they do
+not simulate live list results, pagination, stream outcomes or authentication.
+
+Existing root HTML publication already serves query selection. There is no new
+S3 entry, `/chat` page, CloudFront policy, backend API, IAM or workflow change.
+The root page continues receiving its query in the browser while `/api/*` retains
+uncached viewer query/cookie forwarding to API Gateway.
 
 ## Email/password account pages
 
@@ -207,8 +292,9 @@ A newly completed link clears the application/linking cookies only after the
 existing server confirmation; already-linked leaves the application session
 alone. Uncertain outcomes retain their existing ownership-based cookie behavior.
 Entering the result page drops the old local chat view. Full-page OAuth also loses
-memory-only drafts/transcripts; server history remains stored but cannot yet be
-reopened by a history UI. Returning a page from browser back/forward cache triggers
+memory-only drafts/transcripts; server history remains stored. The list UI can
+select a conversation for follow-ups, but earlier messages cannot yet be retrieved.
+Returning a page from browser back/forward cache triggers
 a fresh session check before protected content is used. Active chat/form requests
 continue to lock account navigation. See the [login](../Docs/FrontendStack/Google-Login.md)
 and [linking](../Docs/FrontendStack/Google-Linking.md) security and recovery details.
@@ -261,7 +347,7 @@ review and deployment through the existing workflow:
    Confirm the private S3 URL and direct API cannot bypass origin/session controls.
 2. Sign in with an existing confirmed password account; verify `/me`, chat,
    follow-up, account-bound ownership and a write-once title in DynamoDB. Refresh
-   should restore auth with a fresh empty local conversation view.
+   should restore auth and metadata; a selected root URL restores its ID with no historical/local transcript.
 3. Verify streaming/activity, one active send, draft preservation, keyboard/focus,
    deliberate exact-request replay, truncation and interrupted/error states.
 4. Verify logout/me 401, expiry and reauthentication without automatic resubmission.
@@ -312,3 +398,22 @@ or session issuance. Do not copy authorization URLs, cookies or codes into repor
 
 This UI does not make public demo ready: demo Google availability, additional abuse
 controls, history recovery, cancellation and operational rollback remain separate work.
+
+### Conversation-list operator checklist after deployment
+
+1. Check list loading, empty/error states, explicit refresh and Load more using
+   suitable existing data, with no automatic investigations or seeding.
+2. Select an existing row or valid ID outside page one and send a deliberate
+   follow-up. Earlier messages stay undisplayed; backend history supplies context.
+3. Verify query-only Back/Forward, selected-ID refresh, New chat URL clearing,
+   per-conversation drafts/turns/title and return from Account settings.
+4. Verify exact retries, especially an initial-turn failure after server ID
+   assignment: original message/turn/omitted conversationId stay unchanged.
+   No retry/selection should dispatch automatically or cross workspaces.
+5. Verify active-request navigation locks, truncated completion refresh, no refresh
+   on EOF/activity/deltas, and logout/expiry/account-change cache clearing. A service
+   error/403 must not sign out or blank the chat, and uncertain logout retains it.
+
+Local checks cover compilation, unchanged existing tests, source review and inert
+presentation only. Live pagination, streaming races, retries, account transitions
+and backend ownership enforcement remain operator validation after deployment.
