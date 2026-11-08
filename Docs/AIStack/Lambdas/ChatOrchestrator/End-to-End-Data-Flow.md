@@ -36,6 +36,7 @@ If a viewer does not render Mermaid, read the JSON snapshots in order: client re
 - All IDs, evidence, times, scan counts, and token counts are illustrative, not output from a live run. No dataset, account ID, secret, provider diagnostic, or private reasoning is included.
 - This is a follow-up in one existing conversation. Its first completed exchange occupies event sequences 1-2; that exchange appears in the model messages below, but its earlier stored items are not reprinted. The new turn occupies sequences 3-7.
 - JSON includes every field used at each shown API boundary and every attribute present on each shown stored-item variant. Unused optional attributes are absent, not invented as `null`. In particular, no summary pointers exist yet, and the original user event has no `attempt_id`.
+- Storage snapshots below show original EVT and META items, not every companion record. The atomic writer also creates selected-field HIST copies and a current TURN item; their exact fields and nullable pointers are defined in [persistence/context](Persistence-and-Context.md#exact-projection-contracts). They never enter the model/tool/stream examples.
 - The only shortened field contents are the two explicitly labeled system-reference strings in the Bedrock request. The tool schemas are complete but formatted compactly. Evidence shows one full **projected query row**, not the entire normalized WAF record; unrequested columns are intentionally outside this result.
 - The event date (September 11) is different from the chat/query-submission date (October 11). Query time filters concern the security event, not the conversation timestamp.
 
@@ -108,6 +109,8 @@ Here is the complete metadata item **after** saving sequence 3:
   "updated_at": "2026-10-11T10:00:00.100Z",
   "last_event_id": "33333333-3333-4333-8333-333333333333",
   "last_event_sequence": 3,
+  "history_projection_version": 1,
+  "history_through_sequence": 3,
   "lease_version": 2,
   "active_turn_id": "296a0470-b7b7-4a21-a9d7-72fb7be90ac9",
   "active_attempt_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -150,7 +153,7 @@ Here is the complete metadata item **after** saving sequence 3:
 }
 ```
 
-The original user event is not duplicated on retry. Metadata's `last_event_sequence` and this immutable event are updated transactionally. No `locked` flag or transcript blob is stored.
+The original user event is not duplicated on retry. This transaction updates META's event counter/watermark and writes both the shown EVT and its `HIST#0000000003` copy, linking the original user pointer in TURN. The preceding admission transaction published this new turn's running TURN at revision 1 alongside the META lease; the user link keeps revision 1. No `locked` flag or transcript blob is stored.
 
 The [handler](../../../../infra/lambdas/ai/chat-orchestrator/handler.ts) now opens NDJSON and sends `conversation`; the full successful stream is shown in step 9.
 
@@ -808,7 +811,7 @@ The model adapter buffers this tool-enabled response until it knows the stop rea
 }
 ```
 
-Token fragments are not extra event items. Once the write succeeds, the handler attempts lease release and terminal completion. After successful release, the complete metadata item is:
+Token fragments are not extra event items. The assistant transaction also writes `HIST#0000000007`, advances the watermark and sets this turn's TURN to complete/revision 2 with the shown assistant pointer. Tool events 4-6 advanced the watermark without creating HIST copies or changing TURN revision. Once the write succeeds, the handler attempts lease release and terminal completion. After successful release, the complete metadata item is:
 
 ```json
 {
@@ -822,6 +825,8 @@ Token fragments are not extra event items. Once the write succeeds, the handler 
   "updated_at": "2026-10-11T10:00:03.100Z",
   "last_event_id": "77777777-7777-4777-8777-777777777777",
   "last_event_sequence": 7,
+  "history_projection_version": 1,
+  "history_through_sequence": 7,
   "lease_version": 2,
   "title": "Security investigation",
   "GSI1PK": "USER#44444444-1111-4444-8111-111111111111",

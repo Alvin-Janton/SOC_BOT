@@ -1,9 +1,10 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
-  DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
+  DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, TransactWriteCommandInput, UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { createHash, randomUUID } from 'node:crypto';
 import { ToolValidation, validToolValidation } from '../../../lib/shared/tool-validation';
+import { admittedTurn, historyKey, historyRecord, storedHistory, transitionedTurn, TurnState, turnState } from './history-records';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
@@ -91,6 +92,8 @@ export interface ConversationMetadata {
   updated_at: string;
   last_event_id?: string;
   last_event_sequence: number;
+  history_projection_version: 1;
+  history_through_sequence: number;
   lease_version: number;
   active_turn_id?: string;
   active_attempt_id?: string;
@@ -135,6 +138,30 @@ export class StoreError extends Error {
    * { name: 'StoreError', code: 'NOT_FOUND', message: 'Conversation is unavailable.' }
    */
   public constructor(public readonly code: string, message: string) { super(message); this.name = 'StoreError'; }
+}
+
+type TransactionItem = NonNullable<TransactWriteCommandInput['TransactItems']>[number];
+
+/** Converts pure projection validation failures into the existing safe storage-domain error. */
+function projection<T>(build: () => T): T {
+  try { return build(); }
+  catch { throw new StoreError('INVALID_RECORD', 'Conversation history projection is invalid.'); }
+}
+
+/** Recognizes only explicit conditional cancellations, with an action-aligned reason for every item. */
+function failedTransactionConditions(error: unknown, count: number): number[] | undefined {
+  if (!(error instanceof Error) || error.name !== 'TransactionCanceledException') return undefined;
+  const reasons = (error as Error & { CancellationReasons?: { Code?: string }[] }).CancellationReasons;
+  if (!Array.isArray(reasons) || reasons.length !== count || reasons.some(reason => !reason || !['None', 'ConditionalCheckFailed'].includes(reason.Code ?? ''))) return undefined;
+  const failed = reasons.flatMap((reason, index) => reason.Code === 'ConditionalCheckFailed' ? [index] : []);
+  return failed.length ? failed : undefined;
+}
+
+/** Captures the metadata fields that admission must prove unchanged, including a previously observed expired lease. */
+function admissionSnapshot(metadata: ConversationMetadata): string {
+  return JSON.stringify([metadata.owner_id, metadata.lease_version, metadata.last_event_sequence,
+    metadata.history_projection_version, metadata.history_through_sequence,
+    metadata.active_turn_id, metadata.active_attempt_id, metadata.lease_expires_at]);
 }
 
 /**
@@ -304,11 +331,98 @@ export class ConversationStore {
     const result = await this.client.send(new GetCommand({ TableName: this.tableName, Key: { PK: `CONV#${conversationId}`, SK: 'META' }, ConsistentRead: true }), { abortSignal: this.requestSignal() });
     const item = result.Item;
     if (!item || item.owner_id !== this.trustedOwnerId) throw new StoreError('NOT_FOUND', 'Conversation is unavailable.');
-    if (item.entity_type !== 'CONVERSATION' || item.schema_version !== 1 || item.conversation_id !== conversationId
-      || !Number.isSafeInteger(item.last_event_sequence) || item.last_event_sequence < 0 || !Number.isSafeInteger(item.lease_version) || item.lease_version < 0) {
+    if (item.PK !== `CONV#${conversationId}` || item.SK !== 'META' || item.entity_type !== 'CONVERSATION' || item.schema_version !== 1 || item.conversation_id !== conversationId
+      || !Number.isSafeInteger(item.last_event_sequence) || item.last_event_sequence < 0 || item.last_event_sequence > 9_999_999_999
+      || !Number.isSafeInteger(item.lease_version) || item.lease_version < 0) {
       throw new StoreError('INVALID_RECORD', 'Conversation metadata is invalid.');
     }
+    if (item.history_projection_version !== 1 || item.history_through_sequence !== item.last_event_sequence) {
+      throw new StoreError('UNSUPPORTED_HISTORY', 'Conversation history requires a coordinated fresh start.');
+    }
+    const active = [item.active_turn_id, item.active_attempt_id, item.lease_expires_at];
+    if (active.some(value => value !== undefined) && (typeof item.active_turn_id !== 'string' || !UUID.test(item.active_turn_id)
+      || item.active_turn_id.length !== 36 || typeof item.active_attempt_id !== 'string' || !UUID.test(item.active_attempt_id)
+      || item.active_attempt_id.length !== 36 || !Number.isSafeInteger(item.lease_expires_at) || item.lease_expires_at <= 0)) {
+      throw new StoreError('INVALID_RECORD', 'Conversation lease metadata is invalid.');
+    }
     return item as ConversationMetadata;
+  }
+
+  /** Strongly reads one strict TURN record without widening the EVT-only audit query. */
+  private async readTurn(conversationId: string, turnId: string): Promise<TurnState | undefined> {
+    const result = await this.client.send(new GetCommand({ TableName: this.tableName,
+      Key: { PK: `CONV#${conversationId}`, SK: `TURN#${turnId}` }, ConsistentRead: true }), { abortSignal: this.requestSignal() });
+    return result.Item === undefined ? undefined : projection(() => turnState(result.Item, conversationId, turnId));
+  }
+
+  /** Proves that a contended HIST sequence is a valid committed copy of its exact original EVT. */
+  private async assertHistoryCollision(conversationId: string, sequence: number): Promise<void> {
+    const copy = await this.client.send(new GetCommand({ TableName: this.tableName,
+      Key: { PK: `CONV#${conversationId}`, SK: projection(() => historyKey(sequence)) }, ConsistentRead: true }), { abortSignal: this.requestSignal() });
+    const history = projection(() => storedHistory(copy.Item, conversationId, sequence));
+    const original = await this.client.send(new GetCommand({ TableName: this.tableName,
+      Key: { PK: history.PK, SK: `EVT#${history.created_at}#${String(sequence).padStart(10, '0')}#${history.event_id}` },
+      ConsistentRead: true }), { abortSignal: this.requestSignal() });
+    if (!original.Item || JSON.stringify(projection(() => historyRecord(storedEvent(original.Item!, conversationId)))) !== JSON.stringify(history)) {
+      throw new StoreError('INVALID_RECORD', 'Conversation history collision disagrees with its audit.');
+    }
+  }
+
+  /** Conditions a replacement on the complete observed TURN, including the user link that may not bump revision. */
+  private turnPut(previous: TurnState | undefined, next: TurnState): TransactionItem {
+    boundedJson(next);
+    if (!previous) return { Put: { TableName: this.tableName, Item: next, ConditionExpression: 'attribute_not_exists(PK)' } };
+    const fields = ['revision', 'attempt_id', 'lease_version', 'status', 'user_event_id', 'assistant_event_id',
+      'outcome_event_id', 'error_code', 'created_at', 'updated_at', 'schema_version', 'entity_type', 'conversation_id', 'turn_id'] as const;
+    return { Put: { TableName: this.tableName, Item: next,
+      ConditionExpression: fields.map((_, index) => `#f${index} = :f${index}`).join(' AND '),
+      ExpressionAttributeNames: Object.fromEntries(fields.map((field, index) => [`#f${index}`, field])),
+      ExpressionAttributeValues: Object.fromEntries(fields.map((field, index) => [`:f${index}`, previous[field]])),
+    } };
+  }
+
+  /** Rejects contradictions between current-turn pointers and the original audit before admitting or replaying work. */
+  private assertTurnAudit(state: TurnState | undefined, events: ChatEvent[], metadata: ConversationMetadata, turnId: string): void {
+    const turn = events.filter(event => event.turn_id === turnId);
+    const invalid = () => { throw new StoreError('INVALID_RECORD', 'Conversation turn projection disagrees with its audit.'); };
+    if (!state) { if (turn.length || metadata.active_turn_id === turnId) invalid(); return; }
+    const user = turn.find(event => event.entity_type === 'USER_MESSAGE');
+    if (state.user_event_id !== (user?.event_id ?? null) || state.lease_version > metadata.lease_version) invalid();
+    if (metadata.active_turn_id === turnId && (state.attempt_id !== metadata.active_attempt_id || state.lease_version !== metadata.lease_version)) invalid();
+    const abandoned = [...turn].reverse().find(event => event.entity_type === 'TURN_OUTCOME' && event.outcome === 'abandoned');
+    if (abandoned?.entity_type === 'TURN_OUTCOME') {
+      if (state.status !== 'abandoned' || state.attempt_id !== abandoned.attempt_id
+        || state.outcome_event_id !== abandoned.event_id || state.error_code !== abandoned.error_code) invalid();
+      return;
+    }
+    const assistant = [...turn].reverse().find(event => event.entity_type === 'ASSISTANT_MESSAGE');
+    if (assistant?.entity_type === 'ASSISTANT_MESSAGE') {
+      if (state.assistant_event_id !== assistant.event_id || state.attempt_id !== assistant.attempt_id
+        || state.status !== (assistant.stop_reason === 'max_tokens' ? 'truncated' : 'complete')) invalid();
+      return;
+    }
+    const outcome = [...turn].reverse().find(event => event.entity_type === 'TURN_OUTCOME' && event.attempt_id === state.attempt_id);
+    if (outcome?.entity_type === 'TURN_OUTCOME') {
+      if (state.outcome_event_id !== outcome.event_id || state.status !== outcome.outcome || state.error_code !== outcome.error_code) invalid();
+    } else if (state.status !== 'running') invalid();
+  }
+
+  /** Revalidates a completed requested turn without requiring unrelated conversation activity to stop. */
+  private async completedReplay(conversationId: string, turnId: string, message: string): Promise<ChatEvent> {
+    for (let read = 0; read < 3; read++) {
+      await this.metadata(conversationId); // Authorize before reading the requested turn or its audit.
+      const before = await this.readTurn(conversationId, turnId);
+      const events = await this.events(conversationId);
+      const metadata = await this.metadata(conversationId);
+      const after = await this.readTurn(conversationId, turnId);
+      // Supported status/pointer changes are atomic with their audit events; only this TURN must stay stable.
+      if (JSON.stringify(before) !== JSON.stringify(after)) continue;
+      const completed = this.checkTurn(events, turnId, message);
+      this.assertTurnAudit(after, events, metadata, turnId);
+      if (!completed) throw new StoreError('INVALID_RECORD', 'Completed conversation turn disagrees with its audit.');
+      return completed;
+    }
+    throw new StoreError('LEASE_LOST', 'Requested conversation turn changed before replay validation.');
   }
 
   /**
@@ -332,39 +446,81 @@ export class ConversationStore {
 
     if (!Number.isInteger(leaseExpiresAtSeconds) || leaseExpiresAtSeconds <= Math.floor(Date.now() / 1000)) throw new StoreError('INVALID_INPUT', 'Turn lease expiry is invalid.');
     const id = conversationId ?? this.initialConversationId(turnId);
-    if (conversationId === undefined) await this.createConversation(id, message);
-    const before = await this.metadata(id);
-    const initialEvents = await this.events(id);
-    const completed = this.checkTurn(initialEvents, turnId, message);
-    if (completed) return { state: 'completed', conversationId: id, assistant: completed };
-    const attemptId = randomUUID();
-    let previous: ConversationMetadata;
-
-    try {
-      const acquired = await this.client.send(new UpdateCommand({
-        TableName: this.tableName, Key: { PK: `CONV#${id}`, SK: 'META' },
-        ConditionExpression: 'owner_id = :owner AND (attribute_not_exists(lease_expires_at) OR lease_expires_at <= :now)',
-        UpdateExpression: 'SET active_turn_id = :turn, active_attempt_id = :attempt, lease_expires_at = :expiry, lease_version = lease_version + :one',
-        ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':now': Math.floor(Date.now() / 1000), ':turn': turnId, ':attempt': attemptId, ':expiry': leaseExpiresAtSeconds, ':one': 1 },
-        ReturnValues: 'ALL_OLD',
-      }), { abortSignal: this.requestSignal() });
-
-      if (!acquired.Attributes) throw new StoreError('INVALID_RECORD', 'Conversation lease could not be established.');
-      previous = acquired.Attributes as ConversationMetadata;
-
-    } catch (error) {
-      if (conditionalFailure(error)) throw new StoreError(before.active_turn_id === turnId ? 'TURN_IN_PROGRESS' : 'CONVERSATION_BUSY', 'A conversation turn is already in progress.');
-      throw error;
+    if (conversationId === undefined) {
+      // An initial-turn retry can resolve its stable existing conversation without even a conditional Put.
+      try { await this.metadata(id); }
+      catch (error) {
+        if (!(error instanceof StoreError) || error.code !== 'NOT_FOUND') throw error;
+        await this.createConversation(id, message);
+      }
     }
-    const lease: Lease = { conversationId: id, turnId, attemptId, version: previous.lease_version + 1, expiresAt: leaseExpiresAtSeconds };
+    const attemptId = randomUUID();
+    let acquired: { previous: ConversationMetadata; lease: Lease } | undefined;
+    for (let build = 0; build < 3; build++) {
+      const before = await this.metadata(id);
+      const events = await this.events(id);
+      const priorTurn = await this.readTurn(id, turnId);
+      if (priorTurn?.status === 'complete' || priorTurn?.status === 'truncated'
+        || events.some(event => event.turn_id === turnId && event.entity_type === 'ASSISTANT_MESSAGE')) {
+        return { state: 'completed', conversationId: id, assistant: await this.completedReplay(id, turnId, message) };
+      }
+      const priorActive = before.active_turn_id && before.active_turn_id !== turnId ? await this.readTurn(id, before.active_turn_id) : priorTurn;
+      // Separate strong reads are not a snapshot. Reclassify a changed view before judging pointer consistency.
+      if (admissionSnapshot(before) !== admissionSnapshot(await this.metadata(id))) continue;
+      if (events.length !== before.last_event_sequence || (events.length > 0 && events.at(-1)?.event_sequence !== before.last_event_sequence)) {
+        throw new StoreError('INVALID_RECORD', 'Conversation audit and projection watermark disagree.');
+      }
+      this.checkTurn(events, turnId, message);
+      this.assertTurnAudit(priorTurn, events, before, turnId);
+      if (before.active_turn_id && before.active_turn_id !== turnId) this.assertTurnAudit(priorActive, events, before, before.active_turn_id);
+      const now = Math.floor(Date.now() / 1000);
+      if (before.lease_expires_at && before.lease_expires_at > now) {
+        throw new StoreError(before.active_turn_id === turnId ? 'TURN_IN_PROGRESS' : 'CONVERSATION_BUSY', 'A conversation turn is already in progress.');
+      }
+      if (leaseExpiresAtSeconds <= now) throw new StoreError('INVALID_INPUT', 'Turn lease expiry is invalid.');
+      const lease: Lease = { conversationId: id, turnId, attemptId, version: before.lease_version + 1, expiresAt: leaseExpiresAtSeconds };
+      const next = projection(() => admittedTurn(priorTurn, lease, new Date().toISOString()));
+      const values: Record<string, unknown> = { ':owner': this.trustedOwnerId, ':version': before.lease_version,
+        ':previous': before.last_event_sequence, ':projection': 1, ':now': now, ':turn': turnId, ':attempt': attemptId,
+        ':expiry': leaseExpiresAtSeconds, ':nextVersion': lease.version };
+      const oldLease = before.active_turn_id === undefined
+        ? 'attribute_not_exists(active_turn_id) AND attribute_not_exists(active_attempt_id) AND attribute_not_exists(lease_expires_at)'
+        : 'active_turn_id = :oldTurn AND active_attempt_id = :oldAttempt AND lease_expires_at = :oldExpiry';
+      if (before.active_turn_id !== undefined) Object.assign(values, { ':oldTurn': before.active_turn_id, ':oldAttempt': before.active_attempt_id, ':oldExpiry': before.lease_expires_at });
+      const transaction = [
+        { Update: { TableName: this.tableName, Key: { PK: before.PK, SK: 'META' },
+          ConditionExpression: `owner_id = :owner AND lease_version = :version AND last_event_sequence = :previous AND history_projection_version = :projection AND history_through_sequence = :previous AND (${oldLease}) AND (attribute_not_exists(lease_expires_at) OR lease_expires_at <= :now)`,
+          UpdateExpression: 'SET active_turn_id = :turn, active_attempt_id = :attempt, lease_expires_at = :expiry, lease_version = :nextVersion',
+          ExpressionAttributeValues: values,
+        } }, this.turnPut(priorTurn, next),
+      ];
+      if (Buffer.byteLength(JSON.stringify(transaction), 'utf8') > 4 * 1024 * 1024) throw new StoreError('RECORD_LIMIT', 'Conversation transaction exceeds its storage limit.');
+      try {
+        await this.client.send(new TransactWriteCommand({ ClientRequestToken: randomUUID(), TransactItems: transaction }), { abortSignal: this.requestSignal() });
+        acquired = { previous: before, lease }; break;
+      } catch (error) {
+        // Only definite cancellations may rebuild; an unknown commit leaves its lease to normal recovery.
+        if (!failedTransactionConditions(error, transaction.length)) throw error;
+        const fresh = await this.metadata(id);
+        const freshTurn = await this.readTurn(id, turnId);
+        if (admissionSnapshot(before) === admissionSnapshot(fresh) && JSON.stringify(priorTurn) === JSON.stringify(freshTurn)) {
+          throw new StoreError('INVALID_RECORD', 'Conversation admission condition could not be reconciled.');
+        }
+      }
+    }
+    if (!acquired) throw new StoreError('LEASE_LOST', 'Conversation changed before turn admission.');
+    const { previous, lease } = acquired;
 
     try {
       const events = await this.events(id);
       const replay = this.checkTurn(events, turnId, message);
-      if (replay) { await this.release(lease); return { state: 'completed', conversationId: id, assistant: replay }; }
+      if (replay) {
+        this.assertTurnAudit(await this.readTurn(id, turnId), events, await this.metadata(id), turnId);
+        await this.release(lease); return { state: 'completed', conversationId: id, assistant: replay };
+      }
       if (previous.active_turn_id && previous.active_attempt_id && !events.some((event) => event.turn_id === previous.active_turn_id
         && event.attempt_id === previous.active_attempt_id && (event.entity_type === 'ASSISTANT_MESSAGE' || event.entity_type === 'TURN_OUTCOME'))) {
-        events.push(await this.appendFor(lease, { entity_type: 'TURN_OUTCOME', outcome: 'timed_out', retryable: true, failure_phase: 'lease_recovery', error_code: 'LEASE_EXPIRED' }, previous.active_turn_id, previous.active_attempt_id));
+        events.push(await this.appendFor(lease, { entity_type: 'TURN_OUTCOME', outcome: 'timed_out', retryable: true, failure_phase: 'lease_recovery', error_code: 'LEASE_EXPIRED' }, previous.active_turn_id, previous.active_attempt_id, previous.lease_version));
       }
 
       let userEvent = events.find((event) => event.turn_id === turnId && event.entity_type === 'USER_MESSAGE');
@@ -405,9 +561,9 @@ export class ConversationStore {
     try {
       await this.client.send(new UpdateCommand({
         TableName: this.tableName, Key: { PK: `CONV#${lease.conversationId}`, SK: 'META' },
-        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version',
+        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND history_projection_version = :projection AND history_through_sequence = last_event_sequence',
         UpdateExpression: 'REMOVE active_turn_id, active_attempt_id, lease_expires_at',
-        ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':attempt': lease.attemptId, ':version': lease.version },
+        ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':attempt': lease.attemptId, ':version': lease.version, ':projection': 1 },
       }), { abortSignal: this.requestSignal() });
     } catch (error) { if (conditionalFailure(error)) throw new StoreError('LEASE_LOST', 'Conversation turn ownership expired.'); throw error; }
   }
@@ -426,9 +582,9 @@ export class ConversationStore {
     try {
       await this.client.send(new UpdateCommand({
         TableName: this.tableName, Key: { PK: `CONV#${lease.conversationId}`, SK: 'META' },
-        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now',
+        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND history_projection_version = :projection AND history_through_sequence = last_event_sequence',
         UpdateExpression: 'SET lease_expires_at = :expiry',
-        ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':expiry': expiry },
+        ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':expiry': expiry, ':projection': 1 },
       }), { abortSignal: this.requestSignal() });
       return { ...lease, expiresAt: expiry };
     } catch (error) { if (conditionalFailure(error)) throw new StoreError('LEASE_LOST', 'Conversation turn ownership expired.'); throw error; }
@@ -514,9 +670,9 @@ export class ConversationStore {
         TransactItems: [
           { Update: {
             TableName: this.tableName, Key: { PK: metadata.PK, SK: 'META' },
-            ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :sequence',
+            ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :sequence AND history_projection_version = :projection AND history_through_sequence = :sequence',
             UpdateExpression: 'SET latest_summary_sk = :summary, summary_covers_through_sk = :checkpoint',
-            ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':sequence': metadata.last_event_sequence, ':summary': summary.SK, ':checkpoint': checkpoint.SK },
+            ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':sequence': metadata.last_event_sequence, ':summary': summary.SK, ':checkpoint': checkpoint.SK, ':projection': 1 },
           } },
           { Put: { TableName: this.tableName, Item: summary, ConditionExpression: 'attribute_not_exists(PK)' } },
         ],
@@ -557,7 +713,9 @@ export class ConversationStore {
       PK: `CONV#${conversationId}`, SK: 'META', entity_type: 'CONVERSATION', schema_version: 1,
       conversation_id: conversationId, owner_id: this.trustedOwnerId, created_at: createdAt, updated_at: createdAt,
       last_event_sequence: 0, lease_version: 0, title: conversationTitle(message), GSI1PK: `USER#${this.trustedOwnerId}`, GSI1SK: `CONV#${createdAt}#${conversationId}`,
+      history_projection_version: 1, history_through_sequence: 0,
     };
+    boundedJson(item);
     try { await this.client.send(new PutCommand({ TableName: this.tableName, Item: item, ConditionExpression: 'attribute_not_exists(PK)' }), { abortSignal: this.requestSignal() }); }
     catch (error) { if (!conditionalFailure(error)) throw error; }
   }
@@ -650,7 +808,7 @@ export class ConversationStore {
    *   turn_id: '<previous-turn-uuid>', attempt_id: '<previous-attempt-uuid>', entity_type: 'TURN_OUTCOME', outcome: 'timed_out', ... }
    * The transaction is fenced by the current lease, even when the event describes an expired prior attempt.
    */
-  private async appendFor(lease: Lease, payload: EventPayload, turnId: string, attemptId: string): Promise<ChatEvent> {
+  private async appendFor(lease: Lease, payload: EventPayload, turnId: string, attemptId: string, expiredVersion?: number): Promise<ChatEvent> {
     validatePayload(payload);
     const eventId = randomUUID();
     const createdAt = new Date().toISOString();
@@ -665,22 +823,52 @@ export class ConversationStore {
         ...(payload.entity_type === 'USER_MESSAGE' ? {} : { attempt_id: attemptId }),
       };
       boundedJson(event);
+      const history = projection(() => historyRecord(event));
+      const previousTurn = history ? await this.readTurn(lease.conversationId, turnId) : undefined;
+      if (history && !previousTurn) throw new StoreError('INVALID_RECORD', 'Conversation turn projection is missing.');
+      let nextTurn: TurnState | undefined;
+      try { nextTurn = history && previousTurn ? projection(() => transitionedTurn(previousTurn, history, lease, expiredVersion)) : undefined; }
+      catch (error) {
+        // A TURN read may observe a later atomic append than the preceding META read.
+        const fresh = await this.metadata(lease.conversationId);
+        this.assertLease(fresh, lease);
+        if (fresh.last_event_sequence > metadata.last_event_sequence) continue;
+        throw error;
+      }
       const updatedAt = typeof metadata.updated_at === 'string' && metadata.updated_at > createdAt ? metadata.updated_at : createdAt;
+      const transaction: TransactionItem[] = [
+        { Update: {
+          TableName: this.tableName, Key: { PK: metadata.PK, SK: 'META' },
+          ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :previous AND history_projection_version = :projection AND history_through_sequence = :previous',
+          UpdateExpression: 'SET last_event_sequence = :sequence, history_through_sequence = :sequence, last_event_id = :event, updated_at = :updated, GSI1SK = :index',
+          ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':previous': metadata.last_event_sequence, ':sequence': sequence, ':event': eventId, ':updated': updatedAt, ':index': `CONV#${updatedAt}#${lease.conversationId}`, ':projection': 1 },
+        } },
+        { Put: { TableName: this.tableName, Item: event, ConditionExpression: 'attribute_not_exists(PK)' } },
+      ];
+      if (history) transaction.push({ Put: { TableName: this.tableName, Item: history, ConditionExpression: 'attribute_not_exists(PK)' } });
+      if (nextTurn) transaction.push(this.turnPut(previousTurn, nextTurn));
+      if (Buffer.byteLength(JSON.stringify(transaction), 'utf8') > 4 * 1024 * 1024) throw new StoreError('RECORD_LIMIT', 'Conversation transaction exceeds its storage limit.');
       try {
         await this.client.send(new TransactWriteCommand({
           ClientRequestToken: randomUUID(),
-          TransactItems: [
-            { Update: {
-              TableName: this.tableName, Key: { PK: metadata.PK, SK: 'META' },
-              ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :previous',
-              UpdateExpression: 'SET last_event_sequence = :sequence, last_event_id = :event, updated_at = :updated, GSI1SK = :index',
-              ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':previous': metadata.last_event_sequence, ':sequence': sequence, ':event': eventId, ':updated': updatedAt, ':index': `CONV#${updatedAt}#${lease.conversationId}` },
-            } },
-            { Put: { TableName: this.tableName, Item: event, ConditionExpression: 'attribute_not_exists(PK)' } },
-          ],
+          TransactItems: transaction,
         }), { abortSignal: this.requestSignal() });
         return event;
-      } catch (error) { if (!conditionalFailure(error)) throw error; }
+      } catch (error) {
+        const failed = failedTransactionConditions(error, transaction.length);
+        if (!failed) throw error;
+        const historyConflict = history && failed.includes(2);
+        if (failed.includes(1) || (historyConflict && !failed.includes(0))) {
+          throw new StoreError('INVALID_RECORD', 'Conversation event or history key already exists.');
+        }
+        // A new sequence under the same live fence is the only ordinary append race. Never retry uniqueness/corruption.
+        const fresh = await this.metadata(lease.conversationId);
+        this.assertLease(fresh, lease);
+        if (fresh.last_event_sequence <= metadata.last_event_sequence) {
+          throw new StoreError('INVALID_RECORD', 'Conversation append condition could not be reconciled.');
+        }
+        if (historyConflict) await this.assertHistoryCollision(lease.conversationId, sequence);
+      }
     }
     throw new StoreError('LEASE_LOST', 'Conversation changed before event persistence.');
   }
