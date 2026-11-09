@@ -10,16 +10,96 @@ with temporary proofs, durable ownership fences and reconciliation boundaries.
 
 ## Implemented scope
 
-The Frontend-owned [conversation list API](../../infra/lambdas/frontend/conversation-history/README.md)
-adds authenticated `GET /api/conversations`, returning at most 20 metadata-only
-entries and an owner/environment-bound continuation cursor. It reads only AI's
-existing `GSI1`; Frontend imports the table reference with no reverse AI dependency,
-table/index replacement or foundation permission change. Eventual consistency and
-mutable recency ordering apply. The existing session authorizer now validates
-protected requests by their matched method: GET can omit Origin, while POST chat
-still requires exact Origin. Static publishing, CloudFront API forwarding, UI and
-workflows are unchanged. Sidebar, transcript retrieval and client caching remain
-future work; see the runtime guide for the contract and operator checks.
+The Frontend-owned [conversation history API](../../infra/lambdas/frontend/conversation-history/README.md)
+serves authenticated `GET /api/conversations` (unchanged metadata pages from GSI1)
+and `GET /api/conversations/{conversationId}/messages` (bounded HIST pages and
+current revisioned TURN statuses). Frontend reuses AI's table reference, with no
+reverse dependency, new table/index or foundation permission change. List recency
+is eventually consistent; message order uses strong sequence-keyed reads. Both
+GETs use the existing BFF/origin authorizer; the messages template resolves only
+one bounded concrete ID and exact method ARN. GET can omit Origin, while POST chat
+still requires exact Origin. Metadata sidebar/selection already exists in the
+frontend, but transcript hydration is not wired by this API slice. Static
+publication, workflows, streaming chat and authentication flows are unchanged.
+The shared reader Lambda is 60 seconds; list processing/integration stays 8/10
+seconds, messages processing/integration is 45/50 seconds. The shared API origin
+response/idle timeout is 60 seconds, not a total streamed-chat duration limit.
+Operator approval of the Regional integration and CloudFront timeout allowances
+is required before deployment; offline synthesis cannot establish those quotas.
+
+### Conversation messages: operator prerequisites and later checks
+
+The operator confirmed the deployed HIST/TURN writer, completed-replay fix and
+fresh-conversation validation. The reader requires supported projection markers
+and matching watermark; absent/foreign conversations both return 404, while owned
+corrupt/unsupported data is 503. There is no migration, repair, old-EVT fallback or
+new writer change. Runtime identity adds only GetItem/Query/BatchGetItem on the
+exact environment chat table; GSI1 Query and own-log grants remain. The existing
+APPLICATION boundary already permits these actions. No Scan, writes, other tables,
+auth/Cognito/secret, tools, S3, Bedrock or Athena access is added.
+
+Messages have a fixed sequence snapshot, at most 20 displayed user/assistant
+messages and 256 KiB complete JSON, newest retrieval with ascending page display.
+One user/assistant pair may split across pages. The separate opaque messages cursor
+keeps the same boundary and a safely consumed HIST position; deferred text is
+neither truncated nor skipped. Outcomes may consume bounded reads and yield empty
+pages with continuation. Queries are capped at three commands/100 examined items
+each; current TURN lookup is one strong batch step with at most two retries for
+validated unprocessed keys. Missing/unprocessed/corrupt required states fail 503.
+There are at most two strong META reads for owner/completeness/lease checks. SDK
+maxAttempts=2 separately bounds physical retries. See the runtime guide's exact
+contract, reserve calculation and [status rules](../../infra/lambdas/frontend/conversation-history/README.md#current-revisioned-status).
+
+Statuses are current when read, even beyond the messages' snapshot. Only a matching
+live META lease supports running; otherwise running is effective incomplete, with
+the stored revision unchanged. A proved newer same-turn attempt makes an older
+observed failure conservative incomplete. Earlier failed history cannot override
+a successful retry. Equal revisions can have different lease-derived observations,
+so future UI reconciliation also needs request-generation freshness. These strong
+reads are not one atomic snapshot and do not require unrelated work to stop.
+No retry controls, historical stream reconnection or automatic model dispatch is
+introduced. Compaction keeps original display history.
+
+**Deployment gate:** confirm the account/Region supports at least a 50-second
+buffered Regional integration and the CloudFront origin supports 60 seconds.
+No automatic quota/throttle request or shorter fallback is provided. The shared
+Lambda/CloudFront changes do not alter list's short deadline or chat STREAM mode,
+integration timeout and heartbeats. No live allowance check was performed here.
+
+After separate review/approval and deployment, insert these manual reads between
+`/me` and logout in the [existing private cookie-jar procedure](#later-manual-auth-validation).
+Keep its prompted login, exact POST Origin, logout and cleanup; use the returned
+`$authJar` and `$browserOrigin` in memory. Substitute an existing owned conversation
+ID. Do not print cookies/headers, save tokens, enable verbose logs, automatically
+seed investigations or create destructive failures for coverage.
+
+```powershell
+$conversationId = '<existing-owned-conversation-id>'
+$path = "$browserOrigin/api/conversations/$([Uri]::EscapeDataString($conversationId))/messages"
+try {
+  $page = Invoke-WebRequest -Uri $path -Method Get -WebSession $authJar `
+    -MaximumRedirection 0 -TimeoutSec 75
+  $page.Content
+  $history = $page.Content | ConvertFrom-Json
+  if ($history.nextCursor) {
+    $older = Invoke-WebRequest -Uri "$($path)?cursor=$([Uri]::EscapeDataString($history.nextCursor))" `
+      -Method Get -WebSession $authJar -MaximumRedirection 0 -TimeoutSec 75
+    $older.Content
+  }
+} finally {
+  Remove-Variable conversationId, path, page, history, older -ErrorAction SilentlyContinue
+}
+```
+
+Operator verification should cover owned/newest/older pages, stable IDs/content,
+ascending order and fixed boundary, split pairs, byte/count stops and empty pages
+with continuation using suitable existing data. Check current status after a safe
+retry, expired/missing lease, and unknown view versus actual storage failure;
+verify same missing/foreign 404, invalid/duplicate/foreign cursors, expired/revoked/
+no-cookie/direct-API denial, no-store, safe logs and unchanged list/auth/Google/chat/
+completed replay. Existing local checks do not exercise these live races or new
+API contracts; no tests, fixtures, mocks or API harness were authorized. The Python
+utility is a later slice, and frontend hydration follows API operator validation.
 
 The stack defines infrastructure and nine email/password authentication routes,
 plus [operator-activated dev Google login](Google-Login.md) and

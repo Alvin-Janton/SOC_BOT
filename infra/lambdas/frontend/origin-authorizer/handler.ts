@@ -1,5 +1,5 @@
 import { createOriginGuard, record } from '../shared/origin-guard';
-import { FRONTEND_PROTECTED_ROUTES, frontendOriginRoutes } from '../shared/origin-routes';
+import { conversationMessagesPath, FRONTEND_PROTECTED_ROUTES, frontendOriginRoutes } from '../shared/origin-routes';
 import { browserRequest, header } from '../shared/browser-request';
 import { createAuthRequestBudget, parseBffAuthConfig } from '../auth/config';
 import { readSessionCookie } from '../auth/cookies';
@@ -61,17 +61,25 @@ function policy(methodArn: string, allowed: boolean, principalId = 'cloudfront-o
 export async function handler(raw: unknown, context: { getRemainingTimeInMillis(): number }): Promise<AuthorizerPolicy> {
   const event = record(raw);
   const protectedRoute = FRONTEND_PROTECTED_ROUTES.find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
+  const messagesRoute = protectedRoute?.route === 'conversation-messages';
+  const messagesPath = messagesRoute && event ? conversationMessagesPath(event) : undefined;
+  const incomingContext = record(event?.requestContext);
+  if (messagesRoute && (!messagesPath || incomingContext?.httpMethod !== 'GET' || incomingContext.resourcePath !== protectedRoute?.resource)) throw new Error('Unauthorized');
+  let invalidMessagesEnvelope = false;
   let failure: 'Unauthorized' | 'Authorization unavailable';
   try {
     const config = configuration();
     const requestContext = record(event?.requestContext);
     const route = protectedRoute ?? frontendOriginRoutes(config.googleEnabled).find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
     const apiArn = config.methodArn.slice(0, config.methodArn.indexOf('/'));
-    const methodArn = route ? `${apiArn}/${config.stage}/${route.method}${route.resource}` : undefined;
+    const methodArn = route ? `${apiArn}/${config.stage}/${route.method}${messagesPath ?? route.resource}` : undefined;
 
     if (!event || !methodArn || event.type !== 'REQUEST' || event.methodArn !== methodArn || requestContext?.apiId !== config.apiId
       || requestContext.stage !== config.stage || requestContext.accountId !== config.account
-      || (protectedRoute && (requestContext.httpMethod !== route!.method || requestContext.resourcePath !== route!.resource))) throw new Error('Unauthorized');
+      || (protectedRoute && (requestContext.httpMethod !== route!.method || requestContext.resourcePath !== route!.resource))) {
+      invalidMessagesEnvelope = messagesRoute;
+      throw new Error('Unauthorized');
+    }
 
     // One budget includes origin verification and both strongly consistent session/user reads.
     const budget = protectedRoute ? createAuthRequestBudget(context.getRemainingTimeInMillis()) : undefined;
@@ -124,7 +132,7 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
 
   catch (error) {
     // Never surface input, secret/configuration details, SDK responses or diagnostics.
-    failure = !protectedRoute || (error instanceof BffAuthError && error.code === 'authentication_required')
+    failure = invalidMessagesEnvelope || !protectedRoute || (error instanceof BffAuthError && error.code === 'authentication_required')
       ? 'Unauthorized' : 'Authorization unavailable';
   }
   throw new Error(failure);

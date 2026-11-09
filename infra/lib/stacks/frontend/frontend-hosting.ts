@@ -51,6 +51,8 @@ export class FrontendHosting extends Construct {
           origin: new HttpOrigin(`${api.restApiId}.execute-api.${Aws.REGION}.${Aws.URL_SUFFIX}`, {
             originPath: `/${environment}`, protocolPolicy: OriginProtocolPolicy.HTTPS_ONLY,
             originSslProtocols: [OriginSslPolicy.TLS_V1_2],
+            // Shared API idle/response timeout, not a total streamed-chat duration cap; operator verifies allowance.
+            readTimeout: Duration.seconds(60),
             // Only this supported CloudFormation sink unwraps the token; synthesis retains a dynamic reference.
             customHeaders: { 'X-Soc-Bot-Origin': originAccess.secret.secretValue.unsafeUnwrap() },
           }),
