@@ -37,20 +37,20 @@ export function messageTurnStatus(state: TurnState, records: readonly HistoryRec
       if (metadata.lease_version <= state.lease_version || ['complete', 'truncated', 'abandoned'].includes(state.status)) invalid();
       status = 'incomplete'; // The batch preceded admission of a newer attempt; the old failure is not its outcome.
     } else if (metadata.lease_version !== state.lease_version) invalid();
-  } 
-  
+  }
+
   else if (metadata.active_turn_id !== undefined && metadata.lease_version === state.lease_version) invalid();
 
   if (status === 'running' && (metadata.active_turn_id !== state.turn_id || metadata.active_attempt_id !== state.attempt_id
     || metadata.lease_version !== state.lease_version || (metadata.lease_expires_at ?? 0) <= Math.floor(now / 1000))) status = 'incomplete';
 
   let error: PublicTurnStatus['error'] = null;
-  
+
   if (status === 'failed' || status === 'timed_out' || status === 'cancelled' || status === 'abandoned') {
     error = state.error_code && Object.hasOwn(ERROR_MESSAGES, state.error_code)
       ? { code: state.error_code, message: ERROR_MESSAGES[state.error_code] } : FALLBACK_ERRORS[status];
   }
-  
+
   const result = publicStatusSchema.safeParse({ turnId: state.turn_id, revision: state.revision, status, error });
   if (!result.success) invalid();
   return result.data!;

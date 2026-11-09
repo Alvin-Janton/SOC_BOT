@@ -72,6 +72,6 @@ export function messageMetadata(raw: unknown, conversationId: string, owner: str
   if (value.PK !== `CONV#${conversationId}` || value.conversation_id !== conversationId
     || value.history_through_sequence !== value.last_event_sequence
     || (active.some(field => field !== undefined) && (active.some(field => field === undefined) || value.lease_version < 1))) throw new HistoryError('SERVICE_UNAVAILABLE');
-    
+
   return value;
 }

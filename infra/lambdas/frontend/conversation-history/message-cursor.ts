@@ -12,7 +12,7 @@ const cursorSchema = z.strictObject({ version: z.literal(1), query: z.literal('c
 /** Validates only base-table HIST positions inside the authorized conversation and fixed sequence boundary. */
 export function historyPosition(raw: unknown, conversationId: string, snapshot: number): HistoryPosition {
   const parsed = positionSchema.safeParse(raw);
-  
+
   if (!parsed.success || parsed.data.PK !== `CONV#${conversationId}` || Number(parsed.data.SK.slice(5)) < 1
     || Number(parsed.data.SK.slice(5)) > snapshot) throw new HistoryError('SERVICE_UNAVAILABLE');
 

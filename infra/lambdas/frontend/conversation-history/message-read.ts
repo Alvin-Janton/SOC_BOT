@@ -156,7 +156,7 @@ export async function readMessages(config: HistoryConfiguration, owner: string, 
         if (item.entity_type !== 'TURN_OUTCOME') {
           const message: PublicMessage = { messageId: item.event_id, turnId: item.turn_id, sequence: item.event_sequence,
             role: item.role, content: item.content, createdAt: item.created_at };
-            
+
           const additional = Buffer.byteLength(JSON.stringify(message), 'utf8') + (messages.length ? 1 : 0);
           if (additional > MAX_MESSAGE_BYTES - NON_MESSAGE_RESERVE) throw new HistoryError('SERVICE_UNAVAILABLE');
           if (messages.length === MAX_MESSAGES || bytes + additional > MAX_MESSAGE_BYTES - NON_MESSAGE_RESERVE) { stopped = true; break; }
