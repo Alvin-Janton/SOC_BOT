@@ -16,7 +16,21 @@ export const FRONTEND_ORIGIN_ROUTES = [
 export const FRONTEND_PROTECTED_ROUTES = [
   { route: 'chat', method: 'POST', resource: '/api/chat' },
   { route: 'conversations', method: 'GET', resource: '/api/conversations' },
+  { route: 'conversation-messages', method: 'GET', resource: '/api/conversations/{conversationId}/messages' },
 ] as const;
+
+export const CONVERSATION_MESSAGES_RESOURCE = '/api/conversations/{conversationId}/messages';
+
+/** Resolves only the messages template's one bounded ID to its exact concrete path. */
+export function conversationMessagesPath(event: Record<string, unknown>): string | undefined {
+  const params = event.pathParameters;
+  if (event.resource !== CONVERSATION_MESSAGES_RESOURCE || !params || typeof params !== 'object' || Array.isArray(params)
+    || Object.keys(params).length !== 1 || !Object.hasOwn(params, 'conversationId')) return undefined;
+  const id = (params as Record<string, unknown>).conversationId;
+  if (typeof id !== 'string' || !id.length || id.length > 128 || /[^A-Za-z0-9_-]/.test(id)) return undefined;
+  const path = `/api/conversations/${id}/messages`;
+  return event.path === path ? path : undefined;
+}
 
 const GOOGLE_ORIGIN_ROUTES = [
   { route: 'google-start', method: 'GET', resource: '/api/auth/google/start' },

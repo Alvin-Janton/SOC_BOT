@@ -6,6 +6,7 @@ const ERRORS = {
   INVALID_INPUT: { status: 400, message: 'Invalid conversation-list request.' },
   AUTHENTICATION_REQUIRED: { status: 401, message: 'Authentication required.' },
   SERVICE_UNAVAILABLE: { status: 503, message: 'Conversation history is temporarily unavailable.' },
+  CONVERSATION_UNAVAILABLE: { status: 404, message: 'Conversation is unavailable.' },
 } as const;
 
 /** Carries only authored public errors; storage/provider details never enter responses or logs. */
@@ -38,6 +39,15 @@ export function request(raw: unknown, config: HistoryConfiguration): { owner: st
     || (event.isBase64Encoded !== undefined && event.isBase64Encoded !== false)
     || (event.body !== undefined && event.body !== null && event.body !== '')) throw new HistoryError('INVALID_INPUT');
 
+  const owner = requestOwner(context, config);
+
+  if (event.pathParameters !== undefined && event.pathParameters !== null
+    && (!record(event.pathParameters) || Object.keys(event.pathParameters).length)) throw new HistoryError('INVALID_INPUT');
+  return { owner, cursor: requestCursor(event) };
+}
+
+/** Reuses the exact trusted subject/API/stage contract for the two admitted history GET routes. */
+export function requestOwner(context: Record<string, unknown>, config: HistoryConfiguration): string {
   const authorization = record(context.authorizer);
   const subject = authSubSchema.safeParse(authorization?.userId);
 
@@ -45,9 +55,11 @@ export function request(raw: unknown, config: HistoryConfiguration): { owner: st
     || authorization?.authenticationType !== 'bff-session' || !subject.success || authorization.principalId !== subject.data
     || authorization.apiId !== config.apiId || authorization.stage !== config.environment) throw new HistoryError('AUTHENTICATION_REQUIRED');
 
-  if (event.pathParameters !== undefined && event.pathParameters !== null
-    && (!record(event.pathParameters) || Object.keys(event.pathParameters).length)) throw new HistoryError('INVALID_INPUT');
+  return subject.data;
+}
 
+/** Preserves the list route's single/multivalue cursor reconciliation without admitting other query fields. */
+export function requestCursor(event: Record<string, unknown>): string | undefined {
   let cursor: string | undefined;
 
   for (const name of ['queryStringParameters', 'multiValueQueryStringParameters'] as const) {
@@ -65,7 +77,7 @@ export function request(raw: unknown, config: HistoryConfiguration): { owner: st
 
     cursor = value;
   }
-  return { owner: subject.data, cursor };
+  return cursor;
 }
 
 const idSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);

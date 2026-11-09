@@ -1,10 +1,12 @@
-# Authenticated conversation metadata listing
+# Authenticated conversation metadata and messages
 
-`handler.ts` serves only `GET /api/conversations` through the existing CloudFront
-API behavior and zero-cache BFF session authorizer. This is an API-only increment:
-no history sidebar, transcript opening, polling, rename/delete or frontend cache
-implementation is included. Authentication/Google flows and streaming chat are
-unchanged; the removed Google diagnostics remain removed.
+`handler.ts` serves `GET /api/conversations` and
+`GET /api/conversations/{conversationId}/messages` through the existing CloudFront
+API behavior and zero-cache BFF session authorizer. The list contract below is
+unchanged. The messages endpoint is an API-only increment: the existing metadata
+sidebar/selection does not yet fetch historical messages. No frontend hydration,
+Python client, polling or rename/delete implementation is included.
+Authentication/Google flows and streaming chat remain unchanged.
 
 ## Request and response
 
@@ -86,30 +88,182 @@ There is no historical-owner reassignment, backfill or index/projection migratio
 
 ## Runtime and permissions
 
-Frontend owns the dedicated Node.js 22 / 256 MiB / ten-second Lambda, boundary-limited
-APPLICATION role, log group and GET integration. AI still owns the table; Frontend
+Frontend owns the existing Node.js 22 / 256 MiB Lambda (now 60 seconds), boundary-limited
+APPLICATION role, seven-day managed log group and both GET integrations. AI still owns the table; Frontend
 imports its reference, preserving Data -> AI -> Frontend deployment and reverse
 teardown order. The existing deployment/teardown workflows need no change.
 
-The identity policy grants only `dynamodb:Query` on that table's exact
-`/index/GSI1` ARN plus CreateLogStream/PutLogEvents in its own managed log group.
-No auth-table/Cognito/secret access, base-table Query/GetItem/Scan, writes, tools,
-S3, Bedrock, Athena or metrics grants are present. The existing APPLICATION
-boundary's environment table-prefix wildcard covers the index suffix; no
-foundation change or administrator foundation-first rollout is required.
+The identity policy retains `dynamodb:Query` on that table's exact
+`/index/GSI1` ARN and adds only GetItem/Query/BatchGetItem on the matching base-table
+ARN. Own-log CreateLogStream/PutLogEvents remain. There is no Scan, write, wildcard
+table/index, auth-table/Cognito/secret, S3, Bedrock, Athena, tool or metrics grant.
+The existing APPLICATION boundary already covers these actions and the index
+suffix; no foundation change or administrator foundation-first rollout is needed.
 See [DynamoDB's Query/index resource authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_dynamodb.html).
 
-The SDK uses at most two attempts, 500-ms connection / two-second request timeouts
-and a six-second call signal bounded by the request deadline. Total processing
-is capped at eight seconds with Lambda response reserve; serialized success is
-capped at 32 KiB. Logs contain only request ID, fixed route/outcome, duration,
+List processing still uses at most two SDK attempts, 500-ms connection / two-second
+request timeouts and a six-second call signal bounded by its eight-second deadline.
+The list integration stays ten seconds and serialized list success stays 32 KiB.
+The messages limits are separately defined below; the shared Lambda timeout does
+not enlarge list processing. List logs contain only request ID, fixed route/outcome, duration,
 returned count and continuation-present boolean. No subject, title, conversation
 ID, cursor, cookie, SDK error or raw item is logged. Retention is seven days;
 dev log deletion and demo retention follow existing environment policy.
 
+## Conversation messages contract
+
+The operator confirmed the HIST/TURN writer and completed-replay correction were
+deployed and validated with fresh conversations before this implementation.
+Only supported fresh data is accepted: owned META must have projection version 1
+and a watermark equal to last_event_sequence. No legacy fallback, migration,
+backfill, repair or deletion occurs. Original EVT and SUMMARY are never queried.
+
+Use `GET /api/conversations/<id>/messages`, optionally followed by
+`?cursor=<opaque-token>`. No body or other parameters are accepted. IDs use the
+existing 1-128 ASCII letter/digit/underscore/hyphen grammar; slash, encoded path
+traversal, empty/duplicate IDs and trailing line terminators are rejected. The
+authorizer compares the exact concrete path/method ARN and the handler rechecks
+the REST template, path parameter, account/API/stage and trusted BFF subject.
+The new Lambda permission allows only the matching account/API/stage GET
+`/api/conversations/*/messages`; it does not widen the list permission.
+
+Complete illustrative response, with synthetic identifiers and text:
+
+```json
+{
+  "conversationId": "example-conversation",
+  "snapshotSequence": 14,
+  "messages": [
+    {
+      "messageId": "f4cd09aa-15ed-4d99-b605-91381069cb42",
+      "turnId": "31f15daf-9dc2-4b04-a618-aa99cd08c137",
+      "sequence": 1,
+      "role": "user",
+      "content": "Check the WAF logs for suspicious activity.",
+      "createdAt": "2026-11-08T14:00:00.000Z"
+    },
+    {
+      "messageId": "e3e342b8-834b-4cd0-8e7c-e8d34219df05",
+      "turnId": "31f15daf-9dc2-4b04-a618-aa99cd08c137",
+      "sequence": 14,
+      "role": "assistant",
+      "content": "I found blocked SQL injection attempts.",
+      "createdAt": "2026-11-08T14:01:30.000Z"
+    }
+  ],
+  "turnStatuses": [
+    { "turnId": "31f15daf-9dc2-4b04-a618-aa99cd08c137", "revision": 4, "status": "complete", "error": null }
+  ],
+  "nextCursor": null
+}
+```
+
+Messages expose exactly those six fields, preserving saved content, IDs and UTC
+timestamps. Each response has at most 20 messages and 262,144 serialized UTF-8 JSON
+bytes. The same envelope holds empty arrays for an empty page. Sequence gaps and
+split user/assistant pairs are expected. No original tool/audit payload, owner,
+attempt/fence, raw key, model configuration, summary or retry control is returned.
+Absent and other-owned conversations have identical 404 CONVERSATION_UNAVAILABLE;
+invalid admitted inputs/cursors use 400 INVALID_INPUT, identity failures 401,
+and storage/configuration/corrupt/unsupported records 503 SERVICE_UNAVAILABLE.
+Gateway/authorizer denials can occur earlier; generic 403 is not session expiry.
+All handler errors retain the existing error/requestId envelope, no-store and
+nosniff. Error text is authored, never a raw SDK/stored diagnostic message.
+
+### Reads, consumed positions and bounds
+
+One strong META GetItem authorizes before any history/status read and captures
+the first page's last_event_sequence. A versioned, canonical base64url messages
+cursor (at most 2,048 characters) binds query/environment/account/owner/conversation,
+that snapshot and only a validated HIST key. The list cursor dialect is separate
+and unchanged. Tokens remain untrusted navigation positions, not signatures or
+proof of previous issuance; every page reauthorizes META. Later writes are excluded
+from messages by the fixed boundary, not by pretending reads are one transaction.
+
+At most three application-issued strong base-table Query commands use fixed PK
+and the range HIST#0000000001 through the padded snapshot, descending, Limit=100.
+No filter, GSI, Scan or EVT fallback is used. The reader validates strict records,
+descending sequences and duplicate IDs/user/assistant records. Outcomes can advance
+the consumed position but never become fabricated assistant messages or current
+status authority. A zero boundary needs no Query.
+
+Public message JSON bytes and separators are counted before inclusion, with a
+32-KiB non-message reserve: at most 20 status objects capped at 1,024 bytes each,
+their separators and an envelope/cursor below 4 KiB total less than 24,596 bytes.
+The reader also measures actual non-message overhead and final JSON against the
+limits. Whole text is deferred when the next message cannot fit. A single invalid
+or future oversized message fails safely rather than being truncated/skipped.
+
+The descending consumed checkpoint is independent of the ascending display array.
+Mid-page stops resume before the deferred record, including any preceding consumed
+outcomes. SDK LastEvaluatedKey is used only after consuming its entire returned
+page. Full-page exhaustion returns null even with exactly 20 messages. Outcome-only
+or budget-limited pages can have progressing cursors; continuation promises neither
+a nonempty next page nor a total. No-progress budget exhaustion fails safely,
+instead of repeating the same cursor or declaring history exhausted.
+
+### Current revisioned status
+
+Only distinct turns represented by returned messages are batch-read (at most 20),
+with strong consistency. Results are mapped by validated keys, not array order.
+One batch step permits at most three application-issued BatchGetItem commands,
+retrying only validated UnprocessedKeys with small bounded exponential jitter.
+Unexpected/duplicate/foreign keys, processed-but-missing items or unprocessed keys
+after the cap fail the request with 503. Partial status success is not returned.
+[AWS documents unordered results, partial batches and unprocessed-key backoff](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchGetItem.html).
+
+One additional strong META GetItem rechecks ownership/completeness and current
+lease evidence. Unrelated sequence/lease activity does not require quiescence.
+User pointers and known assistant relationships must agree with TURN; explicit
+abandonment can clear the effective assistant pointer without deleting history.
+Current completion can reference an answer beyond snapshotSequence, but the
+reader never fetches or inserts that answer outside this page.
+
+Statuses are complete, truncated, running, failed, timed_out, cancelled, abandoned
+or effective incomplete. Running requires matching live META turn/attempt/fence;
+an expired/missing lease yields incomplete/error:null, never a write. If fresh META
+proves a newer same-turn attempt than the batch observed, an old failure is
+conservatively incomplete; irreconcilable invariants fail 503. Current confirmed
+terminal states use an allowlisted authored code/message or a fixed fallback;
+all complete/truncated/running/incomplete errors are null. Prior failed HIST
+outcomes do not override a later successful retry.
+
+Revision is the positive persisted TURN revision, unchanged by the reader.
+Lease-derived running/incomplete can change at the same revision, so a future
+frontend must also reject stale request generations when reconciling equal
+revisions. These individual strong reads are not an atomic multi-item snapshot.
+Compaction preserves display history. Opening history does not resume a stream,
+and historical failures do not reconstruct exact retry requests or expose controls.
+
+### Timeouts and deployment gates
+
+Messages have a 45-second admission-to-response deadline with actual Lambda
+remaining-time reserve, 50-second buffered Regional integration and a shared
+60-second Lambda timeout. SDK calls retain maxAttempts=2, 500-ms connection and
+two-second request timeouts, with signals capped at five seconds and the original
+deadline. Queries reserve time for batches/META/final serialization; budget limits
+can yield shorter pages. Application command counts are not physical HTTP-attempt
+counts. The shared CloudFront API origin read/response timeout is 60 seconds;
+it is an idle-response limit, not a total streamed-chat duration cap. Chat's STREAM
+integration and heartbeats remain unchanged. List stays eight seconds/32 KiB with
+its ten-second integration.
+
+**Before deployment, the operator must confirm a Regional integration allowance
+of at least 50 seconds and CloudFront allowance for 60 seconds.** Defaults and
+adjustability are documented by [API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-execution-service-limits-table.html)
+and [CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html).
+Offline synthesis does not prove either live allowance. No quota/throttle request,
+live API check or deployment is performed here. Future clients should allow the
+end-to-end ceiling, for example 75 seconds; no client was changed in this slice.
+
+Messages logs add only fixed route template, safe request ID/outcome/duration,
+message/byte/query/batch counts and continuation-present. List logging is unchanged.
+Never log concrete paths, conversation/owner/attempt IDs, text, titles, tokens,
+cursors, raw items, SDK diagnostics or transaction state.
+
 ## Later UI and operator validation
 
-Future UI should use an in-memory cache only: reload checks `/me` then page one;
+The existing metadata UI uses an in-memory cache: reload checks `/me` then page one;
 merge/deduplicate by conversationId; refresh page one after chat completion; clear
 on logout/expiry/account change. No periodic polling or HTTP/CloudFront caching.
 `/api/conversations` uses the existing uncached `/api/*` behavior with viewer
