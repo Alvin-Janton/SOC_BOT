@@ -171,18 +171,23 @@ caching and dev viewer WAF remain unchanged. `ChatUrl` outputs the CloudFront UR
 
 ### Manual Python client
 
-The [manual client guide](../../README.md#manual-chat-client) covers private
-Windows session storage, explicit login/me/logout, follow-up and completed-turn
-replay, no-session 401 and two-account generic-404 checks. Example after setting
+The [manual client guide](../../README.md#manual-api-and-chat-clients) covers private
+Windows session storage, explicit API-client login/me/logout, list/messages
+pagination, follow-up and completed-turn replay, no-session 401 and two-account
+generic-404 checks. Example after setting
 `$base` and a private `$session` as documented:
 
 ```powershell
-python scripts/chat_client.py --base-url $base --session-file $session --action login --email (Read-Host 'Confirmed password-account email')
+python scripts/api_client.py --base-url $base --session-file $session --action login --email (Read-Host 'Confirmed password-account email')
 python scripts/chat_client.py --base-url $base --session-file $session --message 'Describe waf_events.'
 ```
 
-The password is prompted privately, never a command argument. This standard-library
-client is manual developer tooling, not a browser or automated test; supplied
+The password is prompted privately, never a command argument. Both clients share
+the same origin-bound version-1 session file and must be used sequentially, without
+concurrent credential writes. Chat retains explicit login convenience but delegates
+me/logout and JSON operations to api_client.py. The messages commands depend on the
+separate API deployment/timeout prerequisites. These standard-library clients are
+manual developer tooling, not browsers or automated tests; supplied
 Origin/cookie handling does not verify browser SameSite, HttpOnly, CSRF or Fetch
 Metadata behavior. Authenticated client implementation is not live validation.
 Every CLI action requires an explicit validated CloudFront --base-url; --api-url
