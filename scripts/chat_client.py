@@ -1,56 +1,40 @@
-"""Manually log in, inspect/logout a session, or render one SOC Bot chat turn.
+"""Render one SOC Bot chat turn, or explicitly log in with a hidden password.
 
-Assistant Markdown is plain stdout text; progress and IDs go to stderr.
-Python 3.11+ standard library only; no retries, redirects or AWS credentials.
-Every action requires --base-url for authenticated CloudFront; --session-file selects explicit
-origin-bound cookie storage; login prompts privately and requires --email.
-Session files contain plaintext bearer credentials: keep them private and
-outside synced directories. This is not browser/security/evaluation testing.
-Exit codes: 0 complete, 1 failure/incomplete, 2 invalid arguments, 3 truncated,
-130 interrupted locally. The 60-second socket timeout measures inactivity,
-not the complete turn; server heartbeats normally arrive every 15 seconds.
+Assistant Markdown goes to stdout; progress and IDs go to stderr. Use api_client.py
+for session inspection/logout and JSON APIs. Python 3.11+ standard library only.
+Every action requires an explicit CloudFront --base-url. Session files are private
+plaintext credentials; keep them outside synced directories. No automatic login,
+renewal, retries or redirects. Exit codes: 0 complete, 1 failure, 2 usage,
+3 truncated, 130 interrupted. The 60-second socket timeout measures inactivity.
 """
 
 import argparse
-from datetime import datetime
-from email.utils import parsedate_to_datetime
-import getpass
 import http.client
-import http.cookiejar
-from http.cookies import CookieError, SimpleCookie
 import ipaddress
 import json
-import os
-from pathlib import Path
 import re
 import ssl
 import sys
-import tempfile
-import time
-import unicodedata
 import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
-import warnings
-from typing import TextIO
 
-# Import-only compatibility for the unchanged evaluator, which needs a separate auth migration.
-# This retired endpoint is never selected by the CLI and is not a supported fallback.
+if __package__:
+    from .client_common import (
+        AUTH_PATHS, MAX_HTTP_ERROR_BYTES, ClientError, HttpsTransport, SessionState,
+        base_argument, decode_object, email_argument, login_payload, send_login,
+        session_argument, terminal_text, write_text,
+    )
+else:
+    from client_common import (
+        AUTH_PATHS, MAX_HTTP_ERROR_BYTES, ClientError, HttpsTransport, SessionState,
+        base_argument, decode_object, email_argument, login_payload, send_login,
+        session_argument, terminal_text, write_text,
+    )
+
+# Import-only compatibility for the unchanged evaluator, not a CLI default/fallback.
 DEFAULT_API_URL = "https://1vg8z8ov16.execute-api.us-east-1.amazonaws.com/dev/chat"
-SOCKET_TIMEOUT_SECONDS = 60
 MAX_LINE_BYTES = 256 * 1024
-MAX_HTTP_ERROR_BYTES = 8192
-MAX_SESSION_BYTES = 4096
-SESSION_COOKIE = "__Host-soc_bot_session"
-SESSION_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
-SESSION_FILE = re.compile(r"\.soc-bot-chat-session(?:-[A-Za-z0-9_-]+)?\.json")
-AUTH_PATHS = {"login": "/api/auth/login", "me": "/api/auth/me", "logout": "/api/auth/logout", "chat": "/api/chat"}
-AUTH_ERROR_CODES = {
-    "INVALID_CONFIGURATION", "AUTHENTICATION_FAILED", "AUTHENTICATION_REQUIRED", "SESSION_UNAVAILABLE",
-    "INVALID_INPUT", "BODY_TOO_LARGE", "UNSUPPORTED_MEDIA_TYPE", "INVALID_ORIGIN",
-    "ACCOUNT_NOT_CONFIRMED", "AUTHENTICATION_CHALLENGE", "THROTTLED",
-}
 CONVERSATION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,128}")
 STAGES = {
@@ -61,18 +45,6 @@ STAGES = {
     "tool_error": "Tool returned an application error.", "tool_invocation_failed": "Tool invocation could not be confirmed.",
     "tool_response_invalid": "Tool response was invalid.", "tool_not_executed": "Tool call was not executed.",
 }
-
-
-class ClientError(Exception):
-    """Describe a local protocol problem without including raw response content."""
-
-
-class NoRedirects(urllib.request.HTTPRedirectHandler):
-    """Refuse redirect follow-ups, which could resend or disclose the message."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        """Leave every redirect as an HTTP error rather than issuing another request."""
-        return None
 
 
 def message_argument(value: str) -> str:
@@ -131,54 +103,6 @@ def endpoint_argument(value: str) -> str:
     return value
 
 
-def base_argument(value: str) -> str:
-    """Normalize only an exact generated CloudFront HTTPS root, before file or network work."""
-    try:
-        url = urllib.parse.urlsplit(value)
-        host = url.hostname or ""
-        valid = (value.isascii() and not any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
-                 and url.scheme == "https" and re.fullmatch(r"d[a-z0-9]{1,62}\.cloudfront\.net", host)
-                 and url.netloc.lower() == host and url.path in ("", "/") and "?" not in value and "#" not in value)
-    except ValueError:
-        valid = False
-    if not valid:
-        raise argparse.ArgumentTypeError("Base URL must be a generated https://d....cloudfront.net origin, with only an optional trailing slash.")
-    return f"https://{host}"
-
-
-def email_argument(value: str) -> str:
-    """Bound and normalize the email alias; Cognito remains responsible for authentication."""
-    value = value.strip().lower()
-    if (len(value) > 128 or not value.isascii() or any(ord(character) < 33 or ord(character) == 127 for character in value)
-            or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value)):
-        raise argparse.ArgumentTypeError("Email must be a valid address of at most 128 characters.")
-    return value
-
-
-def session_argument(value: str) -> Path:
-    """Reserve a credential-specific filename so repository ignore rules cannot hide unrelated JSON."""
-    path = Path(value)
-    if any(ord(character) < 32 or ord(character) == 127 for character in value) or not SESSION_FILE.fullmatch(path.name):
-        raise argparse.ArgumentTypeError("Use a session filename such as .soc-bot-chat-session-dev.json in a private directory.")
-    return path
-
-
-def terminal_text(value: str) -> str:
-    """Strip terminal control/format characters, keeping ordinary Unicode, newlines, and tabs."""
-    return "".join(character for character in value if character in "\n\t" or unicodedata.category(character) not in ("Cc", "Cf", "Cs"))
-
-
-def write_text(stream: TextIO, value: str) -> None:
-    """Flush plain text, escaping unsupported characters if UTF-8 reconfiguration was unavailable."""
-    value = terminal_text(value)
-    try:
-        stream.write(value)
-    except UnicodeEncodeError:
-        encoding = stream.encoding or "ascii"
-        stream.write(value.encode(encoding, errors="backslashreplace").decode(encoding))
-    stream.flush()
-
-
 def string_field(event: dict, key: str, limit: int, optional: bool = False) -> str | None:
     """Read a bounded string without copying malformed fields into an error message."""
     if optional and key not in event:
@@ -197,227 +121,6 @@ def boolean_field(event: dict, key: str, optional: bool = False) -> bool | None:
     if type(value) is not bool:
         raise ClientError(f"Response field {key} must be a boolean.")
     return value
-
-
-def invalid_constant(_value: str) -> None:
-    """Reject Python JSON extensions such as NaN rather than accepting invalid JSON."""
-    raise ValueError("Non-JSON constant.")
-
-
-def unique_fields(pairs: list[tuple[str, object]]) -> dict:
-    """Reject duplicate JSON keys rather than silently hiding contradictory identifiers."""
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("Duplicate JSON field.")
-        result[key] = value
-    return result
-
-
-def decode_object(line: bytes) -> dict:
-    """Decode one bounded UTF-8 JSON object with safe protocol errors."""
-    try:
-        value = json.loads(line.decode("utf-8"), parse_constant=invalid_constant, object_pairs_hook=unique_fields)
-    except (UnicodeDecodeError, ValueError, RecursionError) as error:
-        raise ClientError("Response contains invalid UTF-8 or JSON.") from error
-    if not isinstance(value, dict):
-        raise ClientError("Response event must be a JSON object.")
-    return value
-
-
-def session_data(value: object, origin: str) -> dict:
-    """Validate the complete persisted host-only cookie shape without echoing credential data."""
-    fields = {"name", "value", "host", "path", "secure", "expires"}
-    if (not isinstance(value, dict) or set(value) != fields or value["name"] != SESSION_COOKIE
-            or not isinstance(value["value"], str) or not SESSION_TOKEN.fullmatch(value["value"])
-            or value["host"] != urllib.parse.urlsplit(origin).hostname or value["path"] != "/"
-            or value["secure"] is not True or type(value["expires"]) is not int
-            or not 0 < value["expires"] <= 253402300799):
-        raise ClientError("Session file has an invalid cookie, scope or expiry; it was not used.")
-    return value.copy()
-
-
-class SessionState:
-    """Hold one origin-bound credential, saving only explicit, validated auth transitions."""
-
-    def __init__(self, origin: str, path: Path | None, creating: bool = False):
-        """Read a bounded existing file; only login may begin with a deliberately new filename."""
-        self.origin = origin
-        self.path = path
-        self.cookie = None
-        if path is None:
-            return
-        if not path.parent.is_dir() or path.is_symlink() or (path.exists() and not path.is_file()):
-            raise ClientError("Use a regular session file inside an existing private directory.")
-        try:
-            with path.open("rb") as source:
-                raw = source.read(MAX_SESSION_BYTES + 1)
-        except FileNotFoundError:
-            if creating:
-                return
-            raise ClientError("The supplied session file is missing. Run an explicit login first.") from None
-        except OSError:
-            raise ClientError("The supplied session file could not be read; no request was sent.") from None
-        if len(raw) > MAX_SESSION_BYTES:
-            raise ClientError("Session file exceeds the 4 KiB limit; no request was sent.")
-        try:
-            document = decode_object(raw)
-            if (set(document) != {"version", "origin", "cookie"} or type(document["version"]) is not int
-                    or document["version"] != 1 or document["origin"] != origin):
-                raise ClientError("Session file version, shape or origin does not match this request.")
-            if document["cookie"] is not None:
-                self.cookie = session_data(document["cookie"], origin)
-        except ClientError:
-            raise ClientError("Session file is malformed or belongs to another origin; no request was sent.") from None
-        if self.cookie and self.cookie["expires"] <= time.time():
-            write_text(sys.stderr, "Saved session has expired; its cookie will not be sent. No renewal or automatic login will occur.\n")
-
-    def cookie_jar(self) -> http.cookiejar.CookieJar:
-        """Use standard-library host-only HTTPS/expiry handling, never a hand-built Cookie header."""
-        host = urllib.parse.urlsplit(self.origin).hostname
-        jar = http.cookiejar.CookieJar(http.cookiejar.DefaultCookiePolicy(
-            allowed_domains=[host], strict_ns_domain=http.cookiejar.DefaultCookiePolicy.DomainStrictNonDomain,
-            secure_protocols=("https",),
-        ))
-        if self.cookie is not None:
-            value = session_data(self.cookie, self.origin)
-            jar.set_cookie(http.cookiejar.Cookie(
-                version=0, name=SESSION_COOKIE, value=value["value"], port=None, port_specified=False,
-                domain=host, domain_specified=False, domain_initial_dot=False, path="/", path_specified=True,
-                secure=True, expires=value["expires"], discard=False, comment=None, comment_url=None,
-                rest={"HttpOnly": None, "SameSite": "Lax"}, rfc2109=False,
-            ))
-        return jar
-
-    def save(self) -> None:
-        """Atomically replace a private same-directory temporary file; Windows inherits directory ACLs."""
-        if self.path is None:
-            return
-        if self.path.is_symlink():
-            raise ClientError("Session file became a symbolic link; local credentials were not replaced.")
-        document = {"version": 1, "origin": self.origin, "cookie": self.cookie}
-        encoded = json.dumps(document, separators=(",", ":")).encode("utf-8")
-        temporary = None
-        try:
-            descriptor, temporary = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp", dir=self.path.parent)
-            with os.fdopen(descriptor, "wb") as destination:
-                if os.name != "nt":
-                    os.fchmod(destination.fileno(), 0o600)
-                destination.write(encoded)
-                destination.flush()
-                os.fsync(destination.fileno())
-            os.replace(temporary, self.path)
-        except OSError:
-            raise ClientError("Local session-file save failed; the previous file may remain unchanged.") from None
-        finally:
-            if temporary is not None:
-                try:
-                    Path(temporary).unlink(missing_ok=True)
-                except OSError:
-                    write_text(sys.stderr, "Warning: a private temporary session file could not be removed; inspect the chosen directory.\n")
-
-
-class HttpsTransport:
-    """Make one verified HTTPS request at a time; cookies are never adopted automatically."""
-
-    def __init__(self, session: SessionState):
-        """Keep every request bound to its validated CloudFront origin and explicit cookie state."""
-        self.session = session
-        self.opener = urllib.request.build_opener(NoRedirects())
-        self.attempted = False
-        self.confirmed_action = None
-
-    def open(self, url: str, method: str, payload: bytes | None, accept: str):
-        """Attach cookies/Origin only to fixed paths at the configured exact CloudFront origin."""
-        headers = {"Accept": accept}
-        if payload is not None:
-            headers["Content-Type"] = "application/json"
-        if url not in {self.session.origin + path for path in AUTH_PATHS.values()}:
-            raise ClientError("Refusing a request outside the configured CloudFront origin/routes.")
-        headers["Origin"] = self.session.origin
-        request = urllib.request.Request(url, data=payload, method=method, headers=headers)
-        self.session.cookie_jar().add_cookie_header(request)
-        self.attempted = True
-        return self.opener.open(request, timeout=SOCKET_TIMEOUT_SECONDS)
-
-
-def response_cookie(response, origin: str, required: bool = False) -> dict | None:
-    """Parse one exact session Set-Cookie using cookie APIs, rejecting duplicates and unsafe scopes."""
-    values = response.headers.get_all("Set-Cookie", [])
-    if not values and not required:
-        return None
-    if len(values) != 1:
-        raise ClientError("Expected one unambiguous session cookie; response headers were not displayed.")
-    raw = values[0]
-    if len(raw) > MAX_SESSION_BYTES or not raw.isascii() or any(ord(character) < 32 or ord(character) == 127 for character in raw):
-        raise ClientError("Session cookie response is malformed; headers were not displayed.")
-    # SimpleCookie overwrites repeated attributes, so reject them before asking it to parse values.
-    parts = raw.split(";")
-    attributes = [part.partition("=")[0].strip().lower() for part in parts[1:]]
-    if (len(attributes) != len(set(attributes)) or set(attributes) != {"path", "secure", "httponly", "samesite", "max-age", "expires"}
-            or not re.fullmatch(r"__Host-soc_bot_session=(?:[A-Za-z0-9_-]{43}|\"[A-Za-z0-9_-]{43}\"|\"\"|)", parts[0].strip())):
-        raise ClientError("Session cookie has duplicate or unsupported scope/security attributes.")
-    try:
-        cookies = SimpleCookie()
-        cookies.load(raw)
-        if set(cookies) != {SESSION_COOKIE}:
-            raise ValueError("Unexpected cookie.")
-        cookie = cookies[SESSION_COOKIE]
-        if (cookie["domain"] or cookie["path"] != "/" or cookie["secure"] is not True
-                or cookie["httponly"] is not True or cookie["samesite"] != "Lax"
-                or not re.fullmatch(r"0|[1-9][0-9]{0,4}", cookie["max-age"])):
-            raise ValueError("Unexpected scope.")
-        age = int(cookie["max-age"])
-        expires = parsedate_to_datetime(cookie["expires"])
-        if expires.tzinfo is None or expires.utcoffset().total_seconds() != 0 or age > 43200:
-            raise ValueError("Unexpected expiry.")
-        expiry = int(expires.timestamp())
-        if age == 0 and cookie.value == "" and expiry <= time.time():
-            return None
-        if age == 0:
-            raise ValueError("Contradictory deletion.")
-        # Retain the more conservative deadline; a long Expires value cannot bypass Max-Age.
-        expiry = min(expiry, int(time.time()) + age)
-        return session_data({"name": SESSION_COOKIE, "value": cookie.value,
-                             "host": urllib.parse.urlsplit(origin).hostname, "path": "/", "secure": True, "expires": expiry}, origin)
-    except (CookieError, ValueError, TypeError, AttributeError, OverflowError):
-        raise ClientError("Session cookie scope, token or expiry is invalid; headers were not displayed.") from None
-
-
-def public_session(response) -> dict:
-    """Accept only the public user ID and UTC expiry contract, never internal session/provider records."""
-    value = bounded_json(response)
-    if (set(value) != {"userId", "expiresAt"} or not isinstance(value["userId"], str)
-            or not LABEL.fullmatch(value["userId"]) or not isinstance(value["expiresAt"], str)
-            or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z", value["expiresAt"])):
-        raise ClientError("Auth response does not match the public session contract.")
-    try:
-        expiry = datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00"))
-        if expiry.timestamp() <= 0:
-            raise ValueError("Invalid expiry.")
-    except ValueError:
-        raise ClientError("Auth response has an invalid UTC expiry.") from None
-    return value
-
-
-def bounded_json(response) -> dict:
-    """Read one small JSON response with strict UTF-8 and duplicate-key rejection, without dumping it."""
-    body = response.read(MAX_HTTP_ERROR_BYTES + 1)
-    if len(body) > MAX_HTTP_ERROR_BYTES or response.headers.get_content_type() != "application/json":
-        raise ClientError("Expected bounded auth/API JSON; raw response omitted.")
-    return decode_object(body)
-
-
-def save_confirmed_session(session: SessionState, cookie: dict | None, outcome: str) -> None:
-    """Distinguish remotely confirmed auth from a subsequent local credential-file failure."""
-    session.cookie = cookie
-    try:
-        session.save()
-    except ClientError:
-        raise ClientError(f"{outcome} was confirmed remotely, but local session-file saving failed. Inspect the private file before reuse.") from None
-    except KeyboardInterrupt:
-        write_text(sys.stderr, f"{outcome} was confirmed remotely; local session-file saving was interrupted and may be incomplete.\n")
-        raise
 
 
 class Renderer:
@@ -564,7 +267,7 @@ def report_http_error(error: urllib.error.HTTPError, renderer: Renderer) -> None
     renderer.status(f"HTTP {error.code}: request did not complete successfully; redirects are not followed.")
     if error.code == 403:
         renderer.status("Check origin/endpoint and the dev WAF allowlisted address; a 403 is not necessarily caused by WAF.")
-    if error.code == 401 and renderer.authenticated:
+    if error.code == 401:
         renderer.status("The session was not authorized. Check expiry/login explicitly; no login, renewal or retry was sent.")
     try:
         body = error.read(MAX_HTTP_ERROR_BYTES + 1)
@@ -595,92 +298,6 @@ def send_turn(url: str, payload: bytes, renderer: Renderer, transport: HttpsTran
         return 1
 
 
-def report_auth_error(response, action: str) -> str | None:
-    """Render only a recognized public auth envelope; gateway/HTML bodies and headers stay private."""
-    write_text(sys.stderr, f"HTTP {response.code}: {action} did not complete successfully; redirects are not followed.\n")
-    if response.code == 403:
-        write_text(sys.stderr, "Check Origin, endpoint and dev IPv4 WAF configuration; 403 does not identify a single cause.\n")
-    try:
-        envelope = bounded_json(response)
-        if set(envelope) == {"error", "requestId"}:
-            error = envelope["error"]
-            if (isinstance(error, dict) and set(error) == {"code", "message"}
-                    and isinstance(error["code"], str) and error["code"] in AUTH_ERROR_CODES
-                    and isinstance(error["message"], str) and 0 < len(error["message"]) <= 1024
-                    and isinstance(envelope["requestId"], str) and LABEL.fullmatch(envelope["requestId"])):
-                write_text(sys.stderr, f"Auth error [{error['code']}]: {error['message']}\nRequest ID: {envelope['requestId']}\n")
-                return error["code"]
-        write_text(sys.stderr, "No recognized public auth error envelope; raw response omitted.\n")
-    except (ClientError, OSError, http.client.HTTPException):
-        write_text(sys.stderr, "No readable bounded auth JSON was available; raw response omitted.\n")
-    return None
-
-
-def login_payload(email: str) -> bytes:
-    """Prompt without any echoing fallback and encode only the bounded email/password login body."""
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", getpass.GetPassWarning)
-            password = getpass.getpass("Password (hidden): ")
-    except (getpass.GetPassWarning, EOFError):
-        raise ClientError("Hidden password input is unavailable; use an interactive terminal. No request was sent.") from None
-    try:
-        units = len(password.encode("utf-16-le")) // 2
-        if not 1 <= units <= 256:
-            raise ClientError("Password must contain 1-256 API string units; no request was sent.")
-        payload = json.dumps({"email": email, "password": password}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    except UnicodeEncodeError:
-        raise ClientError("Password contains invalid Unicode; no request was sent.") from None
-    finally:
-        del password
-    if len(payload) > 8192:
-        raise ClientError("Login body exceeds the auth API limit; no request was sent.")
-    return payload
-
-
-def send_auth(action: str, transport: HttpsTransport, payload: bytes | None) -> int:
-    """Validate one auth response completely before reporting success or mutating saved cookie state."""
-    session = transport.session
-    url = session.origin + AUTH_PATHS[action]
-    try:
-        with transport.open(url, "GET" if action == "me" else "POST", payload, "application/json") as response:
-            if action == "logout":
-                if response.status != 204 or response.read(MAX_HTTP_ERROR_BYTES + 1) != b"":
-                    raise ClientError("Expected an empty HTTP 204 logout response; local credential was retained.")
-                if response_cookie(response, session.origin, required=True) is not None:
-                    raise ClientError("Logout did not return the expected deletion cookie; local credential was retained.")
-                transport.confirmed_action = "Logout"
-                save_confirmed_session(session, None, "Logout")
-                write_text(sys.stdout, "Logged out. The local session state is cleared.\n")
-                return 0
-            if response.status != 200:
-                raise ClientError("Unexpected authentication success status; raw response omitted.")
-            value = public_session(response)
-            if action == "login":
-                cookie = response_cookie(response, session.origin, required=True)
-                expiry = int(datetime.fromisoformat(value["expiresAt"].replace("Z", "+00:00")).timestamp())
-                if cookie is None or cookie["expires"] != expiry or expiry <= time.time():
-                    raise ClientError("Login did not establish a matching unexpired reusable session; local file was not changed.")
-                transport.confirmed_action = "Login"
-                save_confirmed_session(session, cookie, "Login")
-            elif response.headers.get_all("Set-Cookie", []):
-                raise ClientError("Session inspection unexpectedly returned cookies; local file was not changed.")
-            write_text(sys.stdout, json.dumps(value, ensure_ascii=False) + "\n")
-            return 0
-    except urllib.error.HTTPError as error:
-        with error:
-            code = report_auth_error(error, action)
-            if action in {"login", "logout"} and (error.code >= 500 or 300 <= error.code < 400):
-                write_text(sys.stderr, "Remote auth outcome is unconfirmed; saved credentials were retained. No automatic retry was sent.\n")
-            if action == "me" and error.code == 401 and code == "AUTHENTICATION_REQUIRED" and error.headers.get_all("Set-Cookie", []):
-                if response_cookie(error, session.origin) is not None:
-                    raise ClientError("Rejected session response contained a replacement cookie; local file was not changed.")
-                transport.confirmed_action = "Session rejection"
-                save_confirmed_session(session, None, "Session rejection")
-                write_text(sys.stderr, "The recognized auth response requested cookie clearance; local session state was cleared.\n")
-        return 1
-
-
 def main() -> int:
     """Validate mode/arguments before file access or prompting, then make one explicit operation."""
     for stream in (sys.stdout, sys.stderr):
@@ -689,7 +306,7 @@ def main() -> int:
         except (AttributeError, OSError, ValueError):
             pass
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--action", choices=("chat", "login", "me", "logout"), default="chat", help="Explicit operation; default: chat.")
+    parser.add_argument("--action", choices=("chat", "login"), default="chat", help="Default: chat; explicit login convenience. Use api_client.py for me/logout and JSON APIs.")
     parser.add_argument("--message", type=message_argument,
                         help="One nonblank analyst message (at most 8192 API string units).")
     parser.add_argument("--conversation-id", type=conversation_argument, help="Existing conversation; omit for a new conversation.")
@@ -724,9 +341,9 @@ def main() -> int:
     try:
         session = SessionState(args.base_url, args.session_file, creating=args.action == "login")
         transport = HttpsTransport(session)
-        if args.action != "chat":
-            payload = login_payload(args.email) if args.action == "login" else b"{}" if args.action == "logout" else None
-            return send_auth(args.action, transport, payload)
+        if args.action == "login":
+            return send_login(transport, login_payload(args.email),
+                              lambda value: write_text(sys.stdout, json.dumps(value, ensure_ascii=True, indent=2) + "\n"))
         renderer.status("CloudFront session mode; no automatic login or renewal.")
         renderer.status(f"Turn ID: {turn_id}")
         renderer.status(f"Conversation ID: {args.conversation_id}" if args.conversation_id

@@ -19,6 +19,8 @@ interface Navigation {
   selection: ConversationSelection; rows: readonly Conversation[];
   assigned(id: string, expected?: string): boolean; select(id?: string): boolean;
   completed(): void; busy?(busy: boolean): void;
+  canSend(id?: string): boolean; canRetry(id?: string): boolean; resolved(id: string | undefined, turnId: string): boolean;
+  started(): void; settled(id: string | undefined, complete: boolean): void;
 }
 
 /** Owns isolated in-memory workspaces and immutable exact-retry snapshots for one mounted account. */
@@ -55,9 +57,12 @@ export function useChat(accountId: string | undefined, expired: (message: string
   }
 
   /** Holds the global send/navigation lock across one stream or exact replay without changing its request. */
-  async function run(target: Workspace, original: Turn) {
-    if (active.current || preview || !accountId || original.accountId !== accountId) return;
+  async function run(target: Workspace, original: Turn, retrying = false) {
+    if (active.current || preview || !accountId || original.accountId !== accountId
+      || !(retrying ? callbacks.current.canRetry(target.conversationId) : callbacks.current.canSend(target.conversationId))) return;
     active.current = true; setBusy(true); callbacks.current.busy?.(true);
+    callbacks.current.started();
+    let complete = false;
     controller.current = new AbortController();
     update(target, original.request.turnId, turn => ({ ...turn, answer: '', activity: [], state: 'running', error: undefined, replayed: false }));
     try {
@@ -74,6 +79,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
         if (event.type === 'text') update(target, original.request.turnId, turn => ({ ...turn, answer: turn.answer + event.text }));
         if (event.type === 'activity') update(target, original.request.turnId, turn => ({ ...turn, activity: [...turn.activity.slice(-199), event.activity] }));
         if (event.type === 'complete') {
+          complete = true;
           update(target, original.request.turnId, turn => ({ ...turn, state: event.truncated ? 'truncated' : 'complete', replayed: event.replayed }));
           callbacks.current.completed();
         }
@@ -85,15 +91,19 @@ export function useChat(accountId: string | undefined, expired: (message: string
       update(target, original.request.turnId, turn => ({ ...turn, state: safe.status === 0 ? 'incomplete' : 'error', error: safe }));
     } finally {
       active.current = false;
-      if (alive.current) { setBusy(false); callbacks.current.busy?.(false); }
+      if (alive.current) {
+        setBusy(false); callbacks.current.busy?.(false);
+        callbacks.current.settled(target.conversationId, complete);
+      }
     }
   }
   const last = workspace.turns.at(-1);
-  const unresolved = last?.state === 'incomplete' || last?.state === 'error';
+  const resolved = Boolean(last && callbacks.current.resolved(workspace.conversationId, last.request.turnId));
+  const unresolved = (last?.state === 'incomplete' || last?.state === 'error') && !resolved;
 
   /** Snapshots one explicit send; an existing selection always supplies its ID, even without local messages. */
   function send() {
-    if (active.current || unresolved || preview || !accountId || navigation.selection.error) return;
+    if (active.current || unresolved || preview || !accountId || navigation.selection.error || !callbacks.current.canSend(workspace.conversationId)) return;
     if (!workspace.draft.trim() || workspace.draft.length > 8192) { workspace.inputError = 'Enter a message of 1–8,192 characters.'; render(value => value + 1); return; }
     const request: ChatRequest = Object.freeze({ turnId: crypto.randomUUID(), message: workspace.draft,
       ...(workspace.conversationId ? { conversationId: workspace.conversationId } : {}) });
@@ -108,8 +118,9 @@ export function useChat(accountId: string | undefined, expired: (message: string
 
   /** Replays only this workspace's last allowed request, preserving initial omission of conversationId. */
   function retry() {
-    if (!last || !last.error?.retryable || active.current || preview || last.accountId !== accountId || navigation.selection.error) return;
-    void run(workspace, last);
+    if (!last || !last.error?.retryable || resolved || active.current || preview || last.accountId !== accountId || navigation.selection.error
+      || !callbacks.current.canRetry(workspace.conversationId)) return;
+    void run(workspace, last, true);
   }
 
   /** Selects a deliberate fresh context while retaining other conversations and an idle new-chat draft. */

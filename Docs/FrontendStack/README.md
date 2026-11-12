@@ -18,9 +18,11 @@ reverse dependency, new table/index or foundation permission change. List recenc
 is eventually consistent; message order uses strong sequence-keyed reads. Both
 GETs use the existing BFF/origin authorizer; the messages template resolves only
 one bounded concrete ID and exact method ARN. GET can omit Origin, while POST chat
-still requires exact Origin. Metadata sidebar/selection already exists in the
-frontend, but transcript hydration is not wired by this API slice. Static
-publication, workflows, streaming chat and authentication flows are unchanged.
+still requires exact Origin. The frontend now restores selected saved messages
+and current statuses, with bounded explicit older-page reads and a newest-page
+refresh control. See the [frontend history guide](../../frontend/README.md#saved-messages-statuses-and-explicit-pagination)
+for account-scoped cache, first-page readiness, local streaming/retry separation
+and scroll behavior. Static publication, workflows and authentication are unchanged.
 The shared reader Lambda is 60 seconds; list processing/integration stays 8/10
 seconds, messages processing/integration is 45/50 seconds. The shared API origin
 response/idle timeout is 60 seconds, not a total streamed-chat duration limit.
@@ -55,7 +57,7 @@ live META lease supports running; otherwise running is effective incomplete, wit
 the stored revision unchanged. A proved newer same-turn attempt makes an older
 observed failure conservative incomplete. Earlier failed history cannot override
 a successful retry. Equal revisions can have different lease-derived observations,
-so future UI reconciliation also needs request-generation freshness. These strong
+so UI reconciliation also uses request-generation freshness. These strong
 reads are not one atomic snapshot and do not require unrelated work to stop.
 No retry controls, historical stream reconnection or automatic model dispatch is
 introduced. Compaction keeps original display history.
@@ -99,7 +101,11 @@ verify same missing/foreign 404, invalid/duplicate/foreign cursors, expired/revo
 no-cookie/direct-API denial, no-store, safe logs and unchanged list/auth/Google/chat/
 completed replay. Existing local checks do not exercise these live races or new
 API contracts; no tests, fixtures, mocks or API harness were authorized. The Python
-utility is a later slice, and frontend hydration follows API operator validation.
+utility is implemented separately. The operator subsequently confirmed an owned
+messages response and identical missing/foreign 404s, satisfying the frontend
+integration gate. Frontend hydration is now implemented; pagination, byte limits,
+status/retry cases and concurrent browser reads still need operator validation.
+No live checks are claimed by the frontend implementation.
 
 The stack defines infrastructure and nine email/password authentication routes,
 plus [operator-activated dev Google login](Google-Login.md) and
