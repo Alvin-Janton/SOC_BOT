@@ -94,7 +94,6 @@ export function useMessages(accountId: string | undefined, conversationId: strin
   const generation = useRef(0);
   const pending = useRef<Pending | undefined>(undefined);
   const suspended = useRef(false);
-  const completedId = useRef<string | undefined>(undefined);
   const alive = useRef(false);
   if (scope.current.account !== accountId || scope.current.id !== conversationId || scope.current.visible !== visible) {
     scope.current = { account: accountId, id: conversationId, visible, visit: scope.current.visit + 1 };
@@ -175,12 +174,11 @@ export function useMessages(accountId: string | undefined, conversationId: strin
   const more = useCallback(() => { void read(false); }, [read]);
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; cancel(); cache.current.clear(); completedId.current = undefined; };
+    return () => { alive.current = false; cancel(); cache.current.clear(); };
   }, [cancel]);
   useEffect(() => {
     // This is one selection/reentry/completion read, not an effect on cache/list/render changes.
     if (accountId && conversationId && visible && !suspended.current) {
-      if (completedId.current === conversationId) completedId.current = undefined;
       void read(true);
     }
     return cancel;
@@ -193,10 +191,10 @@ export function useMessages(accountId: string | undefined, conversationId: strin
     if (selected) selected.verified = false;
   }, [cancel]);
 
-  /** Refreshes once only after a confirmed completion and the chat's immediate lock has been released. */
-  const settled = useCallback((id: string | undefined, complete: boolean) => {
+  /** Refreshes once after completion or an explicit retry-state recheck, once the immediate chat lock is released. */
+  const settled = useCallback((id: string | undefined, complete: boolean, recheck = false) => {
     suspended.current = false;
-    if (complete && id && alive.current) { completedId.current = id; setCompletion(value => value + 1); }
+    if ((complete || recheck) && id && alive.current) setCompletion(value => value + 1);
   }, []);
 
   /** Requires a valid newest observation for this visit, never list membership or stale cached data. */
@@ -220,11 +218,28 @@ export function useMessages(accountId: string | undefined, conversationId: strin
 
   /** A saved assistant plus its successful terminal status resolves only that exact retained local turn. */
   const resolved = useCallback((id: string | undefined, turnId: string) => Boolean(id && cache.current.get(id)?.confirmations.get(turnId)?.resolved), []);
+  /** Returns the current validated visible observation, never an inferred latest turn or an old discarded row. */
+  const observation = useCallback((turnId: string): TurnStatus | undefined => {
+    const id = scope.current.id;
+    return id ? cache.current.get(id)?.statuses.find(status => status.turnId === turnId) : undefined;
+  }, []);
+  /** Applies a current preparation/chat 404 to this selection without dropping any other conversation's state. */
+  const unavailable = useCallback((id: string) => {
+    if (!alive.current || scope.current.id !== id || !selectedView(id)) return;
+    cancel();
+    const saved = cache.current.get(id);
+    if (saved) {
+      saved.messages = []; saved.statuses = []; saved.observations = []; saved.confirmations.clear(); saved.snapshot = undefined;
+      saved.nextCursor = null; saved.consumed.clear(); saved.loaded = false; saved.verified = false; saved.unavailable = true;
+      saved.error = new ApiError('Conversation unavailable.', 'CONVERSATION_UNAVAILABLE', 404, false); saved.pageError = undefined; saved.chain++;
+    }
+    render(value => value + 1);
+  }, [cancel]);
   const ready = !conversationId || Boolean(entry?.verified && entry.validVisit === scope.current.visit && !entry.unavailable);
   // Unverified does not mean a GET is active: a settled uncertain local turn needs an explicit refresh.
   const phase = entry?.phase ?? 'idle';
   return { messages: entry?.messages ?? [], statuses: entry?.statuses ?? [], confirmations: entry?.confirmations,
     loaded: entry?.loaded ?? false, ready, phase, error: entry?.error, pageError: entry?.pageError,
     unavailable: entry?.unavailable ?? false, nextCursor: entry?.nextCursor ?? null, change: entry?.change,
-    refresh, more, suspend, settled, canSend, canRetry, resolved };
+    refresh, more, suspend, settled, canSend, canRetry, resolved, observation, markUnavailable: unavailable };
 }

@@ -63,7 +63,8 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
   const chat = useChat(session?.userId, expired, import.meta.env.DEV, { selection, rows, select: selectConversation,
     assigned: assignConversation, completed: history.refresh, busy: navigationBusy,
     canSend: id => !leaving.current && messages.canSend(id), canRetry: id => !leaving.current && messages.canRetry(id),
-    resolved: messages.resolved, started: messages.suspend, settled: messages.settled });
+    resolved: messages.resolved, started: messages.suspend, settled: messages.settled,
+    observation: messages.observation, unavailable: messages.markUnavailable });
   const messageBusy = messages.phase !== 'idle';
   const latest = messages.messages.at(-1);
   const latestStatus = latest && messages.statuses.find(status => status.turnId === latest.turnId)?.status;
@@ -119,6 +120,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
     {import.meta.env.DEV && preview && <div className="preview-bar">Development-only layout preview · no session, API connection or active send.</div>}
     {notice && <div className="page-notice" role={notice.warning ? 'alert' : 'status'}>{notice.message}</div>}
     {logoutError && <div className="page-notice" role="alert">{logoutError} Your local view was retained because logout was not confirmed.</div>}
+    {chat.retryNotice && <div className="page-notice" role="status">{chat.retryNotice}</div>}
     <div className="workspace-layout"><ConversationSidebar rows={rows} selected={selection.id} busy={chat.busy || loggingOut} visible={visible}
       phase={history.phase} loaded={preview || history.loaded} error={history.error} pageError={history.pageError} nextCursor={history.nextCursor}
       select={id => !leaving.current && selectConversation(id)} newChat={() => { if (!leaving.current) chat.reset(); }} refresh={history.refresh} more={history.more} />
@@ -140,7 +142,9 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
         </div>}
         {messages.pageError && <div className="messages-error" role="alert"><p>{messages.pageError.message}</p><p>The loaded transcript was retained. Refresh messages to restart the page chain, or explicitly try Load older messages again.</p></div>}
         {!messages.unavailable && <Transcript messages={messages.messages} statuses={messages.statuses} confirmations={messages.confirmations} turns={chat.turns}
-          retryDisabled={chat.busy || loggingOut || !messages.canRetry(chat.conversationId)} retry={() => { if (!leaving.current) chat.retry(); }} />}
+          retryDisabled={chat.busy || loggingOut || !messages.canRetry(chat.conversationId)} retry={() => { if (!leaving.current) chat.retry(); }}
+          durableDisabled={chat.busy || loggingOut || chat.unresolved || !messages.canRetry(chat.conversationId)} preparingTurnId={chat.preparingTurnId}
+          retrySaved={status => { if (!leaving.current) void chat.retrySaved(status); }} />}
         {!messages.unavailable && messages.loaded && messages.ready && !messages.messages.length && !chat.turns.length && <div className="messages-empty">
           <p>{messages.nextCursor !== null ? 'This page contains no displayed messages. Load older messages to continue; history is not yet known to be empty.' : 'No saved messages in this conversation.'}</p>
         </div>}
@@ -154,8 +158,8 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
     {selection.id && !messages.ready && !messageBusy && !chat.busy && !messages.error && <div className="unresolved-note" role="status">Refresh messages to verify the latest saved state before sending or retrying. Your draft and local request were retained.</div>}
     {selection.id && messages.loaded && !messages.messages.length && messages.nextCursor !== null && !messages.unavailable && <div className="unresolved-note">Load older messages to establish a usable view before sending.</div>}
     {chat.unresolved && !messages.unavailable && <div className="unresolved-note">Resolve the original turn before sending a follow-up, or deliberately start a new conversation. Previous backend work may still finish.</div>}
-    <div ref={form}><Composer draft={chat.draft} change={chat.setDraft} send={() => { if (!leaving.current) chat.send(); }} busy={chat.busy} blocked={Boolean(chat.unresolved) || loggingOut || Boolean(selection.error) || !messages.canSend(chat.conversationId)} preview={preview} error={chat.inputError} /></div>
+    <div ref={form}><Composer draft={chat.draft} change={chat.setDraft} send={() => { if (!leaving.current) chat.send(); }} busy={chat.busy} preparing={Boolean(chat.preparingTurnId)} blocked={Boolean(chat.unresolved) || loggingOut || Boolean(selection.error) || !messages.canSend(chat.conversationId)} preview={preview} error={chat.inputError} /></div>
     </div></div>
-    <span className="sr-only" role="status">{chat.busy ? 'Investigation running. Sending, new conversation and sign out are disabled.' : 'No active request.'}</span>
+    <span className="sr-only" role="status">{chat.preparingTurnId ? 'Checking retry availability. Sending, navigation and sign out are disabled. No chat request has been submitted yet.' : chat.busy ? 'Investigation running. Sending, new conversation and sign out are disabled.' : 'No active request.'}</span>
   </div>;
 }

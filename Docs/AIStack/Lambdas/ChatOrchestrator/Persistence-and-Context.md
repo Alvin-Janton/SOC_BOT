@@ -13,7 +13,7 @@ All records for a conversation use `PK = CONV#<conversationId>` and schema versi
 | `CONVERSATION` | `META` | Trusted owner, title/timestamps, latest event/sequence, attempt lease/fence, and optional summary pointers. |
 | Event variant | `EVT#<UTC-created_at>#<10-digit-event_sequence>#<eventId>` | One immutable user/assistant/tool/outcome event. |
 | Display-history variant | `HIST#<10-digit-event_sequence>` | Immutable selected-field copy of a user, final-assistant or outcome event, ordered by sequence regardless of clock changes. |
-| `TURN_STATE` | `TURN#<turnId>` | One mutable current-attempt/status record per accepted logical turn; no text or tool payload. |
+| `TURN_STATE` | `TURN#<turnId>` | One mutable current-attempt/status record with immutable original request text and effective retryability; no tool payload. |
 | `CONTEXT_SUMMARY` | `SUMMARY#<UTC-created_at>#<10-digit-covered-sequence>#<summaryId>` | Bounded summary text and exact `covers_through_sk` checkpoint. |
 
 Only metadata carries `GSI1PK = USER#<trusted-owner-id>` and `GSI1SK = CONV#<updated_at>#<conversationId>`. The separate Frontend reader uses that sparse index for listing; this orchestrator has neither index-query nor scan permissions and implements no listing endpoint. The existing conditional metadata Put derives a title from the first message: collapse whitespace/control characters, keep up to eight words and sixty Unicode code points including ASCII `...` when shortened, prefer a word boundary, and fall back to `Security investigation` for no displayable text. This write-once rule matches the frontend's initial title; follow-ups, retries and conditional-create conflicts cannot overwrite it. No backfill, model-generated title or separate structured incident-state model is introduced.
@@ -50,16 +50,87 @@ Every TURN item contains exactly:
 | --- | --- |
 | `PK`, `SK`, `schema_version:1`, `entity_type:"TURN_STATE"`, `conversation_id`, `turn_id` | Same conversation partition; `SK=TURN#<turnId>`. |
 | `attempt_id`, `lease_version` | Latest accepted attempt and its fence, retained after lease release. |
+| `original_message`, `retryable` | Exact original validated text, immutable before/after USER append; null while running, effective outcome boolean for failed/timed_out/cancelled, false for complete/truncated/abandoned. |
 | `revision`, `status` | Positive safe revision and `running`, `complete`, `truncated`, `failed`, `timed_out`, `cancelled` or `abandoned`. |
 | `user_event_id` | Null before the original user commits; once linked, preserved across attempts. |
 | `assistant_event_id`, `outcome_event_id`, `error_code` | Nullable effective-result pointers/code. Running has all three null. Complete/truncated has an assistant pointer and null outcome/error. Failures have an outcome pointer/code and no assistant pointer. |
 | `created_at`, `updated_at` | Admission creation time and most recent transition/link time. Creation is stable across retries; clocks may regress, so revision orders observations. |
 
-A newly admitted turn is running/revision 1 with null message pointers. Accepted retries and effective terminal transitions increment revision; linking the initial user preserves the current revision. Tools, renew/release and completed replays do not change revision. `max_tokens` completion becomes truncated. Stored running is not proof that work is still live: a future reader must match the current META attempt/fence and unexpired lease, otherwise report effective `incomplete` without writing a fabricated terminal event. Later message pages may have a fixed sequence boundary while TURN is current when read; the future API must expose/reconcile its revision separately. No such endpoint or batch-read permission is added here.
+A newly admitted turn is running/revision 1 with null message pointers. Accepted retries and effective terminal transitions increment revision; linking the initial user preserves the current revision. Tools, renew/release and completed replays do not change revision. `max_tokens` completion becomes truncated. Stored running is not proof that work is still live: the reader matches the current META attempt/fence and unexpired lease, otherwise reports effective `incomplete` without writing a fabricated terminal event. Message pages have a fixed sequence boundary while TURN is current when read; its revision is exposed/reconciled separately. The Frontend-owned messages endpoint reports current status and lightweight advisory retry availability; preparation is a separate exact-key read.
 
 New META records also contain `history_projection_version:1` and `history_through_sequence:0`. Every original append advances both the existing event sequence and this watermark atomically, including tools deliberately omitted from HIST. Thus the watermark means all events through it followed the projection policy, not that every sequence has a HIST item. Admission requires the supported version and exact equality with `last_event_sequence`; missing, unsupported or lagging markers fail with a safe storage error rather than upgrading legacy data. Markers are not projected into GSI1.
 
-`events()` and the unchanged evaluator read only the `EVT#` key range. META/SUMMARY remain exact-key reads. HIST/TURN cannot enter model context, audit retrieval counts/bytes, summaries, tool recovery or evaluator evidence, and do not replace audit-based idempotency. Opening or refreshing a future history page will not resume a stream or reconstruct a retry request.
+`events()` and the unchanged evaluator read only the `EVT#` key range. META/SUMMARY remain exact-key reads. HIST/TURN cannot enter model context, audit retrieval counts/bytes, summaries, tool recovery or evaluator evidence, and do not replace audit-based idempotency. Opening or refreshing history does not resume a stream or reconstruct a request from displayed text. The separate explicit retry-preparation GET can return the supported original request, as described below.
+
+
+## Latest-turn durable retry projection
+
+Fresh META also requires `retry_projection_version:1` and `latest_turn_id:null`
+before any admission. A new logical turn atomically sets that pointer with its
+lease and TURN creation, even before USER_MESSAGE commits. Same-turn retries keep
+it; appends, renew/release, summaries and older-attempt recovery cannot change or
+remove it. It is admission order, not a timestamp, latest tool sequence or newest
+message on a displayed page. Nonempty history cannot have a null latest pointer;
+null also requires the pre-admission zero lease version. A live/expired active
+lease must name that same latest admitted turn.
+
+TURN saves exact validated `original_message` at first admission and preserves it
+across all transitions. A retry must match it even when USER_MESSAGE was never
+appended; whenever the original audit user exists, its text must match too. Full
+expected-record conditions include both new fields. Running/new attempts use
+`retryable:null`; effective failed/timed_out/cancelled outcomes copy their audit
+boolean; saved assistant or abandonment uses false. User-pointer linking still
+does not bump revision. An old recovery outcome cannot change a newer attempt's
+status or retryability. Record/transaction ceilings remain 96 KiB/4 MiB.
+
+Only the latest existing noncompleted turn can acquire another attempt. Admission
+checks the pointer after coherent bounded pre-reads and again inside the existing
+lease/TURN transaction. A newer question admitted between preparation and POST
+therefore makes the stale retry conflict instead of executing it. Confirmed
+failed/timed_out submissions share the pure reader retry policy; full audit and
+effective retryability must agree. Existing local exact retries retain interrupted
+lease recovery and original initial omission of conversationId. If that omitted-ID
+request fits but the explicit-ID durable form is too large, the original local
+path remains available; preparation reports REQUEST_TOO_LARGE. Current local
+cancellation handling is not expanded into historical cancellation retry.
+
+Completed/truncated replay remains before lease acquisition and independent of
+unrelated conversation activity; latest-only fences **another attempt**, not a
+saved answer. Message mismatch, abandonment and terminal precedence are preserved.
+The unchanged EVT context path still excludes failed/abandoned exchanges and
+reuses original terminal tool evidence without duplicating user/tool records.
+Neither original_message nor advisory retry metadata becomes an extra model
+message. Existing compaction barriers, tool-call budgets and finalization stay
+in force; moving the latest pointer does not rewrite older outcome flags.
+
+The shared pure [retry policy](../../../../infra/lib/shared/retry-policy.ts) and
+[chat grammar](../../../../infra/lib/shared/chat-request.ts) do not construct SDK
+clients. The read-only [preparation contract](../../../../infra/lambdas/frontend/conversation-history/README.md#read-only-retry-preparation)
+returns a canonical request with explicit conversationId only after current
+ownership/status/latest/lease/size checks. GET reserves nothing. /api/chat remains
+authoritative and does not require a preparation token/call. Unknown completion
+writes stay unknown; no failed/retryable outcome is invented afterward.
+
+### Coordinated fresh-data rollout
+
+This required projection is intentionally incompatible with old conversations and
+mixed writers/readers/strict frontends. Missing fields/markers fail safely; there
+is no inference, backfill, data repair, alternate schema or migration fallback.
+
+The operator must perform the following separately; implementation never deletes
+conversation items or deploys resources:
+
+1. Review, deploy and validate the preceding message UI through CloudFront (operator-confirmed before this slice).
+2. Stop submissions across browsers/clients and drain existing orchestrator executions.
+3. Explicitly clear only designated old conversations, including META/EVT/HIST/TURN/SUMMARY items. Keep the table, auth sessions and unrelated data/resources.
+4. Coordinate writer, reader/authorizer/API and frontend publication through existing workflows while traffic stays stopped. Publish/invalidate existing HTML/static paths so an old cached strict frontend is not used with new required status fields.
+5. Confirm new assets/configuration, start fresh conversations and then resume traffic.
+
+Writer-only/reader-only deployment or rollback to an old writer is not transparent
+compatibility. Do not resume with mixed versions. No feature flag, automatic
+cleanup, rollback deletion or new publishing mechanism is included. Live checks
+must cover latest-only races, two-browser submission, failed/timed_out eligibility,
+unknown/cancelled exclusions, same-turn/user deduplication and completed replay.
 
 ## Acceptance, leases, and appends
 
@@ -128,7 +199,7 @@ If final assistant persistence might have committed but its acknowledgment is lo
 `buildContext()` converts stored events into Bedrock messages, not a sorted DynamoDB transcript:
 
 1. Insert the supplied authorized summary, if any, as explicitly untrusted reference text; exclude events at or before its numeric covered checkpoint. The orchestrator loads that summary through the store before calling this function.
-2. Group remaining events into logical turns and order them by event sequence. Put the current submission last, including when retrying an older logical turn.
+2. Group remaining events into logical turns and order them by event sequence. Put the current submission last when retrying the latest admitted logical turn; an older completed replay never starts a model attempt.
 3. Use completed prior turns and the current turn. Omit abandoned turns and prior turns without a completed assistant answer; their audit events remain stored.
 4. Rebuild each original assistant tool group by `assistant_message_id`/block index and pair results by exact `tool_use_id`/name. Prefer durable terminal results over newer pending checkpoints. Completed history rejects incomplete groups; current incomplete groups are omitted pending recovery.
 5. Emit user text, original assistant-role tool-use blocks, corresponding user-role tool-result blocks, and completed assistant prose. A user-role tool-result wrapper is Bedrock protocol data, not another human message. Adjacent equal roles are coalesced.
@@ -167,7 +238,7 @@ The operator chose a fresh start, not migration. This implementation performs no
 
 1. Stop new turn submissions and let all active/old-writer Lambda executions drain.
 2. Obtain explicit operator confirmation before the operator clears all items belonging to designated old test conversations. Do not delete the table/index, auth users/sessions, evaluation artifacts, security data or unrelated resources. No cleanup script is supplied.
-3. Deploy the new writer through the existing reviewed workflows, then create fresh conversations. Existing resource identities, IAM, indexes, retention, model configuration and budgets remain unchanged.
-4. Keep every supported writer on this contract. Mixed deployments or rollback to an old writer require explicit compatibility/cleanup coordination: the old writer does not maintain HIST/TURN/watermarks, and lagging state must fail closed rather than become a falsely complete history.
+3. Coordinate the writer, reader and strict frontend publication through the existing reviewed workflows and invalidation while traffic stays stopped, then verify new assets and create fresh conversations. Follow the complete [coordinated rollout](#coordinated-fresh-data-rollout), including the required retry projection. Existing resource identities, IAM, indexes, retention, model configuration and budgets remain unchanged.
+4. Keep every supported writer on this contract. Mixed deployments or rollback to an old writer require explicit compatibility/cleanup coordination: older writers do not maintain all required projections, and lagging state must fail closed rather than become a falsely complete history.
 
-After rollout, use the existing authenticated chat deliberately to inspect first turn, tools, follow-up, completed exact replay and safely available failure/retry. Confirm matching EVT/HIST IDs/sequences/text, one original user and one TURN per turn, correct final attempt/revision, all-event watermark equality and no tool copies. Compaction should preserve original EVT/HIST/TURN items. Live concurrency, recovery, condition failures and ambiguous commits were source-reviewed, not executed by the existing checks; no new tests, fixtures, mocks or persistence harness were authorized. Do not infer runtime atomicity/race coverage from build/synthesis or the unchanged existing suite. The messages API and frontend hydration remain future slices.
+After rollout, use the existing authenticated chat deliberately to inspect first turn, tools, follow-up, completed exact replay and safely available failure/retry. Confirm matching EVT/HIST IDs/sequences/text, one original user and one TURN per turn, correct final attempt/revision, all-event watermark equality and no tool copies. Compaction should preserve original EVT/HIST/TURN items. Live concurrency, recovery, condition failures and ambiguous commits were source-reviewed, not executed by the existing checks; no new tests, fixtures, mocks or persistence harness were authorized. Do not infer runtime atomicity/race coverage from build/synthesis or the unchanged existing suite. Messages, frontend hydration and the new explicit preparation flow use the same fresh-data contract and require coordinated operator validation.

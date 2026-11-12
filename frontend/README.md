@@ -221,7 +221,8 @@ by itself block sending. Cursor 400 offers newest refresh, not a chat POST.
 Messages are individual records, sorted by numeric sequence; an assistant can be
 the first record on a page, and a pair can split across pages. User text stays React
 text; saved assistant Markdown uses the existing safe renderer with no raw HTML or
-images. No history record invents activities, reasoning, an answer or a retry.
+images. No history record invents activities, reasoning, an answer or original request text.
+The separate explicit preparation route below supplies an eligible durable retry.
 Compact statuses appear once per visible turn. Statuses are current observations,
 even beyond a fixed message snapshot: higher revisions prevail, and the newest
 accepted equal-revision observation wins because lease-derived running/incomplete
@@ -242,9 +243,9 @@ unconfirmed local role omitted from a fresh page remains explicitly local. Once
 a role is actually confirmed, its old local copy is not recreated merely because
 a subsequent newest-page reset moves it outside the loaded pages. Original frozen
 requests retain account binding, exact turn/message and initial omission of
-conversationId. Only those actual retained requests have the existing explicit
-retry affordance; historical messages never reconstruct a retry or automatically
-resubmit. A new send invalidates pending older/pre-send status observations.
+conversationId. Actual retained requests keep their existing exact local retry
+affordance. Historical messages never reconstruct request text or automatically
+resubmit; a separate explicit latest-failure preparation can supply it. A new send invalidates pending older/pre-send status observations.
 
 Initial loading, cached revalidation, first-load failure, older-page failure and
 confirmed empty history are distinct. Recognized missing/foreign 404 invalidates
@@ -502,7 +503,7 @@ or session issuance. Do not copy authorization URLs, cookies or codes into repor
    a durable provider association.
 
 This UI does not make public demo ready: demo Google availability, additional abuse
-controls, historical retry recovery, cancellation and operational rollback remain separate work.
+controls, unknown-outcome recovery, cancellation and operational rollback remain separate work.
 
 ### Conversation-list operator checklist after deployment
 
@@ -523,3 +524,80 @@ controls, historical retry recovery, cancellation and operational rollback remai
 Local checks cover compilation, unchanged existing tests, source review and inert
 presentation only. Live pagination, streaming races, retries, account transitions
 and backend ownership enforcement remain operator validation after deployment.
+
+
+## Durable retry of the latest failed turn
+
+The preceding message UI was operator-confirmed reviewed, deployed and validated
+through CloudFront before this implementation. A fresh messages status now requires
+`retry:{available,reason}`; availability is never inferred from displayed failure
+text, the visible last row, a cached position or a locally invented request. Only
+the latest **admitted logical turn** with confirmed failed/timed_out status and
+persisted retryable:true can be eligible, without an unexpired conversation lease.
+Complete/truncated, cancelled/abandoned, running and effective incomplete/unknown
+never gain a historical fresh-attempt button. Another question can change availability
+without changing the old turn revision; request-generation freshness still applies.
+
+For a historical eligible turn, **Retry failed turn** performs one read-only GET
+`/api/conversations/{conversationId}/turns/{turnId}/retry`, then POST `/api/chat`
+only if the current preparation remains eligible. There is no second confirmation
+or automatic second attempt. GET reserves nothing and executes nothing; POST
+revalidates latest admission/audit/text/lease atomically. A newer question or a
+competing browser can still make submission conflict rather than execute.
+
+`src/api/retry.ts` validates the exact six-field preparation envelope, matching
+conversation/turn, safe revision/status/reason and either request:null or an exact
+three-field original request. It uses the existing same-origin/no-store/redirect
+policy, a combined 75-second fetch/body abort, 40-KiB success and 8-KiB error cap.
+Eligible requests preserve exact text and include explicit conversationId, even for
+an originally new question; their serialized UTF-8 JSON must fit 32 KiB. A valid
+but oversized explicit-ID request returns REQUEST_TOO_LARGE without truncation.
+IDs, paths, bodies and credentials cannot be chosen through extra flags/queries.
+
+One immediate preparation lock disables duplicate send/retry/navigation/logout
+while leaving drafts editable. Account, selection/URL, current status observation,
+abort and generation checks guard every result before side effects or POST. The
+lock transfers directly to the existing streaming path, without a release gap.
+Its canonical request becomes a frozen real local snapshot on that same logical
+turn: no new turn UUID, second displayed user message, title change, draft clearing
+or duplicate USER_MESSAGE is introduced. Later local exact retry uses that actual
+snapshot, including unknown POST outcomes, under its existing failure guards.
+
+An actual retained local request keeps its own single-button retry/policy and is
+never rewritten by preparation or given a competing historical button. Thus a
+nonretryable local conflict is not bypassed by swapping in a prepared request.
+A reload/another browser can use current durable availability after fresh checks.
+Preparation ineligible/invalid/outage/conflict makes no POST; an authored notice
+and one appropriate history refresh follow, without another preparation/execution
+chain. Missing/foreign/missing-turn 404 invalidates only the selected cached view.
+Recognized protected 401 clears the account as before; generic denial/outage does
+not. A submitted POST conflict remains nonretryable, retains context and rechecks
+history once. Disconnect after POST does not mean cancellation.
+
+Streaming, safe activity/answer display, final-answer reconciliation and completion
+metadata/messages refresh are unchanged. No query/model/tool budgets increase and
+no old history is copied into the draft. Completed replay is a saved answer, not
+continuation or fresh execution. The redundant completedId ref was removed; the
+functional completion counter/signals, observations, confirmations and cursor-chain
+rules remain, with no new eviction or pruning policy.
+
+### Maintenance rollout and later verification
+
+Required TURN original_message/retryable and META retry_projection_version/latest
+turn pointer intentionally reject old records. The operator must follow the
+[coordinated fresh-data rollout](../Docs/AIStack/Lambdas/ChatOrchestrator/Persistence-and-Context.md#coordinated-fresh-data-rollout):
+stop submissions, drain old executions, clear only designated conversation items,
+coordinate writer/reader/frontend deployment and the existing HTML publication/
+CloudFront invalidation, verify versions, then start fresh/resume. Keep the table,
+auth sessions and unrelated data. Neither mixed old/new strict clients nor an
+old-writer rollback is transparent compatibility. Implementation performs no
+cleanup/deployment; no migration, feature flags, publishing changes or new storage
+are added. Python clients are unchanged and do not yet allow preparation GET.
+
+Operator checks remain fresh failed/timed_out eligibility, one-click GET-to-POST,
+reload/another browser, same logical turn/user deduplication, unavailable classes,
+latest-admission race, two-browser conflicts, size bounds, current status freshness,
+auth/foreign/missing denial, unknown outcomes and existing chat/local retry/replay/
+Google/pagination. Existing lint/build/Jest and disconnected visual inspection do
+not establish the new persistence/preparation/race behavior. No new tests, mocks,
+fixtures, network harness or live API/model calls were authorized.

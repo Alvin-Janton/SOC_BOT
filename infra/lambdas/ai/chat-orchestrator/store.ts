@@ -5,6 +5,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { ToolValidation, validToolValidation } from '../../../lib/shared/tool-validation';
 import { admittedTurn, historyKey, historyRecord, storedHistory, transitionedTurn, TurnState, turnState } from './history-records';
+import { retryAvailability } from '../../../lib/shared/retry-policy';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 export interface JsonObject { [key: string]: JsonValue }
@@ -94,6 +95,8 @@ export interface ConversationMetadata {
   last_event_sequence: number;
   history_projection_version: 1;
   history_through_sequence: number;
+  retry_projection_version: 1;
+  latest_turn_id: string | null;
   lease_version: number;
   active_turn_id?: string;
   active_attempt_id?: string;
@@ -160,7 +163,7 @@ function failedTransactionConditions(error: unknown, count: number): number[] | 
 /** Captures the metadata fields that admission must prove unchanged, including a previously observed expired lease. */
 function admissionSnapshot(metadata: ConversationMetadata): string {
   return JSON.stringify([metadata.owner_id, metadata.lease_version, metadata.last_event_sequence,
-    metadata.history_projection_version, metadata.history_through_sequence,
+    metadata.history_projection_version, metadata.history_through_sequence, metadata.retry_projection_version, metadata.latest_turn_id,
     metadata.active_turn_id, metadata.active_attempt_id, metadata.lease_expires_at]);
 }
 
@@ -336,13 +339,17 @@ export class ConversationStore {
       || !Number.isSafeInteger(item.lease_version) || item.lease_version < 0) {
       throw new StoreError('INVALID_RECORD', 'Conversation metadata is invalid.');
     }
-    if (item.history_projection_version !== 1 || item.history_through_sequence !== item.last_event_sequence) {
+    if (item.history_projection_version !== 1 || item.history_through_sequence !== item.last_event_sequence || item.retry_projection_version !== 1) {
       throw new StoreError('UNSUPPORTED_HISTORY', 'Conversation history requires a coordinated fresh start.');
     }
+    if ((item.latest_turn_id !== null && (typeof item.latest_turn_id !== 'string' || item.latest_turn_id.length !== 36 || !UUID.test(item.latest_turn_id)))
+      || (item.latest_turn_id === null && (item.last_event_sequence > 0 || item.lease_version > 0))
+      || (item.latest_turn_id !== null && item.lease_version < 1)) throw new StoreError('INVALID_RECORD', 'Conversation latest turn metadata is invalid.');
     const active = [item.active_turn_id, item.active_attempt_id, item.lease_expires_at];
     if (active.some(value => value !== undefined) && (typeof item.active_turn_id !== 'string' || !UUID.test(item.active_turn_id)
       || item.active_turn_id.length !== 36 || typeof item.active_attempt_id !== 'string' || !UUID.test(item.active_attempt_id)
-      || item.active_attempt_id.length !== 36 || !Number.isSafeInteger(item.lease_expires_at) || item.lease_expires_at <= 0)) {
+      || item.active_attempt_id.length !== 36 || !Number.isSafeInteger(item.lease_expires_at) || item.lease_expires_at <= 0
+      || item.active_turn_id !== item.latest_turn_id)) {
       throw new StoreError('INVALID_RECORD', 'Conversation lease metadata is invalid.');
     }
     return item as ConversationMetadata;
@@ -373,7 +380,7 @@ export class ConversationStore {
     boundedJson(next);
     if (!previous) return { Put: { TableName: this.tableName, Item: next, ConditionExpression: 'attribute_not_exists(PK)' } };
     const fields = ['revision', 'attempt_id', 'lease_version', 'status', 'user_event_id', 'assistant_event_id',
-      'outcome_event_id', 'error_code', 'created_at', 'updated_at', 'schema_version', 'entity_type', 'conversation_id', 'turn_id'] as const;
+      'outcome_event_id', 'error_code', 'original_message', 'retryable', 'created_at', 'updated_at', 'schema_version', 'entity_type', 'conversation_id', 'turn_id'] as const;
     return { Put: { TableName: this.tableName, Item: next,
       ConditionExpression: fields.map((_, index) => `#f${index} = :f${index}`).join(' AND '),
       ExpressionAttributeNames: Object.fromEntries(fields.map((field, index) => [`#f${index}`, field])),
@@ -385,25 +392,26 @@ export class ConversationStore {
   private assertTurnAudit(state: TurnState | undefined, events: ChatEvent[], metadata: ConversationMetadata, turnId: string): void {
     const turn = events.filter(event => event.turn_id === turnId);
     const invalid = () => { throw new StoreError('INVALID_RECORD', 'Conversation turn projection disagrees with its audit.'); };
-    if (!state) { if (turn.length || metadata.active_turn_id === turnId) invalid(); return; }
+    if (!state) { if (turn.length || metadata.active_turn_id === turnId || metadata.latest_turn_id === turnId) invalid(); return; }
     const user = turn.find(event => event.entity_type === 'USER_MESSAGE');
     if (state.user_event_id !== (user?.event_id ?? null) || state.lease_version > metadata.lease_version) invalid();
+    if (user?.entity_type === 'USER_MESSAGE' && user.content !== state.original_message) invalid();
     if (metadata.active_turn_id === turnId && (state.attempt_id !== metadata.active_attempt_id || state.lease_version !== metadata.lease_version)) invalid();
     const abandoned = [...turn].reverse().find(event => event.entity_type === 'TURN_OUTCOME' && event.outcome === 'abandoned');
     if (abandoned?.entity_type === 'TURN_OUTCOME') {
       if (state.status !== 'abandoned' || state.attempt_id !== abandoned.attempt_id
-        || state.outcome_event_id !== abandoned.event_id || state.error_code !== abandoned.error_code) invalid();
+        || state.outcome_event_id !== abandoned.event_id || state.error_code !== abandoned.error_code || state.retryable !== false) invalid();
       return;
     }
     const assistant = [...turn].reverse().find(event => event.entity_type === 'ASSISTANT_MESSAGE');
     if (assistant?.entity_type === 'ASSISTANT_MESSAGE') {
       if (state.assistant_event_id !== assistant.event_id || state.attempt_id !== assistant.attempt_id
-        || state.status !== (assistant.stop_reason === 'max_tokens' ? 'truncated' : 'complete')) invalid();
+        || state.status !== (assistant.stop_reason === 'max_tokens' ? 'truncated' : 'complete') || state.retryable !== false) invalid();
       return;
     }
     const outcome = [...turn].reverse().find(event => event.entity_type === 'TURN_OUTCOME' && event.attempt_id === state.attempt_id);
     if (outcome?.entity_type === 'TURN_OUTCOME') {
-      if (state.outcome_event_id !== outcome.event_id || state.status !== outcome.outcome || state.error_code !== outcome.error_code) invalid();
+      if (state.outcome_event_id !== outcome.event_id || state.status !== outcome.outcome || state.error_code !== outcome.error_code || state.retryable !== outcome.retryable) invalid();
     } else if (state.status !== 'running') invalid();
   }
 
@@ -472,25 +480,35 @@ export class ConversationStore {
       }
       this.checkTurn(events, turnId, message);
       this.assertTurnAudit(priorTurn, events, before, turnId);
+      if (priorTurn && priorTurn.original_message !== message) throw new StoreError('TURN_CONFLICT', 'Turn identifier was already used for another message.');
+      if (priorTurn && before.latest_turn_id !== turnId) throw new StoreError('TURN_TERMINAL', 'Only the latest admitted turn can start another attempt.');
       if (before.active_turn_id && before.active_turn_id !== turnId) this.assertTurnAudit(priorActive, events, before, before.active_turn_id);
       const now = Math.floor(Date.now() / 1000);
       if (before.lease_expires_at && before.lease_expires_at > now) {
         throw new StoreError(before.active_turn_id === turnId ? 'TURN_IN_PROGRESS' : 'CONVERSATION_BUSY', 'A conversation turn is already in progress.');
       }
       if (leaseExpiresAtSeconds <= now) throw new StoreError('INVALID_INPUT', 'Turn lease expiry is invalid.');
+      // Confirmed failures use the same durable policy as readers. Existing local expired/unknown recovery stays below this gate.
+      if (priorTurn && (priorTurn.status === 'failed' || priorTurn.status === 'timed_out')) {
+        const eligibility = projection(() => retryAvailability(before, priorTurn, priorTurn.status, Date.now()));
+        // An original local initial request may still fit while the explicit-ID durable form does not.
+        if (!eligibility.available && !(eligibility.reason === 'REQUEST_TOO_LARGE' && conversationId === undefined)) {
+          throw new StoreError('TURN_TERMINAL', 'This turn cannot start another attempt.');
+        }
+      }
       const lease: Lease = { conversationId: id, turnId, attemptId, version: before.lease_version + 1, expiresAt: leaseExpiresAtSeconds };
-      const next = projection(() => admittedTurn(priorTurn, lease, new Date().toISOString()));
+      const next = projection(() => admittedTurn(priorTurn, lease, new Date().toISOString(), message));
       const values: Record<string, unknown> = { ':owner': this.trustedOwnerId, ':version': before.lease_version,
         ':previous': before.last_event_sequence, ':projection': 1, ':now': now, ':turn': turnId, ':attempt': attemptId,
-        ':expiry': leaseExpiresAtSeconds, ':nextVersion': lease.version };
+        ':expiry': leaseExpiresAtSeconds, ':nextVersion': lease.version, ':latest': before.latest_turn_id };
       const oldLease = before.active_turn_id === undefined
         ? 'attribute_not_exists(active_turn_id) AND attribute_not_exists(active_attempt_id) AND attribute_not_exists(lease_expires_at)'
         : 'active_turn_id = :oldTurn AND active_attempt_id = :oldAttempt AND lease_expires_at = :oldExpiry';
       if (before.active_turn_id !== undefined) Object.assign(values, { ':oldTurn': before.active_turn_id, ':oldAttempt': before.active_attempt_id, ':oldExpiry': before.lease_expires_at });
       const transaction = [
         { Update: { TableName: this.tableName, Key: { PK: before.PK, SK: 'META' },
-          ConditionExpression: `owner_id = :owner AND lease_version = :version AND last_event_sequence = :previous AND history_projection_version = :projection AND history_through_sequence = :previous AND (${oldLease}) AND (attribute_not_exists(lease_expires_at) OR lease_expires_at <= :now)`,
-          UpdateExpression: 'SET active_turn_id = :turn, active_attempt_id = :attempt, lease_expires_at = :expiry, lease_version = :nextVersion',
+          ConditionExpression: `owner_id = :owner AND lease_version = :version AND last_event_sequence = :previous AND history_projection_version = :projection AND history_through_sequence = :previous AND retry_projection_version = :projection AND latest_turn_id = :latest AND (${oldLease}) AND (attribute_not_exists(lease_expires_at) OR lease_expires_at <= :now)`,
+          UpdateExpression: 'SET active_turn_id = :turn, active_attempt_id = :attempt, lease_expires_at = :expiry, lease_version = :nextVersion, latest_turn_id = :turn',
           ExpressionAttributeValues: values,
         } }, this.turnPut(priorTurn, next),
       ];
@@ -561,7 +579,7 @@ export class ConversationStore {
     try {
       await this.client.send(new UpdateCommand({
         TableName: this.tableName, Key: { PK: `CONV#${lease.conversationId}`, SK: 'META' },
-        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND history_projection_version = :projection AND history_through_sequence = last_event_sequence',
+        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND history_projection_version = :projection AND retry_projection_version = :projection AND latest_turn_id = active_turn_id AND history_through_sequence = last_event_sequence',
         UpdateExpression: 'REMOVE active_turn_id, active_attempt_id, lease_expires_at',
         ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':attempt': lease.attemptId, ':version': lease.version, ':projection': 1 },
       }), { abortSignal: this.requestSignal() });
@@ -582,7 +600,7 @@ export class ConversationStore {
     try {
       await this.client.send(new UpdateCommand({
         TableName: this.tableName, Key: { PK: `CONV#${lease.conversationId}`, SK: 'META' },
-        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND history_projection_version = :projection AND history_through_sequence = last_event_sequence',
+        ConditionExpression: 'owner_id = :owner AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND history_projection_version = :projection AND retry_projection_version = :projection AND latest_turn_id = active_turn_id AND history_through_sequence = last_event_sequence',
         UpdateExpression: 'SET lease_expires_at = :expiry',
         ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':expiry': expiry, ':projection': 1 },
       }), { abortSignal: this.requestSignal() });
@@ -670,7 +688,7 @@ export class ConversationStore {
         TransactItems: [
           { Update: {
             TableName: this.tableName, Key: { PK: metadata.PK, SK: 'META' },
-            ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :sequence AND history_projection_version = :projection AND history_through_sequence = :sequence',
+            ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :sequence AND history_projection_version = :projection AND retry_projection_version = :projection AND latest_turn_id = :turn AND history_through_sequence = :sequence',
             UpdateExpression: 'SET latest_summary_sk = :summary, summary_covers_through_sk = :checkpoint',
             ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':sequence': metadata.last_event_sequence, ':summary': summary.SK, ':checkpoint': checkpoint.SK, ':projection': 1 },
           } },
@@ -713,7 +731,7 @@ export class ConversationStore {
       PK: `CONV#${conversationId}`, SK: 'META', entity_type: 'CONVERSATION', schema_version: 1,
       conversation_id: conversationId, owner_id: this.trustedOwnerId, created_at: createdAt, updated_at: createdAt,
       last_event_sequence: 0, lease_version: 0, title: conversationTitle(message), GSI1PK: `USER#${this.trustedOwnerId}`, GSI1SK: `CONV#${createdAt}#${conversationId}`,
-      history_projection_version: 1, history_through_sequence: 0,
+      history_projection_version: 1, history_through_sequence: 0, retry_projection_version: 1, latest_turn_id: null,
     };
     boundedJson(item);
     try { await this.client.send(new PutCommand({ TableName: this.tableName, Item: item, ConditionExpression: 'attribute_not_exists(PK)' }), { abortSignal: this.requestSignal() }); }
@@ -839,7 +857,7 @@ export class ConversationStore {
       const transaction: TransactionItem[] = [
         { Update: {
           TableName: this.tableName, Key: { PK: metadata.PK, SK: 'META' },
-          ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :previous AND history_projection_version = :projection AND history_through_sequence = :previous',
+          ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :previous AND history_projection_version = :projection AND retry_projection_version = :projection AND latest_turn_id = :turn AND history_through_sequence = :previous',
           UpdateExpression: 'SET last_event_sequence = :sequence, history_through_sequence = :sequence, last_event_id = :event, updated_at = :updated, GSI1SK = :index',
           ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version, ':now': Math.floor(Date.now() / 1000), ':previous': metadata.last_event_sequence, ':sequence': sequence, ':event': eventId, ':updated': updatedAt, ':index': `CONV#${updatedAt}#${lease.conversationId}`, ':projection': 1 },
         } },

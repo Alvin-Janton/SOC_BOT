@@ -1,11 +1,12 @@
-# Authenticated conversation metadata and messages
+# Authenticated conversation history and retry preparation
 
 `handler.ts` serves `GET /api/conversations` and
-`GET /api/conversations/{conversationId}/messages` through the existing CloudFront
-API behavior and zero-cache BFF session authorizer. The list contract below is
-unchanged. The messages endpoint is an API-only increment: the existing metadata
-sidebar/selection does not yet fetch historical messages. No frontend hydration,
-Python client, polling or rename/delete implementation is included.
+`GET /api/conversations/{conversationId}/messages` plus the exact read-only
+`GET /api/conversations/{conversationId}/turns/{turnId}/retry` through the existing
+CloudFront API behavior and zero-cache BFF authorizer. The list contract is
+unchanged. The frontend loads saved messages and offers explicit latest-failure
+retry; GET never invokes chat. No polling, rename/delete or Python-client change
+is included.
 Authentication/Google flows and streaming chat remain unchanged.
 
 ## Request and response
@@ -115,7 +116,8 @@ dev log deletion and demo retention follow existing environment policy.
 The operator confirmed the HIST/TURN writer and completed-replay correction were
 deployed and validated with fresh conversations before this implementation.
 Only supported fresh data is accepted: owned META must have projection version 1
-and a watermark equal to last_event_sequence. No legacy fallback, migration,
+and a watermark equal to last_event_sequence, plus retry_projection_version:1
+and a valid admission-order latest_turn_id. No legacy fallback, migration,
 backfill, repair or deletion occurs. Original EVT and SUMMARY are never queried.
 
 Use `GET /api/conversations/<id>/messages`, optionally followed by
@@ -152,7 +154,8 @@ Complete illustrative response, with synthetic identifiers and text:
     }
   ],
   "turnStatuses": [
-    { "turnId": "31f15daf-9dc2-4b04-a618-aa99cd08c137", "revision": 4, "status": "complete", "error": null }
+    { "turnId": "31f15daf-9dc2-4b04-a618-aa99cd08c137", "revision": 4, "status": "complete", "error": null,
+      "retry": { "available": false, "reason": "ALREADY_COMPLETE" } }
   ],
   "nextCursor": null
 }
@@ -162,7 +165,7 @@ Messages expose exactly those six fields, preserving saved content, IDs and UTC
 timestamps. Each response has at most 20 messages and 262,144 serialized UTF-8 JSON
 bytes. The same envelope holds empty arrays for an empty page. Sequence gaps and
 split user/assistant pairs are expected. No original tool/audit payload, owner,
-attempt/fence, raw key, model configuration, summary or retry control is returned.
+attempt/fence, raw key, model configuration, summary or original retry request is returned.
 Absent and other-owned conversations have identical 404 CONVERSATION_UNAVAILABLE;
 invalid admitted inputs/cursors use 400 INVALID_INPUT, identity failures 401,
 and storage/configuration/corrupt/unsupported records 503 SERVICE_UNAVAILABLE.
@@ -229,11 +232,12 @@ all complete/truncated/running/incomplete errors are null. Prior failed HIST
 outcomes do not override a later successful retry.
 
 Revision is the positive persisted TURN revision, unchanged by the reader.
-Lease-derived running/incomplete can change at the same revision, so a future
-frontend must also reject stale request generations when reconciling equal
-revisions. These individual strong reads are not an atomic multi-item snapshot.
+Lease-derived status or latest-only retry availability can change at the same
+revision, so the frontend also rejects stale request generations when reconciling
+equal revisions. These individual strong reads are not an atomic multi-item snapshot.
 Compaction preserves display history. Opening history does not resume a stream,
-and historical failures do not reconstruct exact retry requests or expose controls.
+and displayed history alone never reconstructs request text. Only the separate
+explicit preparation route below can return a canonical durable retry.
 
 ### Timeouts and deployment gates
 
@@ -285,3 +289,113 @@ After review and separate deployment through the existing workflows, validate:
 Local builds/synthesis and source review do not establish live authorization,
 storage results or browser integration. No live queries or deployments are part
 of this implementation.
+
+
+## Read-only retry preparation
+
+Only the latest **admitted logical user turn** can be available: its effective
+status must be failed/timed_out, persisted retryable exactly true, and no
+unexpired conversation lease may exist. Complete/truncated/cancelled/abandoned,
+running and effective incomplete/unknown are unavailable. The required compact
+`retry` object accompanies each represented messages status; it never contains
+original text. Availability is advisory, not a token, lease, reservation, identity
+proof or promise that a subsequent POST will be accepted.
+
+The fixed unavailable reasons are NOT_LATEST_TURN, TURN_IN_PROGRESS,
+CONVERSATION_BUSY, ALREADY_COMPLETE, TRUNCATED_RESPONSE, TURN_ABANDONED,
+TURN_CANCELLED, OUTCOME_UNCONFIRMED, NOT_RETRYABLE and REQUEST_TOO_LARGE.
+`available:true` requires reason:null; false requires a supported consistent code.
+
+Use GET `/api/conversations/{conversationId}/turns/{turnId}/retry`. No body, query,
+cursor, owner, revision, message or model input is admitted. Conversation IDs use
+the existing bounded ASCII grammar; turn IDs use stored UUID shape. Both path
+parameters and exact concrete method ARN are checked by the session-protected
+authorizer; the handler independently checks REST/account/API/stage and trusted
+BFF context. It reuses the existing Lambda/role, exact-table GetItem and existing
+origin/session checks. No new role, Lambda, table/index, IAM grant or dependency
+is required. GET may omit browser Origin; POST chat still requires exact Origin.
+
+Complete illustrative allowed 200 (synthetic identifiers/text):
+
+```json
+{
+  "conversationId": "example-conversation",
+  "turnId": "4cae88e6-2d79-497d-81bc-49115a39b8a6",
+  "revision": 2,
+  "status": "failed",
+  "retry": { "available": true, "reason": null },
+  "request": {
+    "turnId": "4cae88e6-2d79-497d-81bc-49115a39b8a6",
+    "conversationId": "example-conversation",
+    "message": "Check the WAF logs for suspicious activity."
+  }
+}
+```
+
+A stable owned but ineligible turn returns the same six-field envelope with its
+actual effective status/revision, `retry:{available:false,reason:<fixed-code>}`
+and `request:null`; unavailable preparation never returns the original message.
+The canonical request includes the known conversationId even for an originally
+new question. Exact text is preserved, never normalized/truncated. Existing local
+snapshots still keep their original omitted-ID form. If the canonical explicit-ID
+request exceeds 32,768 serialized UTF-8 bytes, preparation returns REQUEST_TOO_LARGE
+rather than raising the body limit. Total preparation JSON is capped at 40,960 bytes.
+
+The bounded pass uses at most four application-issued strongly consistent Gets:
+authorized projected META, strict target TURN, reauthorized META, rechecked target
+TURN. It compares the full requested TURN and retry-relevant owner/marker/latest/
+lease state without requiring unrelated global sequence quiescence. Supported
+watermarks are validated on both META reads. A changing/unsupported/corrupt view
+is 503; no repeated read loop attempts to establish eligibility. Calls share the
+45-second processing budget with <=5-second signals, two SDK attempts, existing
+500-ms/two-second handler settings and a final response reserve. Client destruction
+is guaranteed. No writes, lease renewal, repair, summary, model/tool invocation or
+chat POST occurs in GET.
+
+Preparation errors retain the bounded error/requestId envelope, no-store and
+nosniff without CORS: 400 INVALID_INPUT for invalid admitted input, protected
+401 AUTHENTICATION_REQUIRED, identical 404 CONVERSATION_UNAVAILABLE for missing/
+foreign conversations or missing target turns, and 503 SERVICE_UNAVAILABLE for
+storage/corrupt/unsupported/changing state. Malformed routes can be denied earlier.
+Logs contain only safe request ID, fixed template route/outcome, duration, read
+count, eligibility and response-byte count; no concrete path, subject/turn/
+conversation ID, text/prepared request, raw records/errors, cookies or tokens.
+
+### Byte and transfer bounds
+
+The retry object remains inside the existing 1,024-byte public-status cap. A
+conservative maximum-length failure example with a 64-character code, 256-byte
+quote-heavy message, maximum revision and retry reason measured 764 JSON bytes;
+other allowed reasons fit the same cap. Twenty such statuses plus a maximum
+cursor/envelope measured 17,574 bytes, below the unchanged 32-KiB nonmessage
+reserve. Actual status/envelope/final-body sizes remain enforced before output;
+messages still account for whole text incrementally within 256 KiB.
+
+A conservative TURN JSON bound using all maximum-length nullable pointers and
+8,192 maximally escaped text units measured 50,093 bytes; twenty are 1,001,860
+JSON bytes, well below [BatchGet's documented 16-MB total response ceiling](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchGetItem.html). Item-size/partial
+partition limits may still yield bounded UnprocessedKeys; the existing three
+application batch calls remain unchanged. No text is copied into messages status.
+A full 32-KiB canonical request plus maximum preparation envelope is <=33,066
+bytes, within 40 KiB. The 96-KiB record/4-MiB writer transaction bounds are unchanged.
+
+### Explicit frontend execution and rollout
+
+One user Retry click holds navigation/send/logout busy state across preparation
+and, only if eligible, the existing streaming POST /api/chat. GET itself does not
+execute or reserve work. Submission rechecks latest admission and audit/message/
+retryability inside the atomic lease path; a newer question or competing browser
+can make POST conflict. No second confirmation, automatic second attempt, new turn
+ID, duplicate user message or draft submission is introduced. Existing saved replay,
+local exact retries and borrowed tool-evidence reuse remain separate contracts.
+
+The operator confirmed the preceding message UI was reviewed, deployed and
+validated before implementation. The new required storage/status fields require
+a [coordinated fresh-data maintenance rollout](../../../../Docs/AIStack/Lambdas/ChatOrchestrator/Persistence-and-Context.md#coordinated-fresh-data-rollout):
+stop submissions, drain executions, clear only designated conversation items,
+coordinate writer/reader/frontend publication and existing invalidation, verify
+new assets, and start fresh before resuming traffic. Do not delete tables/auth
+sessions or run mixed versions; old records fail safely without backfill. No
+deployment/cleanup is performed by implementation. Python clients remain unchanged:
+the JSON client can inspect messages but does not allow this preparation route;
+use a separately authenticated browser/PowerShell GET for operator checks.

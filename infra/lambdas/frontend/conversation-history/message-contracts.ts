@@ -2,11 +2,15 @@ import { z } from 'zod';
 import { conversationMessagesPath, CONVERSATION_MESSAGES_RESOURCE } from '../shared/origin-routes';
 import { record } from '../shared/origin-guard';
 import { HistoryConfiguration, HistoryError, requestCursor, requestOwner } from './contracts';
+import { retrySchema, validRetryStatus } from '../../../lib/shared/retry-policy';
 
 export const MAX_SEQUENCE = 9_999_999_999;
 export const MAX_MESSAGES = 20;
 export const MAX_MESSAGE_BYTES = 262_144;
 export const NON_MESSAGE_RESERVE = 32_768;
+export const MESSAGE_METADATA_FIELDS = ['PK', 'SK', 'schema_version', 'entity_type', 'conversation_id', 'owner_id', 'last_event_sequence',
+  'history_projection_version', 'history_through_sequence', 'retry_projection_version', 'latest_turn_id',
+  'lease_version', 'active_turn_id', 'active_attempt_id', 'lease_expires_at'] as const;
 export const messageId = z.string().min(1).max(128).refine(value => !/[^A-Za-z0-9_-]/.test(value));
 export const eventId = z.string().length(36).regex(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);
 export const historySequence = z.number().int().min(0).max(MAX_SEQUENCE);
@@ -17,6 +21,7 @@ const timestamp = z.string().length(24).regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d
 const metadataSchema = z.object({ PK: z.string(), SK: z.literal('META'), schema_version: z.literal(1),
   entity_type: z.literal('CONVERSATION'), conversation_id: messageId, owner_id: z.string(),
   last_event_sequence: historySequence, history_projection_version: z.literal(1), history_through_sequence: historySequence,
+  retry_projection_version: z.literal(1), latest_turn_id: eventId.nullable(),
   lease_version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), active_turn_id: eventId.optional(),
   active_attempt_id: eventId.optional(), lease_expires_at: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional() });
 
@@ -33,8 +38,9 @@ const publicErrorSchema = z.strictObject({ code: z.string().min(1).max(64).refin
 
 export const publicStatusSchema = z.strictObject({ turnId: eventId, revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   status: z.enum(['complete', 'truncated', 'running', 'failed', 'timed_out', 'cancelled', 'abandoned', 'incomplete']),
-  error: publicErrorSchema.nullable() }).refine(value => Buffer.byteLength(JSON.stringify(value), 'utf8') <= 1024
-    && (['complete', 'truncated', 'running', 'incomplete'].includes(value.status) === (value.error === null)));
+  error: publicErrorSchema.nullable(), retry: retrySchema }).refine(value => Buffer.byteLength(JSON.stringify(value), 'utf8') <= 1024
+    && (['complete', 'truncated', 'running', 'incomplete'].includes(value.status) === (value.error === null))
+    && validRetryStatus(value.status, value.retry));
 
 export type PublicTurnStatus = z.infer<typeof publicStatusSchema>;
 
@@ -71,7 +77,10 @@ export function messageMetadata(raw: unknown, conversationId: string, owner: str
 
   if (value.PK !== `CONV#${conversationId}` || value.conversation_id !== conversationId
     || value.history_through_sequence !== value.last_event_sequence
-    || (active.some(field => field !== undefined) && (active.some(field => field === undefined) || value.lease_version < 1))) throw new HistoryError('SERVICE_UNAVAILABLE');
+    || (value.latest_turn_id === null && (value.last_event_sequence > 0 || value.lease_version > 0))
+    || (value.latest_turn_id !== null && value.lease_version < 1)
+    || (active.some(field => field !== undefined) && (active.some(field => field === undefined) || value.lease_version < 1
+      || value.active_turn_id !== value.latest_turn_id))) throw new HistoryError('SERVICE_UNAVAILABLE');
 
   return value;
 }

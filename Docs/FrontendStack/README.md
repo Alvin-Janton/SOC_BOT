@@ -59,8 +59,43 @@ observed failure conservative incomplete. Earlier failed history cannot override
 a successful retry. Equal revisions can have different lease-derived observations,
 so UI reconciliation also uses request-generation freshness. These strong
 reads are not one atomic snapshot and do not require unrelated work to stop.
-No retry controls, historical stream reconnection or automatic model dispatch is
-introduced. Compaction keeps original display history.
+Historical stream reconnection and automatic model dispatch remain excluded.
+The separate explicit latest-failure retry below uses bounded preparation before
+the existing POST chat path. Compaction keeps original display history.
+
+
+### Durable latest-failure preparation
+
+The existing history Lambda/role now also serves protected GET
+`/api/conversations/{conversationId}/turns/{turnId}/retry`. It reuses existing
+GetItem, zero-cache BFF/origin authorizer, 60-second Lambda/CloudFront allowances
+and 50-second buffered integration. Only the three turns/{turnId}/retry child
+resources, exact CUSTOM GET and account/API/stage-scoped invocation permission
+are added; list/messages identities and existing grants are unchanged. No new
+Lambda, role, table, GSI, foundation permission or stack dependency is introduced.
+
+Messages expose compact advisory `retry` availability, never original text.
+Preparation uses at most four strong exact-key reads under a 45-second budget,
+with rechecked owner, latest admitted turn, strict TURN and lease state. Only
+confirmed latest retryable failed/timed_out is eligible; unknown/cancelled/
+abandoned/truncated/running/complete is not. A 200 ineligible response has fixed
+reason/request:null; eligible returns the same exact original request with known
+conversationId. The full reply is <=40 KiB and canonical request <=32 KiB. GET
+performs no write/execution and reserves nothing. /chat atomically rechecks latest
+admission so a newer question between preparation and POST rejects the stale retry.
+
+One explicit frontend click retains one navigation/send/logout lock across GET
+and the existing streaming POST; drafts and original local snapshots remain.
+No automatic retries, new turn IDs, duplicate users, unknown-outcome feature or
+truncated continuation are added. See the [runtime contract](../../infra/lambdas/frontend/conversation-history/README.md#read-only-retry-preparation)
+and [frontend behavior](../../frontend/README.md#durable-retry-of-the-latest-failed-turn).
+
+The required storage/status fields need a [coordinated maintenance rollout](../AIStack/Lambdas/ChatOrchestrator/Persistence-and-Context.md#coordinated-fresh-data-rollout).
+Stop traffic, drain writers, clear only designated old conversation items and
+coordinate writer/reader/frontend publication/invalidation before fresh data and
+resuming traffic. No table/auth-session deletion, backfill, mixed-version fallback
+or automated cleanup is implemented. The preceding message UI validation gate was
+operator-confirmed; this new retry path still needs operator CloudFront validation.
 
 **Deployment gate:** confirm the account/Region supports at least a 50-second
 buffered Regional integration and the CloudFront origin supports 60 seconds.

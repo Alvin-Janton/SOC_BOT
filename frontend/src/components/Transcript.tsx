@@ -56,10 +56,11 @@ function SavedStatus({ status }: { status: TurnStatus }) {
 interface Props {
   messages: readonly HistoryMessage[]; statuses: readonly TurnStatus[]; turns: readonly Turn[];
   confirmations?: ReadonlyMap<string, Confirmation>; retry(): void; retryDisabled: boolean;
+  retrySaved(status: TurnStatus): void; durableDisabled: boolean; preparingTurnId?: string;
 }
 
 /** Renders saved text safely and keeps activity/retry affordances confined to retained local turns. */
-export function Transcript({ messages, statuses, turns, confirmations, retry, retryDisabled }: Props) {
+export function Transcript({ messages, statuses, turns, confirmations, retry, retryDisabled, retrySaved, durableDisabled, preparingTurnId }: Props) {
   const display = projection(messages, turns, statuses, confirmations);
   const lastLocal = turns.at(-1);
   return <>{display.map((message, index) => {
@@ -88,9 +89,16 @@ export function Transcript({ messages, statuses, turns, confirmations, retry, re
             {lastLocal === local && local.error.retryable && !confirmed
               ? <button className="secondary-button" onClick={retry} disabled={retryDisabled}>Retry this exact turn</button>
               : <p className="muted">No retry is offered for this response.</p>}
-            <p className="fine">Only a retained local request can retry with its exact original message, turn ID and conversation context. No retry was sent.</p></div>}
+            <p className="fine">This retry uses the retained exact original message, turn ID and conversation context. No retry was sent; the server also requires the latest admitted turn.</p></div>}
         </article>}
       {noticeHere && state && !localRunning && !(settledLocally && !confirmed) && <SavedStatus status={state} />}
+      {noticeHere && state?.retry.available && !local && <div className="saved-retry">
+        <button className="secondary-button" disabled={durableDisabled} onClick={() => retrySaved(state)}
+          title="Checks current eligibility, then submits the same original question if still allowed.">
+          {preparingTurnId === state.turnId && <LoaderCircle className="spin" size={14} aria-hidden="true" />}
+          {preparingTurnId === state.turnId ? 'Checking retry…' : 'Retry failed turn'}</button>
+        <p className="fine">Checks the latest saved state before starting another attempt of this same turn. Availability can change.</p>
+      </div>}
       {noticeHere && state && ['complete', 'truncated'].includes(state.status) && !savedAnswer && !settledLocally
         && <p className="history-status">Completion is recorded, but its saved answer is outside the loaded view. Refresh messages to retrieve it.{local && !confirmed ? ' The local partial answer is not final.' : ''}</p>}
     </div>;
