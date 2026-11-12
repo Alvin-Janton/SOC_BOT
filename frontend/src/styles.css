@@ -94,6 +94,14 @@ button svg { flex-shrink: 0; }
 .suggestion:hover { border-color: #6d9180; background: #2b352d; }
 .transcript-column { max-width: 51rem; margin: 0 auto; padding: 2rem 1.75rem 2.5rem; min-width: 0; }
 .turn + .turn { margin-top: 2.5rem; }
+.transcript-message + .transcript-message { margin-top: 1.8rem; }
+.transcript-message .user-message { margin-bottom: 0; }
+.messages-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: 1.25rem; }
+.messages-toolbar .secondary-button { font-size: .75rem; }
+.messages-error, .messages-empty { padding: .85rem 1rem; margin: 1rem 0; border: 1px solid #4d5948; border-radius: .5rem; color: #c7d2be; font-size: .8125rem; line-height: 1.7; overflow-wrap: anywhere; }
+.messages-error { color: #ddc7a7; background: #302f26; }.messages-error p, .messages-empty p { margin: 0 0 .4rem; }
+.saved-status { margin-top: .75rem; color: #a5b99d; font-size: .75rem; line-height: 1.7; overflow-wrap: anywhere; }
+.saved-status p { margin: .3rem 0 0; }.saved-status-failed, .saved-status-timed_out, .saved-status-cancelled, .saved-status-abandoned { color: #d3bca1; }
 .message-label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #a7b5a7; font-size: .6875rem; margin-bottom: .8rem; }
 .message-label > span:last-child { color: #95a496; }
 .assistant-mark { display: inline-flex; align-items: center; gap: .5rem; color: #dbe4d6; }

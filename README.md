@@ -158,6 +158,19 @@ The Lambda console buffers streaming responses. After the operator deploys dev, 
 
 ### Frontend and authentication foundation
 
+The frontend now restores saved user/assistant messages and current turn statuses
+when a signed-in user opens or refreshes `/?conversationId=<id>`. A bounded newest
+read gates sending; cached history revalidates in account-scoped memory. The refresh
+icon resets the page chain, and **Load older messages** fetches one snapshot-bound
+page per click while preserving scroll. Individual messages may split a turn
+across pages. Saved history never reconstructs retries or reconnects a stream;
+local drafts/request snapshots disappear on reload. Existing live streaming,
+automatic titles and exact retained local retries remain. See the [frontend guide](frontend/README.md#saved-messages-statuses-and-explicit-pagination)
+for readiness, unknown/running statuses, safe errors and later CloudFront checks.
+The operator confirmed the messages API's owned response and missing/foreign 404
+gate; pagination, byte limits, status/retry cases and UI races remain unverified live.
+This slice changes no backend, IAM, dependency, static publishing path or workflow.
+
 The CDK app defines `devFrontendStack` and `demoFrontendStack` (`SOC-BOT-<ENV>-FRONTEND`) alongside the existing foundation/Data/AI stacks. Each contains private SSE-S3 hosting behind CloudFront OAC, a separate Regional health/auth/chat API, an email/password Cognito pool/client, and a dedicated AWS-managed-encrypted `SOC-BOT-<ENV>-AUTH-SESSIONS` table. The API defines `GET /api/health` (fixed MOCK health) plus `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/signup`, `POST /api/auth/confirm-signup` and `POST /api/auth/resend-confirmation`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` and `POST /api/auth/change-password`, all protected by exact-route origin verification. `/api/*` is uncached and forwards cookies/headers/query strings excluding viewer Host; other paths use S3 GET/HEAD without cookies. Frontend now adds a dev-only global IPv4 WAF and an origin-secret REQUEST authorizer in both environments. Authenticated POST `/api/chat` now reuses that API and authorizer; the email/password account/chat UI is published by the application workflows; arbitrary SPA fallback remains excluded. Google activation is described below.
 
 The frontend auth Lambda uses independent fixed twelve-hour opaque sessions, `__Host-soc_bot_session` Secure/HttpOnly/SameSite=Lax cookies and strongly consistent user-version/disablement checks. Permanent `USER#sub` metadata and TTL-expiring `SESSION#sha256` records share the dedicated PK-only table. Trusted pre-authentication context and conditional session creation prevent adopting a newer version after stale authentication; AdminGetUser resolves canonical identity and conditionally initializes only genuinely absent metadata before verification. Recovery from lost metadata remains operator work. The new auth role has exact-pool AdminGetUser, exact-table Get/Put/Delete/ConditionCheckItem and its own log writes, without Secrets Manager or investigation access.
