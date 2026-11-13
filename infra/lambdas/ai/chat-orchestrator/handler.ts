@@ -6,6 +6,7 @@ import { ConversationStore, Lease, StoreError } from './store';
 import { httpError, LambdaContext, NdjsonStream } from './stream';
 import { resolveOwner } from './auth';
 import { CancellationMonitor } from './cancellation';
+import { shouldInjectDevRetryFault } from './dev-retry-fault';
 
 /**
  * Maps failures to safe public contracts, never exposing SDK errors, prompts, or record contents.
@@ -117,6 +118,11 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
     budget.attach(monitor);
     store.bindWorkSignal(budget.workSignal);
     await monitor.start();
+    if (shouldInjectDevRetryFault(config.environment, request, begun)) {
+      await budget.checkpoint();
+      console.info(JSON.stringify({ event: 'dev_retry_fault_injected', requestId: context.awsRequestId }));
+      throw new ChatError('MODEL_SERVICE_ERROR', 'The model could not complete the response.', 503, true);
+    }
     orchestrator = new Orchestrator(config, store, begun.lease, budget, activity => stream!.emit(activity), cleanupStore);
     const response = await orchestrator.run(begun.events);
     // Temporary synthetic-dev privacy exception; capture once from the assembled fresh final response.
