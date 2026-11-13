@@ -154,8 +154,10 @@ export class ToolExecutor {
    * No query Lambda invocation is sent during construction.
    */
   public constructor(private readonly config: Configuration, private readonly budget: TurnBudget,
-    private readonly store: ConversationStore, private readonly lease: Lease,
-    private readonly emit: (event: StreamEvent) => Promise<void>) {}
+    private readonly workStore: ConversationStore, private readonly lease: Lease,
+    private readonly emit: (event: StreamEvent) => Promise<void>, private readonly cleanupStore = workStore) {}
+  private cleaning = false;
+  private get store(): ConversationStore { return this.cleaning ? this.cleanupStore : this.workStore; }
 
   /** Emits at most one failure activity per logical call, including polling and fatal-path cleanup. */
   private async reportFailure(call: ToolCall, stage: FailureStage, code: ActivityCode): Promise<void> {
@@ -176,13 +178,19 @@ export class ToolExecutor {
    * Malformed, oversized, or function-error responses throw ChatError rather than returning SDK diagnostics.
    */
   private async invoke(call: ToolCall, request: object, cleanup = false, timeoutMs = 20_000): Promise<JsonObject> {
+    if (!cleanup) {
+      this.budget.check();
+      if ((request as { operation?: string }).operation !== 'query_status') await this.budget.checkpoint();
+    }
+    const cleanupRemaining = this.budget.remaining() - 1000;
+    if (cleanup && cleanupRemaining <= 0) throw new ChatError('QUERY_CANCELLATION_UNAVAILABLE', 'Query cancellation could not be confirmed.');
     let result: InvokeCommandOutput;
     try {
       result = await this.client.send(new InvokeCommand({
         FunctionName: this.config.queryFunction, InvocationType: 'RequestResponse',
         Payload: Buffer.from(JSON.stringify(request)),
-      }), { abortSignal: cleanup ? AbortSignal.timeout(5_000)
-        : AbortSignal.any([this.budget.signal, AbortSignal.timeout(Math.max(1, timeoutMs))]) });
+      }), { abortSignal: cleanup ? AbortSignal.timeout(Math.max(1, Math.min(5_000, cleanupRemaining)))
+        : AbortSignal.any([this.budget.workSignal, AbortSignal.timeout(Math.max(1, timeoutMs))]) });
     } catch (error) {
       await this.reportFailure(call, 'tool_invocation_failed', 'QUERY_INVOCATION_FAILED');
       throw error;
@@ -338,7 +346,7 @@ export class ToolExecutor {
    * Unlike the query Lambda's start operation, execute() does not return its SUBMITTED checkpoint as final evidence.
    */
   public async execute(call: ToolCall, request: ToolRequest): Promise<JsonObject> {
-    this.budget.check();
+    await this.budget.checkpoint();
     if (this.active) throw new ChatError('QUERY_TIMED_OUT', 'A previous query has not reached a confirmed terminal state.');
     if (isRagRequest(request)) return this.executeRag(call, request);
     await this.emit({ type: 'activity', stage: 'query_started', operation: request.operation, table: request.table });
@@ -377,6 +385,7 @@ export class ToolExecutor {
    * Output: its full persisted RAG envelope; ordinary RAG errors remain correctable error-status results.
    */
   private async executeRag(call: ToolCall, request: RagRequest): Promise<JsonObject> {
+    await this.budget.checkpoint();
     const started = Date.now();
     const activity = { operation: request.operation, toolUseId: call.tool_use_id, toolName: request.operation,
       ...('document_id' in request ? { documentId: request.document_id } : {}) };
@@ -464,7 +473,7 @@ export class ToolExecutor {
         return this.timedOut();
       }
       const wait = Math.min(1_000, QUERY_DEADLINE_SECONDS * 1_000 - (Date.now() - submittedAt));
-      await delay(Math.max(1, wait), undefined, { signal: this.budget.signal });
+      await delay(Math.max(1, wait), undefined, { signal: this.budget.workSignal });
     }
   }
 
@@ -541,6 +550,7 @@ export class ToolExecutor {
     const haltedGroups = new Map<string, ToolCall>();
     let finalizationOnly = false;
     for (const [callIndex, call] of calls.entries()) {
+      this.budget.check();
       const latest = selectToolResult(events, call);
       const halt = haltedGroups.get(call.assistant_message_id);
       const queuedAfterHalt = halt && call.attempt_id === halt.attempt_id && call.event_sequence > halt.event_sequence
@@ -658,29 +668,32 @@ export class ToolExecutor {
   public async cancelActive(): Promise<boolean> {
     const active = this.active;
     if (!active) return false;
-    const output = await this.invoke(active.call, { operation: 'cancel_query', query_execution_id: active.id }, true);
-    if (output.ok !== true || output.query_execution_id !== active.id || typeof output.state !== 'string'
-      || !['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].includes(output.state)
-      || typeof output.cancellation_requested !== 'boolean') {
-      const code = queryErrorCode(output);
-      await this.reportFailure(active.call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
-      throw new ChatError('QUERY_CANCELLATION_UNAVAILABLE', 'Query cancellation could not be confirmed.');
-    }
-    active.cancellationRequested = output.cancellation_requested;
-    active.cancellationConfirmed = output.state === 'CANCELLED';
-    if (output.state === 'FAILED' || output.state === 'CANCELLED') {
-      active.failure = await this.failed(active.call, active.id, output.state);
-      this.active = undefined;
-    } else {
-      // Even a succeeded execution needs an authenticated status fetch before its rows become evidence.
-      await this.store.append(this.lease, { entity_type: 'TOOL_RESULT', tool_use_id: active.call.tool_use_id,
-        tool_name: active.call.tool_name, status: 'success', output: {
-          state: PENDING.includes(output.state) ? output.state : 'SUBMITTED', observed_state: output.state,
-          query_execution_id: active.id, query: active.request as unknown as JsonObject, submitted_at_ms: active.submittedAt,
-          cancellation_requested: active.cancellationRequested, cancellation_confirmed: false,
-        } });
-      if (output.state === 'SUCCEEDED') this.active = undefined;
-    }
-    return active.cancellationConfirmed;
+    this.cleaning = true;
+    try {
+      const output = await this.invoke(active.call, { operation: 'cancel_query', query_execution_id: active.id }, true);
+      if (output.ok !== true || output.query_execution_id !== active.id || typeof output.state !== 'string'
+        || !['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].includes(output.state)
+        || typeof output.cancellation_requested !== 'boolean') {
+        const code = queryErrorCode(output);
+        await this.reportFailure(active.call, code ? 'tool_error' : 'tool_response_invalid', code ?? 'TOOL_RESPONSE_INVALID');
+        throw new ChatError('QUERY_CANCELLATION_UNAVAILABLE', 'Query cancellation could not be confirmed.');
+      }
+      active.cancellationRequested = output.cancellation_requested;
+      active.cancellationConfirmed = output.state === 'CANCELLED';
+      if (output.state === 'FAILED' || output.state === 'CANCELLED') {
+        active.failure = await this.failed(active.call, active.id, output.state);
+        this.active = undefined;
+      } else {
+        // Even a succeeded execution needs an authenticated status fetch before its rows become evidence.
+        await this.store.append(this.lease, { entity_type: 'TOOL_RESULT', tool_use_id: active.call.tool_use_id,
+          tool_name: active.call.tool_name, status: 'success', output: {
+            state: PENDING.includes(output.state) ? output.state : 'SUBMITTED', observed_state: output.state,
+            query_execution_id: active.id, query: active.request as unknown as JsonObject, submitted_at_ms: active.submittedAt,
+            cancellation_requested: active.cancellationRequested, cancellation_confirmed: false,
+          } });
+        if (output.state === 'SUCCEEDED') this.active = undefined;
+      }
+      return active.cancellationConfirmed;
+    } finally { this.cleaning = false; }
   }
 }

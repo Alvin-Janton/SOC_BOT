@@ -291,19 +291,20 @@ export class ModelRunner {
     messages: Message[], allowTools: boolean, budget: TurnBudget, emitText: (text: string) => Promise<void>, summary: boolean,
     toolCallsUsed = 0,
   ): Promise<ModelResponse> {
-    budget.check();
+    await budget.checkpoint();
     const reserve = summary || allowTools ? FINALIZATION_RESERVE_MS : OUTCOME_RESERVE_MS;
     const available = budget.remaining() - reserve;
     if (available <= 0) throw new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
     const controller = new AbortController();
 
     const requestSignal = AbortSignal.any([
-      budget.signal, AbortSignal.timeout(Math.max(1, Math.min(MODEL_REQUEST_MS, available))), controller.signal,
+      budget.workSignal, AbortSignal.timeout(Math.max(1, Math.min(MODEL_REQUEST_MS, available))), controller.signal,
     ]);
 
     const maxBytes = summary ? SUMMARY_OUTPUT_BYTES : MAX_OUTPUT_BYTES;
     const maxTokens = summary ? SUMMARY_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
 
+    let closeStream: (() => Promise<unknown>) | undefined;
     try {
       const providerMessages = !allowTools && !summary ? finalizationMessages(messages) : modelMessages(messages, allowTools);
       if (summary) providerMessages.push({ role: 'user', content: [{ text: SUMMARY_INSTRUCTION }] });
@@ -330,6 +331,9 @@ export class ModelRunner {
 
       const response = await this.client.send(new ConverseStreamCommand(input), { abortSignal: requestSignal });
       if (!response.stream) throw protocolError();
+      const iterator = response.stream[Symbol.asyncIterator]();
+      closeStream = async () => iterator.return?.();
+      const providerEvents = { [Symbol.asyncIterator]: () => iterator };
       const blocks = new Map<number, StreamBlock>();
       const ids = new Set<string>();
 
@@ -347,7 +351,7 @@ export class ModelRunner {
       let outputTokens = 0;
       let metadataSeen = false;
 
-      for await (const event of response.stream) {
+      for await (const event of providerEvents) {
         budget.check();
         if (requestSignal.aborted) throw new ChatError('MODEL_TIMED_OUT', 'The model response reached its time limit.', 504);
 
@@ -473,6 +477,7 @@ export class ModelRunner {
       throw new ChatError('MODEL_SERVICE_ERROR', 'The model could not complete the response.');
     } finally {
       controller.abort();
+      await closeStream?.().catch(() => undefined);
     }
   }
 }

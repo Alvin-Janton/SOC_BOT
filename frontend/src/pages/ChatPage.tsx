@@ -64,7 +64,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
     assigned: assignConversation, completed: history.refresh, busy: navigationBusy,
     canSend: id => !leaving.current && messages.canSend(id), canRetry: id => !leaving.current && messages.canRetry(id),
     resolved: messages.resolved, started: messages.suspend, settled: messages.settled,
-    observation: messages.observation, unavailable: messages.markUnavailable });
+    cancellation: messages.cancellation, observation: messages.observation, unavailable: messages.markUnavailable });
   const messageBusy = messages.phase !== 'idle';
   const latest = messages.messages.at(-1);
   const latestStatus = latest && messages.statuses.find(status => status.turnId === latest.turnId)?.status;
@@ -142,8 +142,8 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
         </div>}
         {messages.pageError && <div className="messages-error" role="alert"><p>{messages.pageError.message}</p><p>The loaded transcript was retained. Refresh messages to restart the page chain, or explicitly try Load older messages again.</p></div>}
         {!messages.unavailable && <Transcript messages={messages.messages} statuses={messages.statuses} confirmations={messages.confirmations} turns={chat.turns}
-          retryDisabled={chat.busy || loggingOut || !messages.canRetry(chat.conversationId)} retry={() => { if (!leaving.current) chat.retry(); }}
-          durableDisabled={chat.busy || loggingOut || chat.unresolved || !messages.canRetry(chat.conversationId)} preparingTurnId={chat.preparingTurnId}
+          retryDisabled={chat.busy || chat.stopBlocks || loggingOut || !messages.canRetry(chat.conversationId)} retry={() => { if (!leaving.current) chat.retry(); }}
+          durableDisabled={chat.busy || chat.stopBlocks || loggingOut || chat.unresolved || !messages.canRetry(chat.conversationId)} preparingTurnId={chat.preparingTurnId}
           retrySaved={status => { if (!leaving.current) void chat.retrySaved(status); }} />}
         {!messages.unavailable && messages.loaded && messages.ready && !messages.messages.length && !chat.turns.length && <div className="messages-empty">
           <p>{messages.nextCursor !== null ? 'This page contains no displayed messages. Load older messages to continue; history is not yet known to be empty.' : 'No saved messages in this conversation.'}</p>
@@ -158,7 +158,9 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
     {selection.id && !messages.ready && !messageBusy && !chat.busy && !messages.error && <div className="unresolved-note" role="status">Refresh messages to verify the latest saved state before sending or retrying. Your draft and local request were retained.</div>}
     {selection.id && messages.loaded && !messages.messages.length && messages.nextCursor !== null && !messages.unavailable && <div className="unresolved-note">Load older messages to establish a usable view before sending.</div>}
     {chat.unresolved && !messages.unavailable && <div className="unresolved-note">Resolve the original turn before sending a follow-up, or deliberately start a new conversation. Previous backend work may still finish.</div>}
-    <div ref={form}><Composer draft={chat.draft} change={chat.setDraft} send={() => { if (!leaving.current) chat.send(); }} busy={chat.busy} preparing={Boolean(chat.preparingTurnId)} blocked={Boolean(chat.unresolved) || loggingOut || Boolean(selection.error) || !messages.canSend(chat.conversationId)} preview={preview} error={chat.inputError} /></div>
+    <div ref={form}><Composer draft={chat.draft} change={chat.setDraft} send={() => { if (!leaving.current) chat.send(); }} busy={chat.busy} preparing={Boolean(chat.preparingTurnId)} stop={() => { if (!leaving.current) void chat.stop(); }} stopVisible={(import.meta.env.DEV && preview) || Boolean(chat.stopTarget) || (chat.busy && !chat.preparingTurnId)}
+      stopDisabled={!chat.stopTarget || loggingOut || Boolean(chat.preparingTurnId)} stopPhase={chat.stopPhase}
+      blocked={chat.stopBlocks || Boolean(chat.unresolved) || loggingOut || Boolean(selection.error) || !messages.canSend(chat.conversationId)} preview={preview} error={chat.inputError} /></div>
     </div></div>
     <span className="sr-only" role="status">{chat.preparingTurnId ? 'Checking retry availability. Sending, navigation and sign out are disabled. No chat request has been submitted yet.' : chat.busy ? 'Investigation running. Sending, new conversation and sign out are disabled.' : 'No active request.'}</span>
   </div>;

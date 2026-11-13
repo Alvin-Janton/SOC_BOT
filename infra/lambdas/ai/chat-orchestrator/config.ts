@@ -78,6 +78,12 @@ export class ChatError extends Error {
 
 /** Uses one acceptance-time deadline, reserving bounded time for cancellation and durable outcomes. */
 export class TurnBudget {
+  private control?: { readonly signal: AbortSignal; check(): void; checkpoint(): Promise<void> };
+  /** Combines normal work only; durable cleanup keeps its original independent deadline. */
+  public get workSignal(): AbortSignal { return this.control ? AbortSignal.any([this.signal, this.control.signal]) : this.signal; }
+  public attach(control: NonNullable<TurnBudget['control']>): void { this.control = control; }
+  /** Checks one bounded asynchronous cancellation checkpoint before a normal dispatch. */
+  public async checkpoint(): Promise<void> { this.check(); await this.control?.checkpoint(); this.check(); }
   public readonly deadline: number;
   public readonly signal: AbortSignal;
   /**
@@ -108,6 +114,7 @@ export class TurnBudget {
    * With only 45_000 ms remaining, it throws ChatError { code: 'TURN_TIMED_OUT', status: 504 }.
    */
   public check(): void {
+    this.control?.check();
     if (this.signal.aborted || this.remaining() <= OUTCOME_RESERVE_MS) {
       throw new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
     }

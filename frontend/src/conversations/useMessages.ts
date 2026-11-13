@@ -241,5 +241,6 @@ export function useMessages(accountId: string | undefined, conversationId: strin
   return { messages: entry?.messages ?? [], statuses: entry?.statuses ?? [], confirmations: entry?.confirmations,
     loaded: entry?.loaded ?? false, ready, phase, error: entry?.error, pageError: entry?.pageError,
     unavailable: entry?.unavailable ?? false, nextCursor: entry?.nextCursor ?? null, change: entry?.change,
+    cancellation: () => entry?.statuses.find(status => status.cancel.available || (status.cancel.requested && ['running', 'incomplete'].includes(status.status))),
     refresh, more, suspend, settled, canSend, canRetry, resolved, observation, markUnavailable: unavailable };
 }

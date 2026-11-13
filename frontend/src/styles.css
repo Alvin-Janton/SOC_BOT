@@ -194,3 +194,7 @@ button svg { flex-shrink: 0; }
 }
 @media (max-height: 720px) { .empty-state { padding-top: 1.5rem; padding-bottom: 1rem; }.empty-state h1 { font-size: 2rem; }.empty-state > p { margin-bottom: 1rem; }.empty-state .eyebrow { margin-top: 0; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+.stop-button { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid #9b8770; border-radius: .55rem; padding: .5rem .65rem; color: #f4e2cc; background: #3a3028; font-size: .8rem; white-space: nowrap; }
+.stop-button:disabled { opacity: .55; cursor: default; }
+.stop-button:focus-visible { outline: 2px solid #e1c39d; outline-offset: 3px; }

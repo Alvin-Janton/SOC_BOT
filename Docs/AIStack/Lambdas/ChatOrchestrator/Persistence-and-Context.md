@@ -24,7 +24,7 @@ Event variants are:
 - `TOOL_CALL`: original tool-use ID/name, validated arguments, model-response group ID, content-block index, and application-owned `preparation` decision. New calls always include approved/rejected status and an allowlisted code for rejection; the optional field keeps completed legacy history readable without changing table keys/indexes or schema version.
 - `TOOL_RESULT`: matching tool ID/name, success/error status, and bounded output; may be a pending query checkpoint or terminal evidence/error.
 - `ASSISTANT_MESSAGE`: completed public answer, model ID, stop reason, and role; one full response, not token fragments.
-- `TURN_OUTCOME`: failed/timed-out attempt metadata, retryability, phase, and safe error code. The schema also supports cancelled/abandoned variants, but the current handler emits failed/timed-out outcomes, not an authenticated Stop or abandonment workflow.
+- `TURN_OUTCOME`: failed/timed-out attempt metadata, retryability, phase, and safe error code. The handler also emits confirmed user-cancelled outcomes after authenticated attempt-scoped intent; an abandonment workflow remains unimplemented.
 
 Only a rejected `INVALID_TOOL_INPUT` preparation may optionally include `validation`, with the [shared bounded contract](../../../../infra/lib/shared/tool-validation-contract.json) enforced on writes and reads. It contains a fixed stage and up to three authored path/code/message issues, capped at 2 KiB, plus only the optional fixed `omitted: true` indicator. Rejected arguments stay exactly `{}`. Approved/other rejected decisions cannot carry hints or unknown preparation keys. Legacy decisions without hints remain valid; no table/key/item/version migration occurs.
 
@@ -51,6 +51,7 @@ Every TURN item contains exactly:
 | `PK`, `SK`, `schema_version:1`, `entity_type:"TURN_STATE"`, `conversation_id`, `turn_id` | Same conversation partition; `SK=TURN#<turnId>`. |
 | `attempt_id`, `lease_version` | Latest accepted attempt and its fence, retained after lease release. |
 | `original_message`, `retryable` | Exact original validated text, immutable before/after USER append; null while running, effective outcome boolean for failed/timed_out/cancelled, false for complete/truncated/abandoned. |
+| `cancel_requested_at` | Optional canonical UTC intent timestamp or null; absence on an otherwise valid durable-retry record means no intent. Preserved on that attempt and included in full conditional writes. |
 | `revision`, `status` | Positive safe revision and `running`, `complete`, `truncated`, `failed`, `timed_out`, `cancelled` or `abandoned`. |
 | `user_event_id` | Null before the original user commits; once linked, preserved across attempts. |
 | `assistant_event_id`, `outcome_event_id`, `error_code` | Nullable effective-result pointers/code. Running has all three null. Complete/truncated has an assistant pointer and null outcome/error. Failures have an outcome pointer/code and no assistant pointer. |
@@ -242,3 +243,15 @@ The operator chose a fresh start, not migration. This implementation performs no
 4. Keep every supported writer on this contract. Mixed deployments or rollback to an old writer require explicit compatibility/cleanup coordination: older writers do not maintain all required projections, and lagging state must fail closed rather than become a falsely complete history.
 
 After rollout, use the existing authenticated chat deliberately to inspect first turn, tools, follow-up, completed exact replay and safely available failure/retry. Confirm matching EVT/HIST IDs/sequences/text, one original user and one TURN per turn, correct final attempt/revision, all-event watermark equality and no tool copies. Compaction should preserve original EVT/HIST/TURN items. Live concurrency, recovery, condition failures and ambiguous commits were source-reviewed, not executed by the existing checks; no new tests, fixtures, mocks or persistence harness were authorized. Do not infer runtime atomicity/race coverage from build/synthesis or the unchanged existing suite. Messages, frontend hydration and the new explicit preparation flow use the same fresh-data contract and require coordinated operator validation.
+
+## Cancellation control transitions
+
+See [attempt-scoped cancellation](Cancellation.md) for intent/completion ordering,
+monitoring, cleanup and rollout. Intent changes TURN revision/updated_at without
+creating EVT/HIST or moving META's watermark/latest pointer. Full conditional
+writes preserve absence versus null and recognize this control-only race. Final
+cancelled outcomes retain intent, are nonretryable, and atomically update original
+audit/HIST/TURN/META. Pending intent cannot be erased by local/durable retry or
+expiry recovery. Completed replay and prior completed context/summaries remain.
+The additive optional field does not require deleting valid durable-retry data;
+stop/drain and coordinated publication are still mandatory.

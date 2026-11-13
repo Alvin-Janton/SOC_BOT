@@ -1,13 +1,13 @@
-# Authenticated conversation history and retry preparation
+# Authenticated history, retry preparation and Stop intent
 
 `handler.ts` serves `GET /api/conversations` and
 `GET /api/conversations/{conversationId}/messages` plus the exact read-only
 `GET /api/conversations/{conversationId}/turns/{turnId}/retry` through the existing
 CloudFront API behavior and zero-cache BFF authorizer. The list contract is
 unchanged. The frontend loads saved messages and offers explicit latest-failure
-retry; GET never invokes chat. No polling, rename/delete or Python-client change
+retry and a separate exact attempt-scoped Stop POST; GET never writes or invokes chat. No polling, rename/delete or Python-client change
 is included.
-Authentication/Google flows and streaming chat remain unchanged.
+Authentication/Google flows remain unchanged; acquired chat streams additionally expose attemptId.
 
 ## Request and response
 
@@ -365,9 +365,9 @@ conversation ID, text/prepared request, raw records/errors, cookies or tokens.
 
 The retry object remains inside the existing 1,024-byte public-status cap. A
 conservative maximum-length failure example with a 64-character code, 256-byte
-quote-heavy message, maximum revision and retry reason measured 764 JSON bytes;
+quote-heavy message, maximum revision and retry reason measured 861 JSON bytes including conservative cancellation metadata;
 other allowed reasons fit the same cap. Twenty such statuses plus a maximum
-cursor/envelope measured 17,574 bytes, below the unchanged 32-KiB nonmessage
+cursor/envelope measured 19,514 bytes, below the unchanged 32-KiB nonmessage
 reserve. Actual status/envelope/final-body sizes remain enforced before output;
 messages still account for whole text incrementally within 256 KiB.
 
@@ -399,3 +399,70 @@ sessions or run mixed versions; old records fail safely without backfill. No
 deployment/cleanup is performed by implementation. Python clients remain unchanged:
 the JSON client can inspect messages but does not allow this preparation route;
 use a separately authenticated browser/PowerShell GET for operator checks.
+
+## Attempt-scoped Stop
+
+POST `/api/conversations/{conversationId}/turns/{turnId}/cancel` requires the
+existing protected POST Origin/Fetch Metadata/session/origin-token checks, exact
+REST/account/API/stage/BFF owner, two bounded path IDs, application/json, no query,
+and an exact <=1,024-byte JSON body:
+
+```json
+{"attemptId":"b83eea03-ae9b-4eaa-bc54-40cafacadf74"}
+```
+
+New or duplicate pending intent returns 202; terminal same-attempt cancellation
+returns 200. Both have exactly these five fields (invented identifiers):
+
+```json
+{"conversationId":"example-conversation","turnId":"4cae88e6-2d79-497d-81bc-49115a39b8a6","attemptId":"b83eea03-ae9b-4eaa-bc54-40cafacadf74","revision":2,"state":"stopping"}
+```
+
+A 200 uses state:cancelled and current revision. A 202 can already be stale on
+arrival and must not overwrite a newer terminal observation. Conflicts are 409
+TURN_ALREADY_COMPLETED, ATTEMPT_CHANGED or TURN_NOT_CANCELLABLE; the last applies
+to other terminal/expired/noncurrent work without accepted intent. Missing/foreign
+conversation and missing target are the same 404 CONVERSATION_UNAVAILABLE.
+Existing authored 400/401 and bounded gateway throttling/service errors remain.
+503 means acceptance is unconfirmed, not proof nothing committed. No automatic
+mutation retry, tool/model invocation or waiting for terminal cancellation occurs.
+
+Strong META then TURN reads precede an atomic two-item ConditionCheck META / Update
+TURN transaction. Owner/supported markers/latest/current/live fence and exact
+running target/revision/no-intent are guarded at mutation. Only timestamp,
+updated_at and revision change. Duplicate requests do not rewrite them. Stable
+per-build ClientRequestToken preserves identical SDK retries; application rebuilds
+occur only after confirmed conditional conflict and revalidation. Unknown commit
+uses point-read reconciliation only, otherwise safe 503. Caps: six exact strong
+Gets, two transaction builds, eight-second processing budget, two SDK attempts,
+<=two-second call signals and a response reserve. Client destruction is guaranteed.
+The buffered integration stays ten seconds; shared Lambda/origin remain sixty.
+Receipts/errors fit 8 KiB with existing no-store/nosniff/requestId and no CORS.
+Logging adds only fixed template/outcome, safe request ID, duration and counts.
+
+Each messages status now requires cancel metadata:
+
+```json
+{"available":true,"requested":false,"attemptId":"b83eea03-ae9b-4eaa-bc54-40cafacadf74"}
+```
+
+Only reconciled running/current/latest/live work without intent is available.
+Pending intent uses available:false, requested:true and its attempt; status remains
+running or effective incomplete until confirmed. User-cancelled status retains
+requested:true and that attempt. Other unavailable states use false/false/null.
+No fence, owner, timestamp, query ID or original request is exposed. Pending or
+confirmed cancellation never permits durable retry. Status/cursor/page/read limits
+remain unchanged; conservative status/complete reserve measures are 861/19,514
+bytes, below 1 KiB/32 KiB, with final size enforcement intact.
+
+GET handlers remain read-only. The history role adds only UpdateItem and
+ConditionCheckItem on its exact environment chat table. The APPLICATION boundary
+adds only ConditionCheckItem on that same exact table, leaving its auth-session
+condition-check statement unchanged. No Put/Delete/Scan, new service/table/index,
+role, reverse dependency or broad read/write grant is added.
+
+See [cooperative control, final persistence and operator rollout](../../../../Docs/AIStack/Lambdas/ChatOrchestrator/Cancellation.md).
+Deploy the foundation boundary first and drain old workers before publishing the
+coordinated writer/reader/frontend update. Existing valid durable-retry records
+need no cleanup/backfill for optional cancel_requested_at. Python clients remain
+unchanged and do not add a Stop command. All live validation remains operator work.

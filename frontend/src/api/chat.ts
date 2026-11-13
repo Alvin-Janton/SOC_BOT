@@ -1,15 +1,16 @@
+import { historyIdentifier } from './messages';
 import { ApiError, record, request, responseError } from './http';
 
 export interface ChatRequest { readonly turnId: string; readonly message: string; readonly conversationId?: string }
 export interface Activity { readonly stage: string; readonly message: string; readonly details: readonly string[]; readonly error: boolean }
-export type ChatEvent = { type: 'conversation'; conversationId: string } | { type: 'text'; text: string }
+export type ChatEvent = { type: 'conversation'; conversationId: string; attemptId?: string } | { type: 'text'; text: string }
   | { type: 'activity'; activity: Activity } | { type: 'heartbeat' }
   | { type: 'complete'; conversationId: string; replayed: boolean; truncated: boolean };
 
 const MAX_LINE_BYTES = 256 * 1024;
 const encoder = new TextEncoder();
 const STAGES: Record<string, string> = {
-  investigating: 'Investigating the available evidence', finalizing: 'Preparing the answer', summarizing: 'Summarizing earlier context',
+  cancelling: 'Stopping the investigation', investigating: 'Investigating the available evidence', finalizing: 'Preparing the answer', summarizing: 'Summarizing earlier context',
   query_started: 'Query started', query_completed: 'Query completed', rag_started: 'Reading playbook metadata',
   rag_completed: 'Playbook request completed', tool_request_rejected: 'Tool request rejected', tool_error: 'Tool returned an error',
   tool_invocation_failed: 'Tool invocation could not be confirmed', tool_response_invalid: 'Tool response could not be verified',
@@ -52,6 +53,8 @@ export async function streamChat(payload: ChatRequest, signal: AbortSignal, emit
   let buffered = '';
   let conversationId = payload.conversationId;
   let answerBytes = 0;
+  let attemptId: string | undefined;
+  let conversationSeen = false;
 
   /** Validates one line, reconciling all identifiers against the immutable original request. */
   function line(value: string): boolean {
@@ -74,7 +77,10 @@ export async function streamChat(payload: ChatRequest, signal: AbortSignal, emit
     if (['conversation', 'complete', 'error'].includes(kind) && event.turnId !== payload.turnId) throw new ApiError('The stream omitted its turn identifier.', 'INVALID_STREAM');
     if (kind === 'conversation') {
       if (event.conversationId === undefined || !conversationId) throw new ApiError('The stream omitted its conversation identifier.', 'INVALID_STREAM');
-      emit({ type: 'conversation', conversationId });
+      if (event.attemptId !== undefined && !historyIdentifier(event.attemptId)) throw new ApiError('Invalid stream attempt identifier.', 'INVALID_STREAM');
+      if (conversationSeen && event.attemptId !== attemptId) throw new ApiError('The stream changed its attempt identifier.', 'INVALID_STREAM');
+      attemptId = event.attemptId as string | undefined; conversationSeen = true;
+      emit({ type: 'conversation', conversationId, attemptId });
     } else if (kind === 'text_delta') {
       const delta = text(event.text, MAX_LINE_BYTES);
       answerBytes += encoder.encode(delta).byteLength;
@@ -94,7 +100,8 @@ export async function streamChat(payload: ChatRequest, signal: AbortSignal, emit
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(code) || typeof event.retryable !== 'boolean') throw new ApiError('The terminal error could not be verified.', 'INVALID_STREAM');
       const correlation = event.correlationId === undefined ? undefined : text(event.correlationId, 128);
       if (correlation !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(correlation)) throw new ApiError('The error identifier could not be verified.', 'INVALID_STREAM');
-      throw new ApiError('The investigation ended with an application error. Review the turn status before continuing.', code, 200, event.retryable, false, correlation);
+      if (code === 'TURN_CANCELLED' && event.retryable !== false) throw new ApiError('Contradictory cancellation result.', 'INVALID_STREAM');
+      throw new ApiError(code === 'TURN_CANCELLED' ? 'The investigation was cancelled. Partial text is not a saved answer.' : 'The investigation ended with an application error. Review the turn status before continuing.', code, 200, event.retryable, false, correlation);
     }
     return false; // Unknown informational events cannot complete a turn.
   }

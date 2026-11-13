@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cancelSchema, validCancelStatus } from '../../../lib/shared/cancel-policy';
 import { conversationMessagesPath, CONVERSATION_MESSAGES_RESOURCE } from '../shared/origin-routes';
 import { record } from '../shared/origin-guard';
 import { HistoryConfiguration, HistoryError, requestCursor, requestOwner } from './contracts';
@@ -38,9 +39,10 @@ const publicErrorSchema = z.strictObject({ code: z.string().min(1).max(64).refin
 
 export const publicStatusSchema = z.strictObject({ turnId: eventId, revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   status: z.enum(['complete', 'truncated', 'running', 'failed', 'timed_out', 'cancelled', 'abandoned', 'incomplete']),
-  error: publicErrorSchema.nullable(), retry: retrySchema }).refine(value => Buffer.byteLength(JSON.stringify(value), 'utf8') <= 1024
+  error: publicErrorSchema.nullable(), retry: retrySchema, cancel: cancelSchema }).refine(value => Buffer.byteLength(JSON.stringify(value), 'utf8') <= 1024
     && (['complete', 'truncated', 'running', 'incomplete'].includes(value.status) === (value.error === null))
-    && validRetryStatus(value.status, value.retry));
+    && validRetryStatus(value.status, value.retry) && validCancelStatus(value.status, value.cancel)
+    && (!value.cancel.requested || !value.retry.available));
 
 export type PublicTurnStatus = z.infer<typeof publicStatusSchema>;
 

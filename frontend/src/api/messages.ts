@@ -10,10 +10,12 @@ export const RETRY_REASONS = ['NOT_LATEST_TURN', 'TURN_IN_PROGRESS', 'CONVERSATI
   'TRUNCATED_RESPONSE', 'TURN_ABANDONED', 'TURN_CANCELLED', 'OUTCOME_UNCONFIRMED', 'NOT_RETRYABLE', 'REQUEST_TOO_LARGE'] as const;
 export type RetryAvailability = { readonly available: true; readonly reason: null }
   | { readonly available: false; readonly reason: typeof RETRY_REASONS[number] };
+export interface CancelAvailability { readonly available: boolean; readonly requested: boolean; readonly attemptId: string | null }
 export interface TurnStatus {
   readonly turnId: string; readonly revision: number; readonly status: HistoryStatus;
   readonly error: { readonly code: string; readonly message: string } | null;
   readonly retry: RetryAvailability;
+  readonly cancel: CancelAvailability;
 }
 export interface MessagePage {
   readonly conversationId: string; readonly snapshotSequence: number; readonly messages: readonly HistoryMessage[];
@@ -49,6 +51,14 @@ export function parseRetry(value: unknown, status: HistoryStatus): RetryAvailabi
   return valid ? { available: false, reason } : undefined;
 }
 
+/** Accepts only coherent attempt controls; identifiers are not ownership capabilities. */
+export function parseCancel(value: unknown, state: HistoryStatus): CancelAvailability | undefined {
+  if (!shape(value, ['available', 'requested', 'attemptId']) || typeof value.available !== 'boolean' || typeof value.requested !== 'boolean') return undefined;
+  if (value.available) return state === 'running' && !value.requested && historyIdentifier(value.attemptId) ? value as unknown as CancelAvailability : undefined;
+  if (value.requested) return ['running', 'incomplete', 'cancelled'].includes(state) && historyIdentifier(value.attemptId) ? value as unknown as CancelAvailability : undefined;
+  return value.attemptId === null ? value as unknown as CancelAvailability : undefined;
+}
+
 /** Accepts canonical UTC instants, not timestamps that Date.parse silently repairs. */
 function timestamp(value: unknown): value is string {
   return typeof value === 'string' && value.length === 24 && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
@@ -67,9 +77,12 @@ function cursor(value: unknown): value is string | null {
 
 /** Validates one bounded public turn status without interpreting it as message text or a retry request. */
 function status(value: unknown, invalid: () => ApiError): TurnStatus {
-  if (!shape(value, ['turnId', 'revision', 'status', 'error', 'retry']) || !historyIdentifier(value.turnId)
+  if (!shape(value, ['turnId', 'revision', 'status', 'error', 'retry', 'cancel']) || !historyIdentifier(value.turnId)
     || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1
     || typeof value.status !== 'string' || !HISTORY_STATUSES.includes(value.status) || !parseRetry(value.retry, value.status as HistoryStatus)) throw invalid();
+  const cancel = parseCancel(value.cancel, value.status as HistoryStatus);
+  const retry = parseRetry(value.retry, value.status as HistoryStatus)!;
+  if (!cancel || (cancel.requested && retry.available)) throw invalid();
   if (NO_ERROR.includes(value.status)) {
     if (value.error !== null) throw invalid();
   } else if (!shape(value.error, ['code', 'message']) || typeof value.error.code !== 'string'

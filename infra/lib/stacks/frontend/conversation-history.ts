@@ -19,7 +19,7 @@ export interface ConversationHistoryProps {
   readonly chatHistoryTable: ITable;
 }
 
-/** Owns read-only metadata/HIST/TURN endpoints in Frontend; conversation storage remains owned by AI. */
+/** Owns read-only metadata/HIST/TURN endpoints and one intent mutation in Frontend; conversation storage remains owned by AI. */
 export class ConversationHistory extends Construct {
   public readonly function: NodejsFunction;
   public readonly role: Role;
@@ -40,6 +40,7 @@ export class ConversationHistory extends Construct {
       resources: [`arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:${logGroupName}:*`] }));
     this.role.addToPolicy(new PolicyStatement({ actions: ['dynamodb:Query'], resources: [`${props.chatHistoryTable.tableArn}/index/GSI1`] }));
     this.role.addToPolicy(new PolicyStatement({ actions: ['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:BatchGetItem'], resources: [props.chatHistoryTable.tableArn] }));
+    this.role.addToPolicy(new PolicyStatement({ actions: ['dynamodb:UpdateItem', 'dynamodb:ConditionCheckItem'], resources: [props.chatHistoryTable.tableArn] }));
     const entry = this.handlerEntry();
     this.function = new NodejsFunction(this, 'Function', {
       functionName: name, entry, handler: 'handler', role: this.role, runtime: Runtime.NODEJS_22_X,
@@ -76,7 +77,8 @@ export class ConversationHistory extends Construct {
     messagePermissions[0].sourceArn = props.api.arnForExecuteApi('GET', '/api/conversations/*/messages', props.environment);
     Validations.of(messages.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
       reason: 'This messages GET uses the existing zero-cache origin/BFF session authorizer. Both authorizer and handler validate the exact bounded concrete ID; the reader strongly checks conversation ownership before HIST/TURN reads. Only that account/API/stage GET invocation is allowed.' });
-    const retry = conversation.addResource('turns').addResource('{turnId}').addResource('retry').addMethod('GET', new LambdaIntegration(this.function, {
+    const turn = conversation.addResource('turns').addResource('{turnId}');
+    const retry = turn.addResource('retry').addMethod('GET', new LambdaIntegration(this.function, {
       proxy: true, allowTestInvoke: false, scopePermissionToMethod: true, timeout: Duration.seconds(50),
     }), { authorizationType: AuthorizationType.CUSTOM, authorizer: props.authorizer, requestValidator: props.requestValidator,
       requestParameters: { 'method.request.path.conversationId': true, 'method.request.path.turnId': true } });
@@ -86,6 +88,16 @@ export class ConversationHistory extends Construct {
     retryPermissions[0].sourceArn = props.api.arnForExecuteApi('GET', '/api/conversations/*/turns/*/retry', props.environment);
     Validations.of(retry.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
       reason: 'This exact preparation GET uses the existing zero-cache origin/BFF session authorizer. Concrete conversation/turn IDs are revalidated, ownership precedes four bounded strong point reads, and no execution or writes occur. Invocation is restricted to this account/API/stage GET.' });
+    const cancel = turn.addResource('cancel').addMethod('POST', new LambdaIntegration(this.function, {
+      proxy: true, allowTestInvoke: false, scopePermissionToMethod: true, timeout: Duration.seconds(10),
+    }), { authorizationType: AuthorizationType.CUSTOM, authorizer: props.authorizer, requestValidator: props.requestValidator,
+      requestParameters: { 'method.request.path.conversationId': true, 'method.request.path.turnId': true } });
+    const cancelPermissions = cancel.node.findAll().filter((node): node is CfnPermission => node instanceof CfnPermission);
+    if (cancelPermissions.length !== 1) throw new Error('Expected one invocation permission for cancellation.');
+    cancelPermissions[0].sourceAccount = Aws.ACCOUNT_ID;
+    cancelPermissions[0].sourceArn = props.api.arnForExecuteApi('POST', '/api/conversations/*/turns/*/cancel', props.environment);
+    Validations.of(cancel.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
+      reason: 'This exact attempt-control POST uses the zero-cache origin/BFF session authorizer, required browser Origin and exact path validation. The handler atomically checks owner/latest/live attempt with its intent update on the exact chat table.' });
     Validations.of(this.function.node.defaultChild!).acknowledge({ id: 'AwsSolutions-L1',
       reason: 'Supported Node.js 22 matches the approved repository and frontend Lambda runtime.' });
     Validations.of(policy).acknowledge({

@@ -22,6 +22,7 @@ const turnSchema = z.strictObject({ PK: z.string(), SK: z.string(), schema_versi
   conversation_id: id, turn_id: uuid, attempt_id: uuid, lease_version: counter, revision: counter,
   status: z.enum(['running', 'complete', 'truncated', 'failed', 'timed_out', 'cancelled', 'abandoned']),
   original_message: z.string().min(1).max(8192).refine(value => /\S/.test(value)), retryable: z.boolean().nullable(),
+  cancel_requested_at: timestamp.nullable().optional(),
   user_event_id: uuid.nullable(), assistant_event_id: uuid.nullable(), outcome_event_id: uuid.nullable(), error_code: code.nullable(),
   created_at: timestamp, updated_at: timestamp });
 export type TurnState = z.infer<typeof turnSchema>;
@@ -67,6 +68,8 @@ export function turnState(raw: unknown, conversationId: string, turnId: string):
   const item = parsed.data;
   if (item.PK !== `CONV#${conversationId}` || item.SK !== `TURN#${turnId}`
     || item.conversation_id !== conversationId || item.turn_id !== turnId) invalid();
+  if (item.cancel_requested_at && (item.revision < 2 || !['running', 'cancelled', 'abandoned'].includes(item.status)
+    || (item.status === 'cancelled' && (item.retryable !== false || item.error_code !== 'TURN_CANCELLED')))) invalid();
   if (item.status === 'running') {
     if (item.assistant_event_id !== null || item.outcome_event_id !== null || item.error_code !== null || item.retryable !== null) invalid();
   } else if (item.status === 'complete' || item.status === 'truncated') {
@@ -91,11 +94,12 @@ export function historyRecord(event: ProjectionEvent): HistoryRecord | undefined
 
 /** Publishes one accepted attempt, preserving the original user pointer and monotonically increasing revision. */
 export function admittedTurn(previous: TurnState | undefined, lease: AttemptFence, now: string, message: string): TurnState {
-  if (previous && (['complete', 'truncated', 'abandoned'].includes(previous.status) || previous.lease_version >= lease.version || previous.original_message !== message)) invalid();
+  if (previous && (previous.cancel_requested_at || ['complete', 'truncated', 'abandoned'].includes(previous.status) || previous.lease_version >= lease.version || previous.original_message !== message)) invalid();
   return turnState({ PK: `CONV#${lease.conversationId}`, SK: `TURN#${lease.turnId}`, schema_version: 1, entity_type: 'TURN_STATE',
     conversation_id: lease.conversationId, turn_id: lease.turnId, attempt_id: lease.attemptId, lease_version: lease.version,
     revision: previous ? previous.revision + 1 : 1, status: 'running', user_event_id: previous?.user_event_id ?? null,
     original_message: previous?.original_message ?? message, retryable: null,
+    cancel_requested_at: null,
     assistant_event_id: null, outcome_event_id: null, error_code: null, created_at: previous?.created_at ?? now, updated_at: now,
   }, lease.conversationId, lease.turnId);
 }
@@ -105,7 +109,8 @@ export function transitionedTurn(previous: TurnState, event: HistoryRecord, leas
   if (previous.conversation_id !== event.conversation_id || previous.turn_id !== event.turn_id) invalid();
   const recovery = event.turn_id !== lease.turnId || (event.entity_type !== 'USER_MESSAGE' && event.attempt_id !== lease.attemptId);
   if (recovery) {
-    if (event.entity_type !== 'TURN_OUTCOME' || event.outcome !== 'timed_out' || event.error_code !== 'LEASE_EXPIRED'
+    if (event.entity_type !== 'TURN_OUTCOME' || !((event.outcome === 'timed_out' && event.error_code === 'LEASE_EXPIRED')
+      || (event.outcome === 'cancelled' && event.error_code === 'TURN_CANCELLED' && event.retryable === false && previous.cancel_requested_at))
       || !counter.safeParse(expiredVersion).success || expiredVersion! >= lease.version || previous.lease_version > lease.version) invalid();
     if (previous.attempt_id !== event.attempt_id) {
       if (previous.lease_version <= expiredVersion!) invalid();
@@ -119,7 +124,7 @@ export function transitionedTurn(previous: TurnState, event: HistoryRecord, leas
     if (previous.status !== 'running' || previous.user_event_id !== null || previous.original_message !== event.content) invalid();
     next = { ...previous, user_event_id: event.event_id, updated_at: event.created_at };
   } else if (event.entity_type === 'ASSISTANT_MESSAGE') {
-    if (previous.status !== 'running' || previous.user_event_id === null) invalid();
+    if (previous.status !== 'running' || previous.user_event_id === null || previous.cancel_requested_at) invalid();
     next = { ...previous, status: event.stop_reason === 'max_tokens' ? 'truncated' : 'complete',
       assistant_event_id: event.event_id, outcome_event_id: null, error_code: null,
       retryable: false,

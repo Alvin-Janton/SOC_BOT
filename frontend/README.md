@@ -503,7 +503,7 @@ or session issuance. Do not copy authorization URLs, cookies or codes into repor
    a durable provider association.
 
 This UI does not make public demo ready: demo Google availability, additional abuse
-controls, unknown-outcome recovery, cancellation and operational rollback remain separate work.
+controls, unknown-outcome recovery and operational rollback remain separate work; explicit attempt-scoped Stop is documented below.
 
 ### Conversation-list operator checklist after deployment
 
@@ -601,3 +601,40 @@ auth/foreign/missing denial, unknown outcomes and existing chat/local retry/repl
 Google/pagination. Existing lint/build/Jest and disconnected visual inspection do
 not establish the new persistence/preparation/race behavior. No new tests, mocks,
 fixtures, network harness or live API/model calls were authorized.
+
+## Explicit Stop
+
+The composer offers one Stop for a trusted acquired stream attempt or a validated
+restored running history target. It is disabled before attempt identity arrives
+and during retry preparation, which has not dispatched an invocation. The exact
+same-origin POST carries only attemptId, uses existing cookies/browser Origin,
+a combined 15-second fetch/body deadline and an 8-KiB strict receipt/error cap.
+No owner, fence, query ID, custom identity header or automatic mutation retry is added.
+
+Stop remains operable during the existing stream send/navigation/logout lock.
+Immediate per-workspace state prevents duplicate clicks and new sends before
+React renders. Captured account/selection/URL/attempt/stream generation and current
+history observation fence every receipt; stale 202 cannot regress terminal state.
+A 202 shows Stopping, keeps draft/partial text, suppresses later displayed deltas
+for that attempt and keeps consuming terminal NDJSON. It does not close the chat
+connection or mean confirmed cancellation. Terminal TURN_CANCELLED is nonretryable;
+partial text remains explicitly unsaved. Existing callbacks refresh messages and
+metadata, and a deliberately new question is possible after locks and history settle.
+
+Restored pending/expired intent stays stopping/outcome unconfirmed with manual
+Refresh messages, without polling. Browsing other conversations is allowed when
+no local stream lock exists; late responses stay fenced. 409 completion/attempt/
+noncancellable conflicts refresh history without retargeting or automatically
+resending. Unknown mutation acceptance keeps the same target and permits only a
+deliberate Stop retry/manual refresh. Protected 401 retains existing session
+handling; denial/outage never means session expiry. Local/durable retry snapshots,
+drafts, pagination, partial display, titles and auth/Google remain.
+
+Browser close, transport abort and Ctrl+C do not call Stop. SDK aborts and logical
+cancellation do not prove remote termination or zero further charges. See the
+[contract and additive rollout](../Docs/AIStack/Lambdas/ChatOrchestrator/Cancellation.md):
+foundation boundary first, stop/drain old workers, coordinate writer/reader/frontend
+publication/invalidation, then operator validation. Valid durable-retry records
+may omit only the new cancellation field; no data cleanup/backfill is needed.
+The Vite Stop presentation is inert and disconnected, not a simulated authenticated
+attempt. Existing checks do not establish live persistence/cancellation/UI races.

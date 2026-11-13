@@ -3,6 +3,9 @@ import { authSubSchema } from '../auth/user-state';
 import { record } from '../shared/origin-guard';
 
 const ERRORS = {
+  TURN_ALREADY_COMPLETED: { status: 409, message: 'This turn already completed.' },
+  ATTEMPT_CHANGED: { status: 409, message: 'This attempt is no longer current.' },
+  TURN_NOT_CANCELLABLE: { status: 409, message: 'This turn cannot be cancelled in its current state.' },
   INVALID_INPUT: { status: 400, message: 'Invalid conversation-list request.' },
   AUTHENTICATION_REQUIRED: { status: 401, message: 'Authentication required.' },
   SERVICE_UNAVAILABLE: { status: 503, message: 'Conversation history is temporarily unavailable.' },
@@ -46,7 +49,7 @@ export function request(raw: unknown, config: HistoryConfiguration): { owner: st
   return { owner, cursor: requestCursor(event) };
 }
 
-/** Reuses the exact trusted subject/API/stage contract for the two admitted history GET routes. */
+/** Reuses the exact trusted subject/API/stage contract for the admitted history and attempt-control routes. */
 export function requestOwner(context: Record<string, unknown>, config: HistoryConfiguration): string {
   const authorization = record(context.authorizer);
   const subject = authSubSchema.safeParse(authorization?.userId);

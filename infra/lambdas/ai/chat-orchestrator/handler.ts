@@ -5,6 +5,7 @@ import { Orchestrator } from './orchestrator';
 import { ConversationStore, Lease, StoreError } from './store';
 import { httpError, LambdaContext, NdjsonStream } from './stream';
 import { resolveOwner } from './auth';
+import { CancellationMonitor } from './cancellation';
 
 /**
  * Maps failures to safe public contracts, never exposing SDK errors, prompts, or record contents.
@@ -17,6 +18,10 @@ import { resolveOwner } from './auth';
  */
 function publicError(error: unknown, budget: TurnBudget): ChatError {
 
+  if (error instanceof StoreError && error.code === 'TURN_CANCEL_REQUESTED') return new ChatError('TURN_CANCEL_REQUESTED', 'Cancellation was requested.', 409, false);
+  try { budget.check(); } catch (interruption) {
+    if (interruption instanceof ChatError && ['TURN_CANCEL_REQUESTED', 'CANCELLATION_STATE_UNAVAILABLE'].includes(interruption.code)) return interruption;
+  }
   if (error instanceof ChatError && !error.retryable) return error;
   if (budget.signal.aborted || budget.remaining() <= OUTCOME_RESERVE_MS) return new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
   if (error instanceof ChatError) return error;
@@ -50,7 +55,7 @@ function publicError(error: unknown, budget: TurnBudget): ChatError {
  *   context: { awsRequestId: '<invocation-id>', getRemainingTimeInMillis: () => 890_000 },
  * }
  * Example Output: resolves to undefined; selected illustrative NDJSON writes are:
- * {"type":"conversation","conversationId":"<generated-conversation-id>","turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}
+ * {"type":"conversation","conversationId":"<generated-conversation-id>","turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9","attemptId":"<acquired-attempt-uuid>"}
  * {"type":"text_delta","text":"The WAF table contains request and rule evidence."}
  * {"type":"complete","conversationId":"<generated-conversation-id>","replayed":false,"truncated":false,"turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}
  * Actual model text/activity varies. Completion follows durable assistant persistence; errors use the safe error path.
@@ -63,6 +68,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
   let cleanupStore: ConversationStore | undefined;
   let lease: Lease | undefined;
   let orchestrator: Orchestrator | undefined;
+  let monitor: CancellationMonitor | undefined;
   let turnId: string | undefined;
   let conversationId: string | undefined;
   let outcome = 'rejected';
@@ -93,7 +99,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
     conversationId = begun.state === 'completed' ? begun.conversationId : begun.lease.conversationId;
     lease = begun.state === 'acquired' ? begun.lease : undefined;
     stream = new NdjsonStream(raw, turnId);
-    await stream.emit({ type: 'conversation', conversationId, turnId });
+    await stream.emit({ type: 'conversation', conversationId, turnId, ...(lease ? { attemptId: lease.attemptId } : {}) });
 
     if (begun.state === 'completed') {
       if (begun.assistant.entity_type !== 'ASSISTANT_MESSAGE' || Buffer.byteLength(begun.assistant.content, 'utf8') > MAX_OUTPUT_BYTES) {
@@ -107,13 +113,17 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
       return;
     }
 
-    orchestrator = new Orchestrator(config, store, begun.lease, budget, activity => stream!.emit(activity));
+    monitor = new CancellationMonitor(store, begun.lease, budget);
+    budget.attach(monitor);
+    store.bindWorkSignal(budget.workSignal);
+    await monitor.start();
+    orchestrator = new Orchestrator(config, store, begun.lease, budget, activity => stream!.emit(activity), cleanupStore);
     const response = await orchestrator.run(begun.events);
     // Temporary synthetic-dev privacy exception; capture once from the assembled fresh final response.
     if (config.environment === 'dev') {
       responseDiagnostics = { stop_reason: response.stopReason, response_preview: Array.from(response.text).slice(0, 100).join('') };
     }
-    budget.check();
+    await budget.checkpoint();
     orchestrator.phase = 'persistence';
     completionWriteAttempted = true;
 
@@ -122,12 +132,30 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
 
     outcome = 'completed';
     outcomePersisted = true;
+    await monitor.stop();
 
     try { await cleanupStore.release(begun.lease); leaseReleased = true; } catch { /* Durable completion is replayable even if release needs expiry recovery. */ }
     await stream.finish({ type: 'complete', conversationId, replayed: false, truncated: response.stopReason === 'max_tokens' });
   } catch (error) {
 
     let safe = publicError(error, budget);
+    await monitor?.stop();
+    let intent = false;
+    let controlConfirmed = monitor === undefined;
+    if (monitor && !outcomePersisted) {
+      try {
+        const control = await monitor.cleanupControl();
+        intent = Boolean(control.cancel_requested_at);
+        controlConfirmed = true;
+        // An accepted marker atomically excludes this attempt's assistant write, even after a lost acknowledgment.
+        if (intent && control.status === 'running') completionWriteAttempted = false;
+      } catch { /* Observation failure is not proof of cancellation or absence of intent. */ }
+    }
+    if (intent) {
+      responseDiagnostics = undefined;
+      safe = new ChatError('TURN_CANCELLED', 'The investigation was cancelled.', 200, false);
+      if (stream) await stream.emit({ type: 'activity', stage: 'cancelling' });
+    }
 
     if (orchestrator) {
       try { cancellationConfirmed = await orchestrator.tools.cancelActive(); } catch { /* Do not claim an unknown query was stopped. */ }
@@ -139,34 +167,42 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
       safe = new ChatError('OUTCOME_NOT_CONFIRMED', 'The final outcome could not be confirmed. Retry the same turn after its active lease expires.', 503);
     }
 
-    else if (cleanupStore && lease && !outcomePersisted) {
-      outcome = safe.code === 'TURN_TIMED_OUT' || safe.code === 'QUERY_TIMED_OUT' || safe.code === 'MODEL_TIMED_OUT' ? 'timed_out' : 'failed';
+    else if (cleanupStore && lease && !outcomePersisted && controlConfirmed) {
+      outcome = intent ? 'cancelled' : safe.code === 'TURN_TIMED_OUT' || safe.code === 'QUERY_TIMED_OUT' || safe.code === 'MODEL_TIMED_OUT' ? 'timed_out' : 'failed';
       try {
-        await cleanupStore.append(lease, { entity_type: 'TURN_OUTCOME', outcome: outcome === 'timed_out' ? 'timed_out' : 'failed',
-          retryable: safe.retryable, failure_phase: orchestrator?.phase ?? 'acceptance', error_code: safe.code });
+        const saved = await cleanupStore.append(lease, { entity_type: 'TURN_OUTCOME', outcome: intent ? 'cancelled' : outcome === 'timed_out' ? 'timed_out' : 'failed',
+          retryable: intent ? false : safe.retryable, failure_phase: orchestrator?.phase ?? 'acceptance', error_code: safe.code });
         outcomePersisted = true;
+        if (saved.entity_type === 'TURN_OUTCOME' && saved.outcome === 'cancelled') {
+          outcome = 'cancelled'; safe = new ChatError('TURN_CANCELLED', 'The investigation was cancelled.', 200, false);
+        }
       }
 
       catch {
         safe = new ChatError('OUTCOME_NOT_CONFIRMED', 'The outcome could not be confirmed. Retry the same turn after its active lease expires.', 503);
       }
 
-      try { await cleanupStore.release(lease); leaseReleased = true; } catch { /* A stale writer cannot clear a newer lease. */ }
+      if (outcomePersisted) try { await cleanupStore.release(lease); leaseReleased = true; } catch { /* A stale writer cannot clear a newer lease. */ }
     }
 
+    if (!outcomePersisted && lease && !completionWriteAttempted) {
+      outcome = 'outcome_unknown';
+      safe = new ChatError(safe.code === 'CANCELLATION_STATE_UNAVAILABLE' ? safe.code : 'OUTCOME_NOT_CONFIRMED', 'The outcome could not be confirmed. Refresh messages before taking further action.', 503, false);
+    }
     errorCode = safe.code;
 
-    if (stream) await stream.finish({ type: 'error', code: safe.code, message: safe.message,
+    if (stream) await stream.finish({ type: 'error', ...(safe.code === 'TURN_CANCELLED' && conversationId ? { conversationId } : {}), code: safe.code, message: safe.message,
       retryable: safe.retryable, correlationId: context.awsRequestId });
 
     else await httpError(raw, safe.status, safe.code, safe.message, context.awsRequestId);
   }
 
   finally {
+    await monitor?.stop();
     // Exclude content except the explicitly approved, temporary dev-only final-response preview.
     console.info(JSON.stringify({ event: 'chat_turn', requestId: context.awsRequestId, conversationId, turnId,
       attemptId: lease?.attemptId, outcome, errorCode, outcomePersisted, leaseReleased, cancellationConfirmed,
-      durationMs: Date.now() - acceptedAt, toolCalls: orchestrator?.toolCalls ?? 0,
+      durationMs: Date.now() - acceptedAt, cancellationReads: monitor?.readCount ?? 0, toolCalls: orchestrator?.toolCalls ?? 0,
       inputTokens: orchestrator?.inputTokens ?? 0, outputTokens: orchestrator?.outputTokens ?? 0,
       ...responseDiagnostics }));
   }

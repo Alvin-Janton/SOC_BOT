@@ -35,9 +35,9 @@ export class Orchestrator {
    */
   public constructor(private readonly config: Configuration, private readonly store: ConversationStore,
     private readonly lease: Lease, private readonly budget: TurnBudget,
-    private readonly emit: (event: StreamEvent) => Promise<void>) {
+    private readonly emit: (event: StreamEvent) => Promise<void>, cleanupStore = store) {
     this.model = new ModelRunner(config);
-    this.tools = new ToolExecutor(config, budget, store, lease, emit);
+    this.tools = new ToolExecutor(config, budget, store, lease, emit, cleanupStore);
   }
 
   /**
@@ -52,6 +52,7 @@ export class Orchestrator {
    */
   public async run(initialEvents: readonly ChatEvent[]): Promise<ModelResponse> {
     this.toolCalls = initialEvents.filter(event => event.turn_id === this.lease.turnId && event.entity_type === 'TOOL_CALL').length;
+    await this.budget.checkpoint();
     this.finalizationOnly = await this.tools.recover(initialEvents);
     while (true) {
       this.budget.check();
@@ -85,6 +86,7 @@ export class Orchestrator {
         const item = prepared[index];
         let confirmedFailure = false;
         try {
+          await this.budget.checkpoint();
           if (item.rejection) {
             if (item.rejection === 'INVALID_TOOL') this.finalizationOnly = true;
             await this.rejected(item.call, item.rejection);
@@ -126,6 +128,7 @@ export class Orchestrator {
     const assistantMessageId = randomUUID();
     const prepared: PreparedCall[] = [];
     for (const tool of response.toolUses) {
+      this.budget.check();
       this.toolCalls++;
       let request: ToolRequest | undefined;
       let rejection: ToolRejectionCode | undefined;

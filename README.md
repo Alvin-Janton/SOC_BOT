@@ -531,3 +531,19 @@ The deployment and dev teardown procedures are documented above; live operation 
 ## Cost Constraint
 
 The project has a hard target of no more than **$100 per month** and should remain substantially below that amount. Recurring services must have bounded configurations, monitoring, and an off switch where practical.
+
+### Explicit attempt cancellation
+
+A single composer Stop can target the current acquired attempt or restored
+running history. Its authenticated POST records durable intent; 202 means
+Stopping, not confirmed cancellation. The orchestrator observes intent boundedly,
+aborts normal SDK waits and guards final-answer persistence atomically. Confirmed
+cancelled outcomes are nonretryable and retain original user/tool/history records;
+partial text is not saved as an assistant answer. Disconnect alone never calls Stop.
+See [cancellation contracts, limits and rollout](Docs/AIStack/Lambdas/ChatOrchestrator/Cancellation.md).
+
+Operator rollout requires the exact-table foundation ConditionCheckItem boundary
+permission first, stopped submissions/drained old workers and coordinated AI/
+Frontend/static publication. The optional marker requires no cleanup of otherwise
+valid durable-retry records. No deployment, live cancellation or provider-termination
+claim is made by offline verification.
