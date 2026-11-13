@@ -102,6 +102,7 @@ button svg { flex-shrink: 0; }
 .messages-error { color: #ddc7a7; background: #302f26; }.messages-error p, .messages-empty p { margin: 0 0 .4rem; }
 .saved-status { margin-top: .75rem; color: #a5b99d; font-size: .75rem; line-height: 1.7; overflow-wrap: anywhere; }
 .saved-status p { margin: .3rem 0 0; }.saved-status-failed, .saved-status-timed_out, .saved-status-cancelled, .saved-status-abandoned { color: #d3bca1; }
+.saved-retry { margin-top: .65rem; }.saved-retry .fine { margin: .5rem 0 0; }
 .message-label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: #a7b5a7; font-size: .6875rem; margin-bottom: .8rem; }
 .message-label > span:last-child { color: #95a496; }
 .assistant-mark { display: inline-flex; align-items: center; gap: .5rem; color: #dbe4d6; }

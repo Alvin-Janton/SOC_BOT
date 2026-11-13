@@ -1,6 +1,7 @@
 import { HistoryRecord, TurnState } from '../../ai/chat-orchestrator/history-records';
 import { HistoryError } from './contracts';
 import { MessageMetadata, PublicTurnStatus, publicStatusSchema } from './message-contracts';
+import { retryAvailability } from '../../../lib/shared/retry-policy';
 
 const ERROR_MESSAGES: Record<string, string> = {
   MODEL_SERVICE_ERROR: 'The investigation could not be completed.', MODEL_TIMED_OUT: 'The model reached its time limit.',
@@ -22,7 +23,7 @@ export function messageTurnStatus(state: TurnState, records: readonly HistoryRec
 
   for (const event of records) {
     if (event.turn_id !== state.turn_id) invalid();
-    if (event.entity_type === 'USER_MESSAGE' && state.user_event_id !== event.event_id) invalid();
+    if (event.entity_type === 'USER_MESSAGE' && (state.user_event_id !== event.event_id || state.original_message !== event.content)) invalid();
     if (event.entity_type === 'ASSISTANT_MESSAGE') {
       if (state.user_event_id === null || state.attempt_id !== event.attempt_id) invalid();
       if (state.status === 'abandoned') continue; // Explicit abandonment clears the effective assistant pointer, not immutable history.
@@ -51,7 +52,8 @@ export function messageTurnStatus(state: TurnState, records: readonly HistoryRec
       ? { code: state.error_code, message: ERROR_MESSAGES[state.error_code] } : FALLBACK_ERRORS[status];
   }
 
-  const result = publicStatusSchema.safeParse({ turnId: state.turn_id, revision: state.revision, status, error });
+  const result = publicStatusSchema.safeParse({ turnId: state.turn_id, revision: state.revision, status, error,
+    retry: retryAvailability(metadata, state, status, now) });
   if (!result.success) invalid();
   return result.data!;
 }

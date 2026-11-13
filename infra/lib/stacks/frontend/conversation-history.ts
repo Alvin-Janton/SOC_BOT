@@ -65,7 +65,8 @@ export class ConversationHistory extends Construct {
     Validations.of(method.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
       reason: 'This exact GET uses the existing zero-cache REQUEST authorizer to verify the CloudFront origin and durable opaque session/user state. The handler validates the trusted sub and reconstructs its owner index partition; a JWT authorizer cannot validate the BFF cookie.' });
     // Deployment requires an approved Regional integration allowance of at least 50 seconds.
-    const messages = conversations.addResource('{conversationId}').addResource('messages').addMethod('GET', new LambdaIntegration(this.function, {
+    const conversation = conversations.addResource('{conversationId}');
+    const messages = conversation.addResource('messages').addMethod('GET', new LambdaIntegration(this.function, {
       proxy: true, allowTestInvoke: false, scopePermissionToMethod: true, timeout: Duration.seconds(50),
     }), { authorizationType: AuthorizationType.CUSTOM, authorizer: props.authorizer, requestValidator: props.requestValidator,
       requestParameters: { 'method.request.path.conversationId': true } });
@@ -75,6 +76,16 @@ export class ConversationHistory extends Construct {
     messagePermissions[0].sourceArn = props.api.arnForExecuteApi('GET', '/api/conversations/*/messages', props.environment);
     Validations.of(messages.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
       reason: 'This messages GET uses the existing zero-cache origin/BFF session authorizer. Both authorizer and handler validate the exact bounded concrete ID; the reader strongly checks conversation ownership before HIST/TURN reads. Only that account/API/stage GET invocation is allowed.' });
+    const retry = conversation.addResource('turns').addResource('{turnId}').addResource('retry').addMethod('GET', new LambdaIntegration(this.function, {
+      proxy: true, allowTestInvoke: false, scopePermissionToMethod: true, timeout: Duration.seconds(50),
+    }), { authorizationType: AuthorizationType.CUSTOM, authorizer: props.authorizer, requestValidator: props.requestValidator,
+      requestParameters: { 'method.request.path.conversationId': true, 'method.request.path.turnId': true } });
+    const retryPermissions = retry.node.findAll().filter((node): node is CfnPermission => node instanceof CfnPermission);
+    if (retryPermissions.length !== 1) throw new Error('Expected one invocation permission for retry preparation.');
+    retryPermissions[0].sourceAccount = Aws.ACCOUNT_ID;
+    retryPermissions[0].sourceArn = props.api.arnForExecuteApi('GET', '/api/conversations/*/turns/*/retry', props.environment);
+    Validations.of(retry.node.defaultChild!).acknowledge({ id: 'AwsSolutions-COG4',
+      reason: 'This exact preparation GET uses the existing zero-cache origin/BFF session authorizer. Concrete conversation/turn IDs are revalidated, ownership precedes four bounded strong point reads, and no execution or writes occur. Invocation is restricted to this account/API/stage GET.' });
     Validations.of(this.function.node.defaultChild!).acknowledge({ id: 'AwsSolutions-L1',
       reason: 'Supported Node.js 22 matches the approved repository and frontend Lambda runtime.' });
     Validations.of(policy).acknowledge({

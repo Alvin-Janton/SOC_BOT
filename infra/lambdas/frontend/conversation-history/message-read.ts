@@ -5,13 +5,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { HistoryRecord, storedHistory, TurnState, turnState } from '../../ai/chat-orchestrator/history-records';
 import { record } from '../shared/origin-guard';
 import { HistoryConfiguration, HistoryError } from './contracts';
-import { MAX_MESSAGES, MAX_MESSAGE_BYTES, MessageMetadata, messageMetadata, MessageResponse, messageResponseSchema, NON_MESSAGE_RESERVE, PublicMessage } from './message-contracts';
+import { MAX_MESSAGES, MAX_MESSAGE_BYTES, MESSAGE_METADATA_FIELDS, MessageMetadata, messageMetadata, MessageResponse, messageResponseSchema, NON_MESSAGE_RESERVE, PublicMessage } from './message-contracts';
 import { decodeMessageCursor, encodeMessageCursor, historyPosition } from './message-cursor';
 import { messageTurnStatus } from './message-status';
 
 export interface MessageReadStats { queries: number; batches: number }
-const METADATA_FIELDS = ['PK', 'SK', 'schema_version', 'entity_type', 'conversation_id', 'owner_id', 'last_event_sequence',
-  'history_projection_version', 'history_through_sequence', 'lease_version', 'active_turn_id', 'active_attempt_id', 'lease_expires_at'];
 
 /** Bounds every SDK call by the same request deadline while preserving time for later response work. */
 function callSignal(deadline: number, reserve = 0): AbortSignal {
@@ -95,8 +93,8 @@ export async function readMessages(config: HistoryConfiguration, owner: string, 
     const loadMetadata = async (): Promise<MessageMetadata> => {
       const response = await client.send(new GetCommand({ TableName: config.table,
         Key: { PK: `CONV#${conversationId}`, SK: 'META' }, ConsistentRead: true,
-        ProjectionExpression: METADATA_FIELDS.map((_, index) => `#m${index}`).join(', '),
-        ExpressionAttributeNames: Object.fromEntries(METADATA_FIELDS.map((field, index) => [`#m${index}`, field])),
+        ProjectionExpression: MESSAGE_METADATA_FIELDS.map((_, index) => `#m${index}`).join(', '),
+        ExpressionAttributeNames: Object.fromEntries(MESSAGE_METADATA_FIELDS.map((field, index) => [`#m${index}`, field])),
       }), { abortSignal: callSignal(deadline, 1000) });
 
       return messageMetadata(response.Item, conversationId, owner);
@@ -178,7 +176,7 @@ export async function readMessages(config: HistoryConfiguration, owner: string, 
     const turnStatuses = ids.map(id => messageTurnStatus(states.get(id)!, accepted.filter(item => item.turn_id === id), current, Date.now()));
     const result = messageResponseSchema.safeParse({ conversationId, snapshotSequence, messages, turnStatuses, nextCursor });
     if (!result.success || Date.now() >= deadline - 1000) throw new HistoryError('SERVICE_UNAVAILABLE');
-    // At most 20 status objects <=1024 bytes each, separators and an envelope/cursor <4096 bytes fit the 32-KiB reserve.
+    // Retry metadata stays inside each <=1024-byte status; 20 statuses plus separators/envelope/cursor <4096 fit 32 KiB.
     if (Buffer.byteLength(JSON.stringify({ ...result.data, messages: [] }), 'utf8') > NON_MESSAGE_RESERVE
       || Buffer.byteLength(JSON.stringify(result.data), 'utf8') > MAX_MESSAGE_BYTES) throw new HistoryError('SERVICE_UNAVAILABLE');
     return result.data;

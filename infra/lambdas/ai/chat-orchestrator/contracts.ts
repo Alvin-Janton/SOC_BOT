@@ -7,13 +7,10 @@ import { RagError, RagOperation, RagRequest, describeDocumentRequestSchema, desc
   parseRequest as parseRagRequest, retrieveSectionsRequestSchema } from '../rag-tool/contracts';
 import { ChatError, Configuration } from './config';
 import { JsonObject } from './store';
+import { ChatRequest, chatRequestSchema } from '../../../lib/shared/chat-request';
 
-export const chatRequestSchema = z.strictObject({
-  conversationId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
-  turnId: z.uuid(),
-  message: z.string().min(1).max(8_192).refine(value => /\S/.test(value)),
-});
-export type ChatRequest = z.infer<typeof chatRequestSchema>;
+export { chatRequestSchema };
+export type { ChatRequest };
 
 const table = z.enum(['application_events', 'waf_events', 'vpc_flow_events', 'cloudtrail_events']);
 const field = z.string().min(1).max(128);

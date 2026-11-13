@@ -156,6 +156,24 @@ npx cdk synth devAiStack --exclusively --lookups=false -c devFrontendAllowedClie
 
 The Lambda console buffers streaming responses. After the operator deploys dev, validate NDJSON with a non-buffering client against the returned API URL, then verify another source IP is blocked by WAF. Lambda's existing `HttpResponseStream.from` supplies the metadata/delimiter required by [API Gateway streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-streaming-lambda-configure.html); API Gateway supports a five-minute Regional idle timeout and up to fifteen minutes of streaming. The generic fifteen-second heartbeat and ten-minute application budget are unchanged. API transport/WAF, live failure races, and authentication remain operator validation, not claims from synthesis. The [Cognito BFF](infra/lambdas/frontend/auth/README.md) now defines frontend login/me/logout routes, but remains disconnected from chat identity; its resources belong to the independent frontend stack below.
 
+
+### Explicit durable retry
+
+The latest admitted logical user turn can offer explicit retry after reload or
+in another authenticated browser only for confirmed retryable failed/timed_out
+state with no live conversation lease. Messages expose lightweight availability;
+a separate protected read-only preparation GET returns the exact original request
+only when still eligible. One Retry click holds one frontend lock into the existing
+POST /api/chat; submission atomically revalidates latest admission. No automatic
+resubmission, duplicate user turn, unknown/cancelled retry or truncated continuation
+is added. Existing local immutable requests, saved replay, failed-context filtering
+and reusable tool evidence remain. See the [retry contract and coordinated fresh-data rollout](infra/lambdas/frontend/conversation-history/README.md#read-only-retry-preparation).
+Required new TURN/META/status fields need stopped traffic, drained writers and
+operator-designated conversation cleanup plus coordinated existing deployment/
+publication/invalidation; old records and mixed writers/readers/strict clients are
+not transparently compatible. The agent performs no cleanup/deployment. Python
+clients remain unchanged; preparation is outside their current allowlist.
+
 ### Frontend and authentication foundation
 
 The frontend now restores saved user/assistant messages and current turn statuses

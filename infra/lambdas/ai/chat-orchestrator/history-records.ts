@@ -21,6 +21,7 @@ export type HistoryRecord = z.infer<typeof historySchema>;
 const turnSchema = z.strictObject({ PK: z.string(), SK: z.string(), schema_version: z.literal(1), entity_type: z.literal('TURN_STATE'),
   conversation_id: id, turn_id: uuid, attempt_id: uuid, lease_version: counter, revision: counter,
   status: z.enum(['running', 'complete', 'truncated', 'failed', 'timed_out', 'cancelled', 'abandoned']),
+  original_message: z.string().min(1).max(8192).refine(value => /\S/.test(value)), retryable: z.boolean().nullable(),
   user_event_id: uuid.nullable(), assistant_event_id: uuid.nullable(), outcome_event_id: uuid.nullable(), error_code: code.nullable(),
   created_at: timestamp, updated_at: timestamp });
 export type TurnState = z.infer<typeof turnSchema>;
@@ -59,7 +60,7 @@ export function storedHistory(raw: unknown, conversationId: string, eventSequenc
   return item;
 }
 
-/** Validates one exact, text-free current-turn record; timestamps need not advance with revisions. */
+/** Validates one exact current-turn record with immutable request text; timestamps need not advance with revisions. */
 export function turnState(raw: unknown, conversationId: string, turnId: string): TurnState {
   const parsed = turnSchema.safeParse(raw);
   if (!parsed.success) invalid();
@@ -67,10 +68,11 @@ export function turnState(raw: unknown, conversationId: string, turnId: string):
   if (item.PK !== `CONV#${conversationId}` || item.SK !== `TURN#${turnId}`
     || item.conversation_id !== conversationId || item.turn_id !== turnId) invalid();
   if (item.status === 'running') {
-    if (item.assistant_event_id !== null || item.outcome_event_id !== null || item.error_code !== null) invalid();
+    if (item.assistant_event_id !== null || item.outcome_event_id !== null || item.error_code !== null || item.retryable !== null) invalid();
   } else if (item.status === 'complete' || item.status === 'truncated') {
-    if (item.user_event_id === null || item.assistant_event_id === null || item.outcome_event_id !== null || item.error_code !== null) invalid();
-  } else if (item.assistant_event_id !== null || item.outcome_event_id === null || item.error_code === null) invalid();
+    if (item.user_event_id === null || item.assistant_event_id === null || item.outcome_event_id !== null || item.error_code !== null || item.retryable !== false) invalid();
+  } else if (item.assistant_event_id !== null || item.outcome_event_id === null || item.error_code === null
+    || typeof item.retryable !== 'boolean' || (item.status === 'abandoned' && item.retryable !== false)) invalid();
   bounded(item);
   return item;
 }
@@ -88,11 +90,12 @@ export function historyRecord(event: ProjectionEvent): HistoryRecord | undefined
 }
 
 /** Publishes one accepted attempt, preserving the original user pointer and monotonically increasing revision. */
-export function admittedTurn(previous: TurnState | undefined, lease: AttemptFence, now: string): TurnState {
-  if (previous && (['complete', 'truncated', 'abandoned'].includes(previous.status) || previous.lease_version >= lease.version)) invalid();
+export function admittedTurn(previous: TurnState | undefined, lease: AttemptFence, now: string, message: string): TurnState {
+  if (previous && (['complete', 'truncated', 'abandoned'].includes(previous.status) || previous.lease_version >= lease.version || previous.original_message !== message)) invalid();
   return turnState({ PK: `CONV#${lease.conversationId}`, SK: `TURN#${lease.turnId}`, schema_version: 1, entity_type: 'TURN_STATE',
     conversation_id: lease.conversationId, turn_id: lease.turnId, attempt_id: lease.attemptId, lease_version: lease.version,
     revision: previous ? previous.revision + 1 : 1, status: 'running', user_event_id: previous?.user_event_id ?? null,
+    original_message: previous?.original_message ?? message, retryable: null,
     assistant_event_id: null, outcome_event_id: null, error_code: null, created_at: previous?.created_at ?? now, updated_at: now,
   }, lease.conversationId, lease.turnId);
 }
@@ -113,18 +116,19 @@ export function transitionedTurn(previous: TurnState, event: HistoryRecord, leas
 
   let next: TurnState;
   if (event.entity_type === 'USER_MESSAGE') {
-    if (previous.status !== 'running' || previous.user_event_id !== null) invalid();
+    if (previous.status !== 'running' || previous.user_event_id !== null || previous.original_message !== event.content) invalid();
     next = { ...previous, user_event_id: event.event_id, updated_at: event.created_at };
   } else if (event.entity_type === 'ASSISTANT_MESSAGE') {
     if (previous.status !== 'running' || previous.user_event_id === null) invalid();
     next = { ...previous, status: event.stop_reason === 'max_tokens' ? 'truncated' : 'complete',
       assistant_event_id: event.event_id, outcome_event_id: null, error_code: null,
+      retryable: false,
       revision: previous.revision + 1, updated_at: event.created_at };
   } else {
     // Explicit abandonment has audit precedence; other cleanup/recovery outcomes cannot undo a saved answer.
     if (previous.status === 'abandoned' || (['complete', 'truncated'].includes(previous.status) && event.outcome !== 'abandoned')) return undefined;
     next = { ...previous, status: event.outcome, assistant_event_id: null, outcome_event_id: event.event_id,
-      error_code: event.error_code, revision: previous.revision + 1, updated_at: event.created_at };
+      error_code: event.error_code, retryable: event.retryable, revision: previous.revision + 1, updated_at: event.created_at };
   }
   return turnState(next, event.conversation_id, event.turn_id);
 }

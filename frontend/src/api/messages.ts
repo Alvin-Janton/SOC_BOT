@@ -6,9 +6,14 @@ export interface HistoryMessage {
   readonly role: 'user' | 'assistant'; readonly content: string; readonly createdAt: string;
 }
 export type HistoryStatus = 'complete' | 'truncated' | 'running' | 'failed' | 'timed_out' | 'cancelled' | 'abandoned' | 'incomplete';
+export const RETRY_REASONS = ['NOT_LATEST_TURN', 'TURN_IN_PROGRESS', 'CONVERSATION_BUSY', 'ALREADY_COMPLETE',
+  'TRUNCATED_RESPONSE', 'TURN_ABANDONED', 'TURN_CANCELLED', 'OUTCOME_UNCONFIRMED', 'NOT_RETRYABLE', 'REQUEST_TOO_LARGE'] as const;
+export type RetryAvailability = { readonly available: true; readonly reason: null }
+  | { readonly available: false; readonly reason: typeof RETRY_REASONS[number] };
 export interface TurnStatus {
   readonly turnId: string; readonly revision: number; readonly status: HistoryStatus;
   readonly error: { readonly code: string; readonly message: string } | null;
+  readonly retry: RetryAvailability;
 }
 export interface MessagePage {
   readonly conversationId: string; readonly snapshotSequence: number; readonly messages: readonly HistoryMessage[];
@@ -16,7 +21,7 @@ export interface MessagePage {
 }
 
 const MAX_SEQUENCE = 9_999_999_999;
-const STATUSES: readonly string[] = ['complete', 'truncated', 'running', 'failed', 'timed_out', 'cancelled', 'abandoned', 'incomplete'];
+export const HISTORY_STATUSES: readonly string[] = ['complete', 'truncated', 'running', 'failed', 'timed_out', 'cancelled', 'abandoned', 'incomplete'];
 const NO_ERROR: readonly string[] = ['complete', 'truncated', 'running', 'incomplete'];
 const encoder = new TextEncoder();
 
@@ -26,8 +31,22 @@ function shape(value: unknown, keys: readonly string[]): value is Record<string,
 }
 
 /** Matches stored UUID-shaped identifiers without imposing a new version/variant policy. */
-function identifier(value: unknown): value is string {
+export function historyIdentifier(value: unknown): value is string {
   return typeof value === 'string' && value.length === 36 && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value);
+}
+
+/** Validates advisory retry metadata without inferring latest-turn authority from page order or failure text. */
+export function parseRetry(value: unknown, status: HistoryStatus): RetryAvailability | undefined {
+  if (!shape(value, ['available', 'reason']) || typeof value.available !== 'boolean') return undefined;
+  if (value.available) return value.reason === null && (status === 'failed' || status === 'timed_out') ? { available: true, reason: null } : undefined;
+  if (typeof value.reason !== 'string' || !RETRY_REASONS.some(reason => reason === value.reason)) return undefined;
+  const reason = value.reason as typeof RETRY_REASONS[number];
+  const terminal = { complete: 'ALREADY_COMPLETE', truncated: 'TRUNCATED_RESPONSE', cancelled: 'TURN_CANCELLED', abandoned: 'TURN_ABANDONED' } as const;
+  const valid = Object.hasOwn(terminal, status) ? terminal[status as keyof typeof terminal] === reason
+    : reason === 'NOT_LATEST_TURN' ? true : reason === 'TURN_IN_PROGRESS' ? status === 'running'
+      : reason === 'OUTCOME_UNCONFIRMED' ? status === 'incomplete'
+        : (status === 'failed' || status === 'timed_out') && ['CONVERSATION_BUSY', 'NOT_RETRYABLE', 'REQUEST_TOO_LARGE'].includes(reason);
+  return valid ? { available: false, reason } : undefined;
 }
 
 /** Accepts canonical UTC instants, not timestamps that Date.parse silently repairs. */
@@ -48,9 +67,9 @@ function cursor(value: unknown): value is string | null {
 
 /** Validates one bounded public turn status without interpreting it as message text or a retry request. */
 function status(value: unknown, invalid: () => ApiError): TurnStatus {
-  if (!shape(value, ['turnId', 'revision', 'status', 'error']) || !identifier(value.turnId)
+  if (!shape(value, ['turnId', 'revision', 'status', 'error', 'retry']) || !historyIdentifier(value.turnId)
     || typeof value.revision !== 'number' || !Number.isSafeInteger(value.revision) || value.revision < 1
-    || typeof value.status !== 'string' || !STATUSES.includes(value.status)) throw invalid();
+    || typeof value.status !== 'string' || !HISTORY_STATUSES.includes(value.status) || !parseRetry(value.retry, value.status as HistoryStatus)) throw invalid();
   if (NO_ERROR.includes(value.status)) {
     if (value.error !== null) throw invalid();
   } else if (!shape(value.error, ['code', 'message']) || typeof value.error.code !== 'string'
@@ -82,8 +101,8 @@ export async function listMessages(conversationId: string, next: string | undefi
     const snapshotSequence = value.snapshotSequence;
     let previous = 0;
     const messages = value.messages.map((item: unknown): HistoryMessage => {
-      if (!shape(item, ['messageId', 'turnId', 'sequence', 'role', 'content', 'createdAt']) || !identifier(item.messageId)
-        || !identifier(item.turnId) || !sequence(item.sequence) || item.sequence <= previous || item.sequence > snapshotSequence
+      if (!shape(item, ['messageId', 'turnId', 'sequence', 'role', 'content', 'createdAt']) || !historyIdentifier(item.messageId)
+        || !historyIdentifier(item.turnId) || !sequence(item.sequence) || item.sequence <= previous || item.sequence > snapshotSequence
         || ids.has(item.messageId) || (item.role !== 'user' && item.role !== 'assistant')
         || typeof item.content !== 'string' || !item.content.length || item.content.length > 32_768 || !timestamp(item.createdAt)) throw invalid();
       ids.add(item.messageId); turns.add(item.turnId); previous = item.sequence;

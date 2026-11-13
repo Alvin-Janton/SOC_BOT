@@ -17,9 +17,29 @@ export const FRONTEND_PROTECTED_ROUTES = [
   { route: 'chat', method: 'POST', resource: '/api/chat' },
   { route: 'conversations', method: 'GET', resource: '/api/conversations' },
   { route: 'conversation-messages', method: 'GET', resource: '/api/conversations/{conversationId}/messages' },
+  { route: 'conversation-retry', method: 'GET', resource: '/api/conversations/{conversationId}/turns/{turnId}/retry' },
 ] as const;
 
 export const CONVERSATION_MESSAGES_RESOURCE = '/api/conversations/{conversationId}/messages';
+export const CONVERSATION_RETRY_RESOURCE = '/api/conversations/{conversationId}/turns/{turnId}/retry';
+
+/** Resolves exactly two safe IDs and rejects body/query input for the read-only retry preparation route. */
+export function conversationRetryPath(event: Record<string, unknown>): string | undefined {
+  const params = event.pathParameters;
+  if (event.resource !== CONVERSATION_RETRY_RESOURCE || !params || typeof params !== 'object' || Array.isArray(params)
+    || Object.keys(params).length !== 2 || !Object.hasOwn(params, 'conversationId') || !Object.hasOwn(params, 'turnId')
+    || (event.body !== undefined && event.body !== null && event.body !== '')
+    || (event.isBase64Encoded !== undefined && event.isBase64Encoded !== false)) return undefined;
+  const { conversationId, turnId } = params as Record<string, unknown>;
+  if (typeof conversationId !== 'string' || !conversationId.length || conversationId.length > 128 || /[^A-Za-z0-9_-]/.test(conversationId)
+    || typeof turnId !== 'string' || turnId.length !== 36 || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(turnId)) return undefined;
+  for (const name of ['queryStringParameters', 'multiValueQueryStringParameters']) {
+    const query = event[name];
+    if (query !== undefined && query !== null && (typeof query !== 'object' || Array.isArray(query) || Object.keys(query).length)) return undefined;
+  }
+  const path = `/api/conversations/${conversationId}/turns/${turnId}/retry`;
+  return event.path === path ? path : undefined;
+}
 
 /** Resolves only the messages template's one bounded ID to its exact concrete path. */
 export function conversationMessagesPath(event: Record<string, unknown>): string | undefined {
