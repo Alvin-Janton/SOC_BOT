@@ -1,8 +1,8 @@
 type ApiPath = '/api/auth/me' | '/api/auth/login' | '/api/auth/logout' | '/api/chat'
   | '/api/auth/signup' | '/api/auth/confirm-signup' | '/api/auth/resend-confirmation'
   | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password' | '/api/auth/link/google/start' | '/api/conversations'
-  | `/api/conversations/${string}/messages` | `/api/conversations/${string}/turns/${string}/retry`;
-type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change' | 'google-link' | 'history' | 'messages' | 'retry-preparation';
+  | `/api/conversations/${string}/turns/${string}/cancel` | `/api/conversations/${string}/messages` | `/api/conversations/${string}/turns/${string}/retry`;
+type Context = 'session' | 'login' | 'logout' | 'chat' | 'registration' | 'recovery' | 'password-reset' | 'password-change' | 'google-link' | 'history' | 'messages' | 'retry-preparation' | 'cancel';
 
 const FIXED_PATHS = new Set<string>(['/api/auth/me', '/api/auth/login', '/api/auth/logout', '/api/chat', '/api/auth/signup',
   '/api/auth/confirm-signup', '/api/auth/resend-confirmation', '/api/auth/forgot-password', '/api/auth/reset-password',
@@ -53,7 +53,8 @@ export function request(path: ApiPath, options: RequestInit = {}, cursor?: strin
   if (import.meta.env.DEV) throw new ApiError('Local preview is disconnected. Sign-in and chat are available after CloudFront deployment.', 'LOCAL_PREVIEW', 0, false);
   const messages = /^\/api\/conversations\/[A-Za-z0-9_-]{1,128}\/messages$/.test(path) && !/[^A-Za-z0-9_/-]/.test(path);
   const retry = /^\/api\/conversations\/[A-Za-z0-9_-]{1,128}\/turns\/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\/retry$/.test(path) && !/[^A-Za-z0-9_/-]/.test(path);
-  if ((!FIXED_PATHS.has(path) && !messages && !retry) || ((messages || retry) && options.method !== 'GET')) throw new ApiError('Invalid API route.', 'INVALID_INPUT', 400, false);
+  const cancel = /^\/api\/conversations\/[A-Za-z0-9_-]{1,128}\/turns\/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\/cancel$/.test(path) && !/[^A-Za-z0-9_/-]/.test(path);
+  if ((!FIXED_PATHS.has(path) && !messages && !retry && !cancel) || ((messages || retry) && options.method !== 'GET') || (cancel && options.method !== 'POST')) throw new ApiError('Invalid API route.', 'INVALID_INPUT', 400, false);
   if (cursor !== undefined && ((path !== '/api/conversations' && !messages) || !cursor.length || cursor.length > 2048 || /[^A-Za-z0-9_-]/.test(cursor))) throw new ApiError('Invalid history continuation.', 'INVALID_INPUT', 400, false);
   const url = cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`;
   return fetch(url, { ...options, credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
@@ -102,12 +103,17 @@ export async function responseError(response: Response, context: Context): Promi
     return new ApiError('The operation response could not be verified.', 'INVALID_RESPONSE', response.status);
   }
   const gateway = record(body) && Object.keys(body).length === 1 && body.message === 'Request could not be authorized or processed.';
-  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change', 'google-link', 'history', 'messages', 'retry-preparation'].includes(context)
-    && (code === 'AUTHENTICATION_REQUIRED' || ((context === 'chat' || context === 'history' || context === 'messages' || context === 'retry-preparation') && (code === 'UNAUTHORIZED' || gateway)));
+  const authRequired = response.status === 401 && ['session', 'logout', 'chat', 'password-change', 'google-link', 'history', 'messages', 'retry-preparation', 'cancel'].includes(context)
+    && (code === 'AUTHENTICATION_REQUIRED' || ((context === 'chat' || context === 'history' || context === 'messages' || context === 'retry-preparation' || context === 'cancel') && (code === 'UNAUTHORIZED' || gateway)));
   const id = record(body) ? body.correlationId ?? body.requestId : undefined;
   const correlation = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
   if (authRequired) return new ApiError('Your session could not be authorized. Sign in again; no request will be resent.', 'AUTHENTICATION_REQUIRED', 401, false, true, correlation);
-  const historyMessage = context === 'retry-preparation' && response.status === 404 && code === 'CONVERSATION_UNAVAILABLE' ? 'Conversation unavailable.'
+  const historyMessage = context === 'cancel' ? (response.status === 409 && code === 'TURN_ALREADY_COMPLETED' ? 'This attempt already completed. Refreshing its saved history.'
+    : response.status === 409 && code === 'ATTEMPT_CHANGED' ? 'The active attempt changed. No different attempt was targeted; refreshing messages.'
+    : response.status === 409 && code === 'TURN_NOT_CANCELLABLE' ? 'This attempt cannot be stopped in its current state. Refreshing messages.'
+    : response.status === 404 && code === 'CONVERSATION_UNAVAILABLE' ? 'Conversation unavailable.'
+    : 'Stop acceptance could not be confirmed. Refresh messages before deliberately trying the same attempt again.')
+    : context === 'retry-preparation' && response.status === 404 && code === 'CONVERSATION_UNAVAILABLE' ? 'Conversation unavailable.'
     : context === 'retry-preparation' && response.status === 503 ? 'Retry preparation is temporarily unavailable. No chat request was submitted.'
     : context === 'retry-preparation' && response.status === 400 ? 'The retry check was rejected. No chat request was submitted.'
     : context === 'messages' && response.status === 404 && code === 'CONVERSATION_UNAVAILABLE' ? 'Conversation unavailable.'

@@ -35,10 +35,11 @@ The operator confirmed the deployed HIST/TURN writer, completed-replay fix and
 fresh-conversation validation. The reader requires supported projection markers
 and matching watermark; absent/foreign conversations both return 404, while owned
 corrupt/unsupported data is 503. There is no migration, repair, old-EVT fallback or
-new writer change. Runtime identity adds only GetItem/Query/BatchGetItem on the
+new writer change in the GET path. GET handlers use GetItem/Query/BatchGetItem on the
 exact environment chat table; GSI1 Query and own-log grants remain. The existing
-APPLICATION boundary already permits these actions. No Scan, writes, other tables,
-auth/Cognito/secret, tools, S3, Bedrock or Athena access is added.
+APPLICATION boundary already permits these actions. GET handlers do not write. The separate Stop mutation below adds only exact-table
+UpdateItem/ConditionCheckItem; no Scan, other-table, auth/Cognito/secret, tool, S3,
+Bedrock or Athena access is added.
 
 Messages have a fixed sequence snapshot, at most 20 displayed user/assistant
 messages and 256 KiB complete JSON, newest retrieval with ascending page display.
@@ -806,3 +807,30 @@ metadata inspection, bounded conditional revocation and two-jar validation.
 Missing/malformed records require reviewed investigation, never version-one
 replacement. Automatic durable recovery, global token sign-out, admin-disable
 workflows, UI and public-demo abuse readiness remain deferred; authenticated chat is now wired.
+
+## Attempt-scoped Stop control
+
+The existing history Lambda now owns one narrowly scoped mutation:
+POST `/api/conversations/{conversationId}/turns/{turnId}/cancel`. It reuses the
+turn resource, CUSTOM zero-cache origin/session authorizer, required POST Origin,
+exact invocation permission and ten-second buffered integration. GET list/messages/
+retry stay read-only with unchanged settings. Only exact CHAT-HISTORY UpdateItem
+and ConditionCheckItem are added to the history role; the foundation APPLICATION
+boundary adds only exact-table ConditionCheckItem in dev/demo. No auth/Google,
+origin/WAF, table/index/role, stack dependency or workflow changes are introduced.
+
+The POST records durable intent under an eight-second budget and returns 202
+Stopping; it never runs the investigation or confirms provider termination.
+The orchestrator polls its exact attempt and atomically guards final persistence.
+History exposes compact cancel metadata, and acquired streams add attemptId.
+The [runtime contract](../../infra/lambdas/frontend/conversation-history/README.md#attempt-scoped-stop)
+and [orchestrator guide](../AIStack/Lambdas/ChatOrchestrator/Cancellation.md) define
+bounds, idempotency, conflicts, partial output, uncertainty and logs.
+
+The operator must stop submissions/drain old workers, deploy the foundation
+boundary before AI/Frontend and coordinate static publication/invalidation.
+No clearing of otherwise valid durable-retry data is needed for the optional
+marker, and no cleanup/deployment occurs here. Mixed workers/strict clients and
+rollback to an intent-unaware writer are unsafe without drain and review. Live
+CloudFront cancellation, duplicate/stale targets, completion races, unknown
+acceptance, access denial and ordinary auth/chat/history remain operator checks.

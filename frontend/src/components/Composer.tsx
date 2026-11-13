@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
 
 interface ComposerProps {
+  stop?(): void; stopVisible?: boolean; stopDisabled?: boolean; stopPhase?: 'sending' | 'stopping' | 'unknown';
   draft: string; change(value: string): void; send(): void; busy: boolean; preparing?: boolean; blocked: boolean; preview: boolean; error: string;
 }
 
 /** Keeps drafting independent of the active turn and funnels button/keyboard sends through the same lock. */
-export function Composer({ draft, change, send, busy, preparing = false, blocked, preview, error }: ComposerProps) {
+export function Composer({ draft, change, send, busy, preparing = false, blocked, preview, error, stop, stopVisible = false, stopDisabled = false, stopPhase }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (!input.current) return;
@@ -26,8 +27,12 @@ export function Composer({ draft, change, send, busy, preparing = false, blocked
             event.preventDefault(); if (!disabled) send();
           }
         }} />
-      <div className="composer-bottom"><span>{busy ? <><span className="processing-dot" />{preparing ? 'Checking retry' : 'Investigating'} · you can keep drafting</> : 'Read-only investigation'}</span>
+      <div className="composer-bottom"><span>{busy ? <><span className="processing-dot" />{preparing ? 'Checking retry' : stopPhase === 'stopping' ? 'Stopping · not yet confirmed' : 'Investigating'} · you can keep drafting</> : 'Read-only investigation'}</span>
         <div className="flex items-center gap-3"><span className={invalid ? 'input-count over-limit' : 'input-count'}>{draft.length.toLocaleString()} / 8,192</span>
+          {stopVisible && <button className="stop-button" type="button" onClick={stop} disabled={preview || stopDisabled || stopPhase === 'sending' || stopPhase === 'stopping'}
+            aria-label={stopPhase === 'stopping' ? 'Stopping requested; cancellation not yet confirmed' : 'Stop current attempt'}
+            title="Request cooperative cancellation of this exact attempt. Acceptance is not terminal confirmation.">
+            <Square size={15} aria-hidden="true" />{stopPhase === 'stopping' ? 'Stopping…' : stopPhase === 'sending' ? 'Requesting…' : 'Stop'}</button>}
           <button className="send-button" type="submit" disabled={disabled} aria-label="Send message" title="Send message (Enter)"><ArrowUp size={19} aria-hidden="true" /></button></div>
       </div>
     </form>

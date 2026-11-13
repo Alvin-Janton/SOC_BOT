@@ -43,7 +43,7 @@ This writer requires a coordinated fresh start: drain old executions, obtain exp
 - Investigation tools are read-only. There is no arbitrary SQL, shell execution, unrestricted HTTP, remediation, or hidden evaluation-data access.
 - Log values, retrieved Markdown/metadata/URLs/commands, tool results, and summaries are untrusted material, not instructions or authorization. Guidance citations use document ID/version/section ID separately from event evidence; recommendations remain human-controlled.
 - Event and summary writes require the current attempt's lease and version checks. Retries reuse completed results verbatim; only a read-only RAG call missing its result may be reissued under the original identity. Unknown Athena submissions remain fatal, not blindly redispatched.
-- Chat requires the Frontend origin/session authorizer; dev retains its independent CloudFront IPv4 WAF. Direct IAM invocation remains restricted, the query Lambda stays private, and public-demo rollout remains deferred. Internal query cancellation is not a model-selectable tool or authenticated Stop endpoint.
+- Chat requires the Frontend origin/session authorizer; dev retains its independent CloudFront IPv4 WAF. Direct IAM invocation remains restricted, the query Lambda stays private, and public-demo rollout remains deferred. Internal query cancellation is not model-selectable. The separate authenticated attempt-scoped Stop endpoint records intent; the orchestrator cooperatively observes it and guards final persistence. See [cancellation](Cancellation.md).
 
 ## Controls and streamed output
 

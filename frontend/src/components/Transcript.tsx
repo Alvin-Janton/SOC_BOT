@@ -49,7 +49,7 @@ function SavedStatus({ status }: { status: TurnStatus }) {
     incomplete: 'Incomplete · outcome unknown. This does not confirm a timeout. Refresh messages to check again.',
     failed: 'Failed', timed_out: 'Timed out', cancelled: 'Cancelled', abandoned: 'Abandoned',
   }[status.status];
-  return <div className={`saved-status saved-status-${status.status}`}><span>{text}</span>
+  return <div className={`saved-status saved-status-${status.status}`}><span>{status.cancel.requested && ['running', 'incomplete'].includes(status.status) ? 'Stopping requested · terminal cancellation is not confirmed. Refresh messages to check.' : text}</span>
     {status.error && <p>{status.error.message} <span className="fine">{status.error.code}</span></p>}</div>;
 }
 
@@ -69,7 +69,8 @@ export function Transcript({ messages, statuses, turns, confirmations, retry, re
     const confirmed = Boolean(confirmations?.get(message.turnId)?.resolved);
     const localRunning = local?.state === 'running';
     const settledLocally = local?.state === 'complete' || local?.state === 'truncated';
-    const uncertain = local && !localRunning && !settledLocally && !(message.saved && confirmed);
+    const cancelled = local?.state === 'cancelled' || state?.status === 'cancelled';
+    const uncertain = local && !cancelled && !localRunning && !settledLocally && !(message.saved && confirmed);
     const savedAnswer = messages.some(candidate => candidate.turnId === message.turnId && candidate.role === 'assistant');
     const noticeHere = !display.slice(index + 1).some(candidate => candidate.turnId === message.turnId);
     const label = message.saved ? local?.replayed ? 'Saved replay' : 'Saved message' : localRunning ? 'Investigating' : settledLocally
@@ -82,6 +83,8 @@ export function Transcript({ messages, statuses, turns, confirmations, retry, re
           {message.content ? <Answer text={message.content} /> : localRunning
             ? <p className="thinking" role="status"><LoaderCircle className="spin" size={15} aria-hidden="true" /> Gathering the available evidence…</p>
             : <p className="muted">No verified answer was received.</p>}
+          {cancelled && <div className="turn-notice">The investigation was cancelled. Any retained partial text is not a saved assistant answer. No retry is offered.</div>}
+          {local?.stopping && localRunning && <div className="turn-notice" role="status">Stopping was requested; cancellation is not yet confirmed.</div>}
           {uncertain && message.content && <p className="fine">This retained local partial answer is unconfirmed; it is not a saved final response.</p>}
           {!message.saved && local?.state === 'truncated' && <div className="turn-notice">This answer is truncated. Replaying the saved turn will not continue it.</div>}
           {uncertain && local.error && <div className="turn-notice" role="status"><p>{local.error.message}</p>

@@ -84,7 +84,7 @@ No event is emitted in demo, by summary/compaction calls, or on completed-turn r
 
 | Event | Current contents and purpose |
 | --- | --- |
-| `conversation` | `conversationId`, `turnId`: identifies the accepted conversation/turn. |
+| `conversation` | `conversationId`, `turnId`, plus `attemptId` only for an acquired execution; saved replay has no active cancellation target. |
 | `activity` | Safe `stage`; query start/success stages retain `operation`, `table`, and completion `rowsReturned`. RAG start/success (`rag_started`, `rag_completed`) include the original `toolUseId`, allowlisted `toolName`, operation, optional validated `documentId`, and requested/returned counts. Classified outcome stages below replace ambiguous `rag_failed`. No Markdown or full payload. Existing `investigating`, `finalizing`, `summarizing`, `query_started`, and `query_completed` remain unchanged. |
 | `heartbeat` | `turnId`, generic `stage: processing`; emitted on the 15-second timer when the stream has been idle for at least that interval. |
 | `text_delta` | Public answer `text`. These fragments are not separate database events. |
@@ -94,7 +94,7 @@ No event is emitted in demo, by summary/compaction calls, or on completed-turn r
 Illustrative successful output, with answer text abbreviated:
 
 ```jsonl
-{"type":"conversation","conversationId":"709fed3a-77c6-8c85-90cd-f4af6401e490","turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9"}
+{"type":"conversation","conversationId":"709fed3a-77c6-8c85-90cd-f4af6401e490","turnId":"296a0470-b7b7-4a21-a9d7-72fb7be90ac9","attemptId":"b83eea03-ae9b-4eaa-bc54-40cafacadf74"}
 {"type":"activity","stage":"investigating"}
 {"type":"activity","stage":"query_started","operation":"describe_table","table":"waf_events"}
 {"type":"activity","stage":"query_completed","operation":"describe_table","table":"waf_events","rowsReturned":0}
@@ -134,7 +134,7 @@ Before NDJSON starts, `httpError()` sends an ordinary HTTP JSON response with a 
 
 `emit()` serializes writes through a promise queue. It waits at most one second for backpressure drain; write errors or a destroyed stream suppress later transport writes. `finish()` queues at most one terminal event, stops heartbeats, ends the stream, and bounds closing at five seconds. It cannot guarantee terminal delivery over a broken connection.
 
-A disconnect does not abort the turn budget or cancel an Athena query. Backend work may complete and be saved after the client disappears. A future authenticated Stop endpoint must independently authorize user/turn ownership and invoke cancellation; closing the stream is not that endpoint. Retry using the original turn ID/message to recover the stored outcome, respecting an active lease and the returned retry policy.
+A disconnect does not abort the turn budget or cancel an Athena query. Backend work may complete and be saved after the client disappears. The authenticated [Stop endpoint](Cancellation.md) independently authorizes the exact attempt and records durable intent; closing the stream is not that endpoint. Retry using the original turn ID/message to recover the stored outcome, respecting an active lease and the returned retry policy.
 
 A RAG local-wait abort likewise does not cancel the remote Lambda. Known retrieval/availability errors are persisted tool errors, not terminal stream errors, while time and healthy persistence permit model correction. Malformed RAG protocols, turn termination, and storage failures remain on the fatal handler path. See [RAG integration](RAG-Tools.md) for the exact distinction.
 
@@ -142,4 +142,15 @@ A RAG local-wait abort likewise does not cancel the remote Lambda. Known retriev
 
 The Lambda's 15-minute timeout is an outer cleanup limit, not the intended response duration. Each accepted invocation receives a ten-minute application budget. Normal work stops with 45 seconds left; dispatch checks additionally reserve 90 seconds for finalization. Query deadlines and the logical-turn tool count survive retry through persisted state; a fresh attempt does not restart a previously submitted query's clock.
 
-These limits are application controls, not guarantees about delivery or live Bedrock/Athena behavior. API/browser streaming and cancellation integration still require their own implementation and operator validation.
+These limits are application controls, not guarantees about delivery or live Bedrock/Athena behavior. The implemented API/browser cancellation integration still requires separate operator validation; offline checks do not prove provider termination.
+
+## Explicit cancellation
+
+An acquired conversation event adds a validated flat attemptId. A user Stop POST
+returns accepted intent, not a terminal stream event. Optional safe activity
+stage cancelling does not establish remote termination. Only confirmed durable
+logical cancellation emits the existing error event with TURN_CANCELLED,
+`The investigation was cancelled.`, retryable:false, conversationId/turnId and
+safe correlationId. No complete event/finalization request follows cancellation.
+Disconnected transport receives no delivery guarantee; stored status is authoritative.
+See [control, persistence and rollout](Cancellation.md).
