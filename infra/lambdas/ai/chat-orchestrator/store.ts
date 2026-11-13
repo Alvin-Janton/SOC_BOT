@@ -5,6 +5,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { ToolValidation, validToolValidation } from '../../../lib/shared/tool-validation';
 import { admittedTurn, historyKey, historyRecord, storedHistory, transitionedTurn, TurnState, turnState } from './history-records';
+import { controlFields, controlSchema, TurnControl } from '../../../lib/shared/cancel-policy';
 import { retryAvailability } from '../../../lib/shared/retry-policy';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
@@ -301,8 +302,20 @@ function validatePayload(payload: EventPayload): void {
   if (payload.entity_type === 'TOOL_CALL') boundedJson(payload.arguments, 20_480);
 }
 
+/** Recognizes only the exact intent transition that may change TURN without an audit sequence advance. */
+function intentTransition(before: TurnState, after: TurnState): boolean {
+  if (before.cancel_requested_at || !after.cancel_requested_at || before.status !== 'running' || after.status !== 'running'
+    || after.revision !== before.revision + 1 || after.updated_at !== after.cancel_requested_at) return false;
+  const stable = (item: TurnState) => Object.fromEntries(Object.entries(item).filter(([key]) =>
+    !['cancel_requested_at', 'revision', 'updated_at'].includes(key)));
+  return JSON.stringify(stable(before)) === JSON.stringify(stable(after));
+}
+
 /** Owns authorized append-only conversation records and conditional attempt leases. */
 export class ConversationStore {
+  private workSignal?: AbortSignal;
+  /** Interrupts normal storage waits only; the separately constructed cleanup store remains independent. */
+  public bindWorkSignal(signal: AbortSignal): void { this.workSignal = signal; }
   private readonly client = DynamoDBDocumentClient.from(new DynamoDBClient({ maxAttempts: 2 }), {
     marshallOptions: { removeUndefinedValues: true },
   });
@@ -362,6 +375,23 @@ export class ConversationStore {
     return result.Item === undefined ? undefined : projection(() => turnState(result.Item, conversationId, turnId));
   }
 
+  /** Strongly checks the exact admitted attempt without transferring original messages or tool evidence. */
+  public async cancellationControl(lease: Lease, signal: AbortSignal): Promise<TurnControl> {
+    const response = await this.client.send(new GetCommand({ TableName: this.tableName,
+      Key: { PK: `CONV#${lease.conversationId}`, SK: `TURN#${lease.turnId}` }, ConsistentRead: true,
+      ProjectionExpression: controlFields.map((_, index) => `#c${index}`).join(', '),
+      ExpressionAttributeNames: Object.fromEntries(controlFields.map((field, index) => [`#c${index}`, field])),
+    }), { abortSignal: signal });
+    const result = controlSchema.safeParse(response.Item);
+    if (!result.success || result.data.PK !== `CONV#${lease.conversationId}` || result.data.SK !== `TURN#${lease.turnId}`
+      || result.data.conversation_id !== lease.conversationId || result.data.turn_id !== lease.turnId
+      || result.data.attempt_id !== lease.attemptId || result.data.lease_version !== lease.version
+      || (result.data.cancel_requested_at && (result.data.revision < 2 || !['running', 'cancelled', 'abandoned'].includes(result.data.status)))) {
+      throw new StoreError('CANCELLATION_STATE_UNAVAILABLE', 'Cancellation state could not be verified.');
+    }
+    return result.data;
+  }
+
   /** Proves that a contended HIST sequence is a valid committed copy of its exact original EVT. */
   private async assertHistoryCollision(conversationId: string, sequence: number): Promise<void> {
     const copy = await this.client.send(new GetCommand({ TableName: this.tableName,
@@ -382,9 +412,11 @@ export class ConversationStore {
     const fields = ['revision', 'attempt_id', 'lease_version', 'status', 'user_event_id', 'assistant_event_id',
       'outcome_event_id', 'error_code', 'original_message', 'retryable', 'created_at', 'updated_at', 'schema_version', 'entity_type', 'conversation_id', 'turn_id'] as const;
     return { Put: { TableName: this.tableName, Item: next,
-      ConditionExpression: fields.map((_, index) => `#f${index} = :f${index}`).join(' AND '),
-      ExpressionAttributeNames: Object.fromEntries(fields.map((field, index) => [`#f${index}`, field])),
-      ExpressionAttributeValues: Object.fromEntries(fields.map((field, index) => [`:f${index}`, previous[field]])),
+      ConditionExpression: fields.map((_, index) => `#f${index} = :f${index}`).join(' AND ')
+        + (previous.cancel_requested_at === undefined ? ' AND attribute_not_exists(#cancel)' : ' AND #cancel = :cancel'),
+      ExpressionAttributeNames: { ...Object.fromEntries(fields.map((field, index) => [`#f${index}`, field])), '#cancel': 'cancel_requested_at' },
+      ExpressionAttributeValues: { ...Object.fromEntries(fields.map((field, index) => [`:f${index}`, previous[field]])),
+        ...(previous.cancel_requested_at === undefined ? {} : { ':cancel': previous.cancel_requested_at }) },
     } };
   }
 
@@ -480,6 +512,7 @@ export class ConversationStore {
       }
       this.checkTurn(events, turnId, message);
       this.assertTurnAudit(priorTurn, events, before, turnId);
+      if (priorTurn?.cancel_requested_at) throw new StoreError('TURN_TERMINAL', 'Cancellation was requested for this attempt.');
       if (priorTurn && priorTurn.original_message !== message) throw new StoreError('TURN_CONFLICT', 'Turn identifier was already used for another message.');
       if (priorTurn && before.latest_turn_id !== turnId) throw new StoreError('TURN_TERMINAL', 'Only the latest admitted turn can start another attempt.');
       if (before.active_turn_id && before.active_turn_id !== turnId) this.assertTurnAudit(priorActive, events, before, before.active_turn_id);
@@ -538,7 +571,9 @@ export class ConversationStore {
       }
       if (previous.active_turn_id && previous.active_attempt_id && !events.some((event) => event.turn_id === previous.active_turn_id
         && event.attempt_id === previous.active_attempt_id && (event.entity_type === 'ASSISTANT_MESSAGE' || event.entity_type === 'TURN_OUTCOME'))) {
-        events.push(await this.appendFor(lease, { entity_type: 'TURN_OUTCOME', outcome: 'timed_out', retryable: true, failure_phase: 'lease_recovery', error_code: 'LEASE_EXPIRED' }, previous.active_turn_id, previous.active_attempt_id, previous.lease_version));
+        const oldTurn = await this.readTurn(id, previous.active_turn_id);
+        const cancelled = oldTurn?.attempt_id === previous.active_attempt_id && Boolean(oldTurn.cancel_requested_at);
+        events.push(await this.appendFor(lease, { entity_type: 'TURN_OUTCOME', outcome: cancelled ? 'cancelled' : 'timed_out', retryable: !cancelled, failure_phase: 'lease_recovery', error_code: cancelled ? 'TURN_CANCELLED' : 'LEASE_EXPIRED' }, previous.active_turn_id, previous.active_attempt_id, previous.lease_version));
       }
 
       let userEvent = events.find((event) => event.turn_id === turnId && event.entity_type === 'USER_MESSAGE');
@@ -835,14 +870,22 @@ export class ConversationStore {
       this.assertLease(metadata, lease);
       const sequence = metadata.last_event_sequence + 1;
       if (!Number.isSafeInteger(sequence) || sequence > 9_999_999_999) throw new StoreError('HISTORY_LIMIT', 'Conversation sequence limit reached.');
+      const projected = ['USER_MESSAGE', 'ASSISTANT_MESSAGE', 'TURN_OUTCOME'].includes(payload.entity_type);
+      const previousTurn = projected ? await this.readTurn(lease.conversationId, turnId) : undefined;
+      if (projected && !previousTurn) throw new StoreError('INVALID_RECORD', 'Conversation turn projection is missing.');
+      if (previousTurn?.attempt_id === attemptId && previousTurn.cancel_requested_at && payload.entity_type === 'ASSISTANT_MESSAGE') {
+        throw new StoreError('TURN_CANCEL_REQUESTED', 'Cancellation prevents assistant completion.');
+      }
+      const effective = previousTurn?.attempt_id === attemptId && previousTurn.cancel_requested_at && payload.entity_type === 'TURN_OUTCOME'
+        && payload.outcome !== 'abandoned'
+        ? { ...payload, outcome: 'cancelled' as const, retryable: false, error_code: 'TURN_CANCELLED' } : payload;
       const event: ChatEvent = {
-        ...payload, PK: metadata.PK, SK: `EVT#${createdAt}#${String(sequence).padStart(10, '0')}#${eventId}`,
+        ...effective, PK: metadata.PK, SK: `EVT#${createdAt}#${String(sequence).padStart(10, '0')}#${eventId}`,
         schema_version: 1, conversation_id: lease.conversationId, event_id: eventId, event_sequence: sequence, turn_id: turnId, created_at: createdAt,
         ...(payload.entity_type === 'USER_MESSAGE' ? {} : { attempt_id: attemptId }),
       };
       boundedJson(event);
       const history = projection(() => historyRecord(event));
-      const previousTurn = history ? await this.readTurn(lease.conversationId, turnId) : undefined;
       if (history && !previousTurn) throw new StoreError('INVALID_RECORD', 'Conversation turn projection is missing.');
       let nextTurn: TurnState | undefined;
       try { nextTurn = history && previousTurn ? projection(() => transitionedTurn(previousTurn, history, lease, expiredVersion)) : undefined; }
@@ -883,6 +926,11 @@ export class ConversationStore {
         const fresh = await this.metadata(lease.conversationId);
         this.assertLease(fresh, lease);
         if (fresh.last_event_sequence <= metadata.last_event_sequence) {
+          const controlled = await this.readTurn(lease.conversationId, turnId);
+          if (previousTurn && controlled && intentTransition(previousTurn, controlled)) {
+            if (payload.entity_type === 'ASSISTANT_MESSAGE') throw new StoreError('TURN_CANCEL_REQUESTED', 'Cancellation prevents assistant completion.');
+            continue; // Rebuild from the durable marker, never from stale null/absence.
+          }
           throw new StoreError('INVALID_RECORD', 'Conversation append condition could not be reconciled.');
         }
         if (historyConflict) await this.assertHistoryCollision(lease.conversationId, sequence);
@@ -901,6 +949,7 @@ export class ConversationStore {
   private requestSignal(): AbortSignal {
     const remaining = this.deadline === undefined ? 10_000 : this.deadline - Date.now();
     if (remaining <= 0) throw new StoreError('TURN_TIMED_OUT', 'The investigation reached its time limit.');
-    return AbortSignal.timeout(Math.max(1, Math.min(10_000, remaining)));
+    const timeout = AbortSignal.timeout(Math.max(1, Math.min(10_000, remaining)));
+    return this.workSignal ? AbortSignal.any([this.workSignal, timeout]) : timeout;
   }
 }

@@ -70,7 +70,7 @@ export async function invokeRag(request: RagRequest, config: Configuration, budg
   const payload = Buffer.from(JSON.stringify(request));
   if (payload.byteLength > MAX_REQUEST_BYTES) throw new ChatError('INVALID_TOOL_INPUT', 'The playbook request exceeds its input limit.', 400, false);
   const timeout = AbortSignal.timeout(Math.max(1, Math.min(RAG_INVOCATION_MS, available)));
-  const signal = AbortSignal.any([budget.signal, timeout]);
+  const signal = AbortSignal.any([budget.workSignal, timeout]);
   let result: InvokeCommandOutput;
   try {
     result = await client.send(new InvokeCommand({ FunctionName: config.ragFunction, InvocationType: 'RequestResponse', Payload: payload }),

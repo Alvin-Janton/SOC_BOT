@@ -745,6 +745,11 @@ export function runtimeBoundaryStatements(
       ],
     }),
     new PolicyStatement({
+      sid: `Allow${capitalize(resources.environment)}ChatCancellationConditionChecks`,
+      actions: ['dynamodb:ConditionCheckItem'],
+      resources: [`arn:${Aws.PARTITION}:dynamodb:${Aws.REGION}:${Aws.ACCOUNT_ID}:table/${resources.prefix}-CHAT-HISTORY`],
+    }),
+    new PolicyStatement({
       sid: `Allow${capitalize(resources.environment)}AuthSessionConditionChecks`,
       actions: ['dynamodb:ConditionCheckItem'],
       resources: [`arn:${Aws.PARTITION}:dynamodb:${Aws.REGION}:${Aws.ACCOUNT_ID}:table/${resources.prefix}-AUTH-SESSIONS`],

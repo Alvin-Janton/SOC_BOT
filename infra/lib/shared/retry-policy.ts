@@ -10,7 +10,7 @@ export const retrySchema = z.discriminatedUnion('available', [
 export type RetryAvailability = z.infer<typeof retrySchema>;
 export type RetryStatus = 'running' | 'complete' | 'truncated' | 'failed' | 'timed_out' | 'cancelled' | 'abandoned' | 'incomplete';
 export interface RetryMetadata { readonly latest_turn_id: string | null; readonly lease_expires_at?: number }
-export interface RetryTurn { readonly conversation_id: string; readonly turn_id: string; readonly original_message: string; readonly retryable: boolean | null }
+export interface RetryTurn { readonly conversation_id: string; readonly turn_id: string; readonly original_message: string; readonly retryable: boolean | null; readonly cancel_requested_at?: string | null }
 
 /** Rejects public availability/reason combinations that contradict their reported effective status. */
 export function validRetryStatus(status: RetryStatus, retry: RetryAvailability): boolean {
@@ -36,6 +36,7 @@ export function retryAvailability(metadata: RetryMetadata, turn: RetryTurn, stat
   if (metadata.latest_turn_id !== turn.turn_id) return { available: false, reason: 'NOT_LATEST_TURN' };
   if (status === 'incomplete') return { available: false, reason: 'OUTCOME_UNCONFIRMED' };
   if (status === 'running') return { available: false, reason: 'TURN_IN_PROGRESS' };
+  if (turn.cancel_requested_at) return { available: false, reason: 'NOT_RETRYABLE' };
   if ((metadata.lease_expires_at ?? 0) > Math.floor(now / 1000)) return { available: false, reason: 'CONVERSATION_BUSY' };
   if ((status !== 'failed' && status !== 'timed_out') || turn.retryable !== true) return { available: false, reason: 'NOT_RETRYABLE' };
   return canonicalRetryRequest(turn) ? { available: true, reason: null } : { available: false, reason: 'REQUEST_TOO_LARGE' };

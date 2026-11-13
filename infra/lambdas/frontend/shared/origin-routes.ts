@@ -17,10 +17,20 @@ export const FRONTEND_PROTECTED_ROUTES = [
   { route: 'chat', method: 'POST', resource: '/api/chat' },
   { route: 'conversations', method: 'GET', resource: '/api/conversations' },
   { route: 'conversation-messages', method: 'GET', resource: '/api/conversations/{conversationId}/messages' },
+  { route: 'conversation-cancel', method: 'POST', resource: '/api/conversations/{conversationId}/turns/{turnId}/cancel' },
   { route: 'conversation-retry', method: 'GET', resource: '/api/conversations/{conversationId}/turns/{turnId}/retry' },
 ] as const;
 
 export const CONVERSATION_MESSAGES_RESOURCE = '/api/conversations/{conversationId}/messages';
+export const CONVERSATION_CANCEL_RESOURCE = '/api/conversations/{conversationId}/turns/{turnId}/cancel';
+
+/** Resolves the same exact turn path while admitting only the cancellation POST body. */
+export function conversationCancelPath(event: Record<string, unknown>): string | undefined {
+  if (event.resource !== CONVERSATION_CANCEL_RESOURCE || typeof event.path !== 'string' || !event.path.endsWith('/cancel')) return undefined;
+  const retryPath = conversationRetryPath({ ...event, resource: CONVERSATION_RETRY_RESOURCE, path: event.path.slice(0, -7) + '/retry', body: undefined });
+  return retryPath ? retryPath.slice(0, -6) + '/cancel' : undefined;
+}
+
 export const CONVERSATION_RETRY_RESOURCE = '/api/conversations/{conversationId}/turns/{turnId}/retry';
 
 /** Resolves exactly two safe IDs and rejects body/query input for the read-only retry preparation route. */

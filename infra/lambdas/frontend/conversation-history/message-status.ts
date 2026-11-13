@@ -1,6 +1,7 @@
 import { HistoryRecord, TurnState } from '../../ai/chat-orchestrator/history-records';
 import { HistoryError } from './contracts';
 import { MessageMetadata, PublicTurnStatus, publicStatusSchema } from './message-contracts';
+import { cancelAvailability } from '../../../lib/shared/cancel-policy';
 import { retryAvailability } from '../../../lib/shared/retry-policy';
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -53,7 +54,7 @@ export function messageTurnStatus(state: TurnState, records: readonly HistoryRec
   }
 
   const result = publicStatusSchema.safeParse({ turnId: state.turn_id, revision: state.revision, status, error,
-    retry: retryAvailability(metadata, state, status, now) });
+    retry: retryAvailability(metadata, state, status, now), cancel: cancelAvailability(state, status) });
   if (!result.success) invalid();
   return result.data!;
 }

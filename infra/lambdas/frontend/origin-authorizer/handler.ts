@@ -1,5 +1,5 @@
 import { createOriginGuard, record } from '../shared/origin-guard';
-import { conversationMessagesPath, conversationRetryPath, FRONTEND_PROTECTED_ROUTES, frontendOriginRoutes } from '../shared/origin-routes';
+import { conversationMessagesPath, conversationRetryPath, conversationCancelPath, FRONTEND_PROTECTED_ROUTES, frontendOriginRoutes } from '../shared/origin-routes';
 import { browserRequest, header } from '../shared/browser-request';
 import { createAuthRequestBudget, parseBffAuthConfig } from '../auth/config';
 import { readSessionCookie } from '../auth/cookies';
@@ -63,10 +63,11 @@ export async function handler(raw: unknown, context: { getRemainingTimeInMillis(
   const protectedRoute = FRONTEND_PROTECTED_ROUTES.find(candidate => candidate.method === event?.httpMethod && candidate.resource === event?.resource);
   const messagesRoute = protectedRoute?.route === 'conversation-messages';
   const retryRoute = protectedRoute?.route === 'conversation-retry';
-  const dynamicRoute = messagesRoute || retryRoute;
-  const dynamicPath = event ? messagesRoute ? conversationMessagesPath(event) : retryRoute ? conversationRetryPath(event) : undefined : undefined;
+  const cancelRoute = protectedRoute?.route === 'conversation-cancel';
+  const dynamicRoute = messagesRoute || retryRoute || cancelRoute;
+  const dynamicPath = event ? messagesRoute ? conversationMessagesPath(event) : retryRoute ? conversationRetryPath(event) : cancelRoute ? conversationCancelPath(event) : undefined : undefined;
   const incomingContext = record(event?.requestContext);
-  if (dynamicRoute && (!dynamicPath || incomingContext?.httpMethod !== 'GET' || incomingContext.resourcePath !== protectedRoute?.resource)) throw new Error('Unauthorized');
+  if (dynamicRoute && (!dynamicPath || incomingContext?.httpMethod !== protectedRoute?.method || incomingContext.resourcePath !== protectedRoute?.resource)) throw new Error('Unauthorized');
   let invalidMessagesEnvelope = false;
   let failure: 'Unauthorized' | 'Authorization unavailable';
   try {
