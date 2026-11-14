@@ -33,7 +33,7 @@ type ProjectionEvent = ProjectionEnvelope & (
   { entity_type: 'USER_MESSAGE'; role: 'user'; content: string }
   | { entity_type: 'ASSISTANT_MESSAGE'; attempt_id?: string; role: 'assistant'; content: string; stop_reason: string }
   | { entity_type: 'TURN_OUTCOME'; attempt_id?: string; outcome: 'failed' | 'timed_out' | 'cancelled' | 'abandoned'; retryable: boolean; error_code: string }
-  | { entity_type: 'TOOL_CALL' } | { entity_type: 'TOOL_RESULT' });
+  | { entity_type: 'TOOL_CALL' } | { entity_type: 'TOOL_RESULT' } | { entity_type: 'THINKING' } | { entity_type: 'ASSISTANT_TEXT' });
 export interface AttemptFence { conversationId: string; turnId: string; attemptId: string; version: number }
 
 /** Fails without retaining the rejected item or exposing private payload fields. */
@@ -82,7 +82,7 @@ export function turnState(raw: unknown, conversationId: string, turnId: string):
 
 /** Selects only public-history fields from an already validated original audit event; tools have no copy. */
 export function historyRecord(event: ProjectionEvent): HistoryRecord | undefined {
-  if (event.entity_type === 'TOOL_CALL' || event.entity_type === 'TOOL_RESULT') return undefined;
+  if (event.entity_type !== 'USER_MESSAGE' && event.entity_type !== 'ASSISTANT_MESSAGE' && event.entity_type !== 'TURN_OUTCOME') return undefined;
   const common = { PK: event.PK, SK: historyKey(event.event_sequence), schema_version: event.schema_version,
     conversation_id: event.conversation_id, entity_type: event.entity_type, event_id: event.event_id,
     event_sequence: event.event_sequence, turn_id: event.turn_id, created_at: event.created_at };

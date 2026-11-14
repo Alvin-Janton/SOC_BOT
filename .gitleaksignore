@@ -4,3 +4,5 @@ f721fcc605a7d37edeb7b695a4e8185fbb4bdeb6:Docs/AIStack/Lambdas/RAGTool/README.md:
 9b6abf1a229cbd830414f984db9d94bdc81c4c88:logs.md:generic-api-key:552
 # Reviewed false positive: documented authentication-challenge error code; this commit, rule, and line only.
 4ec3e900d1ebcbb2197492c622257f61b070c5fd:infra/lambdas/frontend/auth/README.md:generic-api-key:45
+# Reviewed false positive: adaptive-thinking log prose; this commit, rule, and line only.
+ad9c01df2942e1e752ea1ceccc3b7b04e832c608:logs.md:generic-api-key:951

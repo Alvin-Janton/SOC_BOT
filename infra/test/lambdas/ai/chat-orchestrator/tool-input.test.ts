@@ -71,13 +71,11 @@ describe('streamed tool input compatibility', () => {
     expect(validateTool(tool.name, tool.input, config)).toEqual({ operation: 'describe_documents' });
   });
 
-  // Invalid JSON/null/whitespace must not gain the {} fallback. Valid JSON with extra
+  // Valid JSON null must not gain the {} fallback. Valid JSON with extra
   // fields, an array, or a scalar is also invalid for this strict zero-argument object schema.
   // Each row below is a separate test using the real validator, not a mocked rejection.
   test.each([
     { label: 'explicit JSON null', raw: 'null' },
-    { label: 'malformed nonempty JSON', raw: '{' },
-    { label: 'whitespace-only input', raw: ' \t\n' },
     { label: 'unexpected fields', raw: '{"unexpected":true}' },
     { label: 'JSON array', raw: '[]' },
     { label: 'JSON string scalar', raw: '""' },
@@ -88,13 +86,15 @@ describe('streamed tool input compatibility', () => {
     expect(() => validateTool(tool.name, tool.input, config)).toThrow(expect.objectContaining<Partial<ChatError>>({ code: 'INVALID_TOOL_INPUT' }));
   });
 
-  // Every other supported tool requires arguments. Empty input must still parse to
-  // null and fail validation; the discovery fallback must not apply.
+  // Malformed JSON is a parser failure, never a fabricated null or recoverable native tool input.
+  test.each(['{', ' \t\n'])('fails invalid JSON at the stream boundary: %j', async raw => {
+    await expect(streamedTool('dev', 'describe_documents', [raw])).rejects.toMatchObject({ code: 'MODEL_TOOL_INPUT_INVALID' });
+  });
+
+  // Required tools cannot borrow the exactly-empty discovery compatibility representation.
   test.each(['describe_document', 'retrieve_sections', 'describe_table', 'query_events', 'aggregate_events'])(
-    '%s still rejects empty required input', async name => {
-      const { tool, config } = await streamedTool('dev', name, ['']);
-      expect(tool.input).toBeNull();
-      expect(() => validateTool(tool.name, tool.input, config)).toThrow(expect.objectContaining<Partial<ChatError>>({ code: 'INVALID_TOOL_INPUT' }));
+    '%s rejects empty required input at the parser boundary', async name => {
+      await expect(streamedTool('dev', name, [''])).rejects.toMatchObject({ code: 'MODEL_TOOL_INPUT_INVALID' });
     },
   );
 });

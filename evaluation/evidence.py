@@ -5,18 +5,21 @@ from pathlib import Path
 import re
 import time
 
-from .common import encoded, integer, object_json, require, sdk_call, text, utc
+from .private_records import GROUP, grouped_block, safe_records
+from .common import EvaluationError, encoded, integer, now, object_json, require, sdk_call, text, utc
 
 LIMITS = {"pages": 128, "records": 10000, "decoded_bytes": 8388608, "deadline_seconds": 60,
-          "record_bytes": 98304, "connect_seconds": 5, "read_seconds": 10, "page_limit": 100}
+          "record_bytes": 98304, "connect_seconds": 5, "read_seconds": 10, "page_limit": 100, "ownership_bytes": 2048}
 PENDING = {"SUBMITTED", "QUEUED", "RUNNING", "UNKNOWN"}
 UUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
 BASE = {"PK", "SK", "schema_version", "conversation_id", "event_id", "event_sequence", "turn_id", "attempt_id", "created_at", "entity_type"}
 VARIANTS = {
     "USER_MESSAGE": {"role", "content"},
-    "ASSISTANT_MESSAGE": {"role", "content", "model_id", "stop_reason"},
-    "TOOL_CALL": {"assistant_message_id", "content_block_index", "tool_use_id", "tool_name", "arguments", "preparation"},
+    "ASSISTANT_MESSAGE": {"role", "content", "model_id", "stop_reason", "assistant_message_id"},
+    "TOOL_CALL": {"assistant_message_id", "content_block_index", "tool_use_id", "tool_name", "arguments", "model_input", "preparation"} | GROUP,
     "TOOL_RESULT": {"tool_use_id", "tool_name", "status", "output"},
+    "THINKING": {"thinking"} | GROUP,
+    "ASSISTANT_TEXT": {"text"} | GROUP,
     "TURN_OUTCOME": {"outcome", "retryable", "failure_phase", "error_code"},
 }
 VALIDATION_CONTRACT = object_json((Path(__file__).resolve().parents[1]
@@ -96,13 +99,14 @@ def decoded(value, depth: int = 0):
     return value
 
 
-def read_events(session, table: str, conversation_id: str, statistics: dict) -> list[dict]:
-    """Read a conversation's EVT# records using strongly consistent base-table queries.
+def read_events(session, table: str, conversation_id: str, statistics: dict, user_id: str, ownership: dict) -> list[dict]:
+    """Verify the session user's META ownership, then strongly query only that conversation's EVT# records.
 
     Follow every pagination cursor, including those on empty pages, normalize
     DynamoDB values with decoded(), and update statistics with page/record/byte
-    counts and SDK attempts. Enforce the read limits here; event validation and
-    filtering to a particular turn happen later in select().
+    counts and SDK attempts. The ownership read shares the same 60-second budget
+    and has separate diagnostics; it never enters the selected evidence or judge input.
+    Event validation and filtering to a particular turn happen later in select().
 
     Example input:
         session = boto3.Session(
@@ -111,6 +115,8 @@ def read_events(session, table: str, conversation_id: str, statistics: dict) -> 
         table = "SOC-BOT-DEV-CHAT-HISTORY"
         conversation_id = "conversation-001"
         statistics = {}
+        user_id = "44444444-1111-4444-8111-111111111111"  # Confirmed /auth/me identity.
+        ownership = {}
 
     Example output (one record shown; remaining stored fields/records omitted):
         [
@@ -127,15 +133,48 @@ def read_events(session, table: str, conversation_id: str, statistics: dict) -> 
 
     statistics after a successful one-page read (illustrative sizes):
         {"pages": 1, "records": 1, "decoded_bytes": 480, "service_attempts": 1}
+    Ownership diagnostics are recorded separately, without the META item or owner value.
     """
-
-    from botocore.config import Config
 
     deadline = time.monotonic() + LIMITS["deadline_seconds"]
     records = []
     cursor = None
     seen_cursors = set()
     statistics.update(pages=0, records=0, decoded_bytes=0)
+    ownership.update(verified=False, statistics={})
+
+    def get_owner(stop_at):
+        """Read only six ownership fields at the exact META key under the shared evidence deadline."""
+        resource = session.resource("dynamodb", config=Config(connect_timeout=5, read_timeout=10,
+                                    retries={"total_max_attempts": 1}))
+        try:
+            require(time.monotonic() < stop_at, "Evidence deadline exceeded.", "STAGE_DEADLINE")
+            return resource.Table(table).get_item(
+                Key={"PK": "CONV#" + conversation_id, "SK": "META"}, ConsistentRead=True,
+                ProjectionExpression="#pk, #sk, #entity, #schema, #conversation, #owner",
+                ExpressionAttributeNames={"#pk": "PK", "#sk": "SK", "#entity": "entity_type", "#schema": "schema_version",
+                                          "#conversation": "conversation_id", "#owner": "owner_id"})
+        finally:
+            resource.meta.client.close()
+
+    try:
+        from botocore.config import Config
+
+        result = sdk_call(get_owner, deadline, ownership['statistics'])
+        metadata = decoded(result.get('Item'))
+        require(isinstance(metadata, dict) and len(encoded(metadata)) <= LIMITS['ownership_bytes']
+                and set(metadata) == {'PK', 'SK', 'entity_type', 'schema_version', 'conversation_id', 'owner_id'}
+                and metadata['PK'] == 'CONV#' + conversation_id and metadata['SK'] == 'META'
+                and metadata['entity_type'] == 'CONVERSATION' and type(metadata['schema_version']) is int
+                and metadata['schema_version'] == 1 and metadata['conversation_id'] == conversation_id
+                and text(user_id, 128) and metadata['owner_id'] == user_id,
+                'Conversation ownership could not be verified.', 'OWNERSHIP_NOT_VERIFIED')
+        ownership.update(verified=True, checked_at=now())
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        ownership['checked_at'] = now()
+        raise EvaluationError('OWNERSHIP_NOT_VERIFIED', 'Conversation ownership could not be verified; no event query was issued.') from exc
 
     while True:
 
@@ -204,19 +243,30 @@ def validate_event(event: dict, conversation_id: str) -> None:
     utc(event.get("created_at"))
     require(event.get("SK") == f"EVT#{event['created_at']}#{sequence:010d}#{event['event_id']}", "Event sort key and sequence disagree.")
 
+    if kind in {'THINKING', 'ASSISTANT_TEXT'} or (kind == 'TOOL_CALL' and ('model_input' in event or 'response_format' in event)):
+        grouped_block(event)
+
+    if kind in {'THINKING', 'ASSISTANT_TEXT'}:
+        return
     if kind in {"USER_MESSAGE", "ASSISTANT_MESSAGE"}:
         require(text(event.get("content"), 32768) and event.get("role") == ("user" if kind == "USER_MESSAGE" else "assistant"), "Invalid durable message.")
         if kind == "ASSISTANT_MESSAGE":
             require(text(event.get("model_id"), 256) and text(event.get("stop_reason"), 64), "Missing assistant metadata.")
+            if "assistant_message_id" in event:
+                require(isinstance(event["assistant_message_id"], str) and bool(UUID.fullmatch(event["assistant_message_id"])), "Invalid answer group ID.")
 
     elif kind in {"TOOL_CALL", "TOOL_RESULT"}:
         require(text(event.get("tool_use_id"), 128) and text(event.get("tool_name"), 128), "Invalid tool identity.")
 
         if kind == "TOOL_CALL":
 
-            require(text(event.get("assistant_message_id"), 128) and integer(event.get("content_block_index"))
-                    and event["content_block_index"] <= 128 and isinstance(event.get("arguments"), dict)
-                    and len(encoded(event["arguments"])) <= 20480, "Invalid tool call.")
+            if 'model_input' not in event:
+                require(not (GROUP - {'assistant_message_id', 'content_block_index'}) & set(event)
+                        and text(event.get("assistant_message_id"), 128) and integer(event.get("content_block_index"))
+                        and event["content_block_index"] <= 128 and isinstance(event.get("arguments"), dict)
+                        and len(encoded(event["arguments"])) <= 20480, "Invalid legacy tool call.")
+            else:
+                grouped_block(event)
 
             preparation = event.get("preparation")
 
@@ -227,11 +277,11 @@ def validate_event(event: dict, conversation_id: str) -> None:
                     "INVALID_TOOL", "INVALID_TOOL_INPUT", "TOOL_LIMIT_REACHED", "FINALIZATION_REQUIRED"}
                 and ("validation" not in preparation or (preparation["code"] == "INVALID_TOOL_INPUT"
                      and valid_tool_validation(preparation["validation"])))
-                and event["arguments"] == {}), "Invalid durable preparation.")
+                and ("model_input" in event or event["arguments"] == {})), "Invalid durable preparation.")
 
         else:
             require(event.get("status") in {"success", "error"} and isinstance(event.get("output"), dict)
-                    and len(encoded(event["output"])) <= 65536, "Invalid tool result.")
+                    and len(encoded(event["output"])) <= (32768 if event["tool_name"] in {"describe_documents", "describe_document", "retrieve_sections"} else 65536), "Invalid tool result.")
             error = event["output"].get("error")
             if isinstance(error, dict) and "validation" in error:
                 require(event["status"] == "error" and event["output"].get("ok") is False
@@ -352,6 +402,8 @@ def select(records: list[dict], case: dict, application: dict) -> dict:
         seen_sequences.add(event["event_sequence"])
         seen_ids.add(event["event_id"])
 
+    other_turn_count = sum(event["turn_id"] != application["turn_id"] for event in records)
+    records = safe_records(records)
     events = sorted((event for event in records if event["turn_id"] == application["turn_id"]), key=lambda event: event["event_sequence"])
     users = [event for event in events if event["entity_type"] == "USER_MESSAGE"]
     require(len(users) == 1 and users[0]["content"] == case["question"], "Expected exactly one matching persisted user message.")
@@ -421,7 +473,7 @@ def select(records: list[dict], case: dict, application: dict) -> dict:
             "pairs": pairs, "checkpoints": checkpoints, "unresolved_calls": unresolved,
             "outcomes": [{**reference(event), **{key: event[key] for key in VARIANTS["TURN_OUTCOME"]}} for event in selected if event["entity_type"] == "TURN_OUTCOME"],
             "causal_cutoff": cutoff, "excluded_later_event_count": len(events) - len(selected),
-            "excluded_other_turn_count": len(records) - len(events),
+            "excluded_other_turn_count": other_turn_count,
             "attempt_ids": sorted({event["attempt_id"] for event in selected if "attempt_id" in event})}
 
 

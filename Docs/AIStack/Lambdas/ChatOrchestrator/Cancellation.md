@@ -111,3 +111,7 @@ stale-attempt conflicts, completion ordering, late receipts/unknown acceptance,
 lost terminal transport, denied owners/origins, and ordinary chat/replay/retry/
 pagination/auth/context behavior. No implementation-time live requests, failure
 seeding, data mutation, deployments or test changes are authorized.
+
+## Thinking-enabled invocations
+
+The same cancellation monitor/work signal aborts adaptive reasoning and ordinary model work. A completed private group is not a completed turn. Both private-group commits and final public commits compare the current attempt and full TURN state, including cancellation intent; accepted intent prevents final completion. Unknown SDK/write outcomes remain unconfirmed, not proof of remote termination. Old workers must be drained before the compatible private-record writer/reader rollout; see [adaptive thinking](Adaptive-Thinking.md#operator-rollout-and-unverified-behavior).

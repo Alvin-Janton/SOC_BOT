@@ -127,8 +127,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
     orchestrator.phase = 'persistence';
     completionWriteAttempted = true;
 
-    await store.append(begun.lease, { entity_type: 'ASSISTANT_MESSAGE', role: 'assistant', model_id: config.modelId,
-      stop_reason: response.stopReason, content: response.text });
+    await store.appendResponse(begun.lease, response);
 
     outcome = 'completed';
     outcomePersisted = true;
