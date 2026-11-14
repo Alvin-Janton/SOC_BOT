@@ -1,18 +1,19 @@
-import { Message } from '@aws-sdk/client-bedrock-runtime';
-import { randomUUID } from 'node:crypto';
-import { ChatError, Configuration, MAX_TOOL_CALLS, TurnBudget } from './config';
-import { buildContext, planCompaction } from './context';
+import { ContentBlock, Message } from '@aws-sdk/client-bedrock-runtime';
+import { ChatError, Configuration, MAX_CONTEXT_BYTES, MAX_TOOL_CALLS, TurnBudget } from './config';
+import { buildContext, isTerminalToolResult, planCompaction, selectToolResult } from './context';
 import { ToolInputError, ToolRequest, isRagRequest, validateTool } from './contracts';
 import { ToolValidation } from '../../../lib/shared/tool-validation';
 import { ModelResponse, ModelRunner } from './model';
-import { ChatEvent, ConversationStore, JsonObject, Lease, StoreError, ToolRejectionCode, isToolRejectionCode } from './store';
+import { ChatEvent, ConversationStore, Lease, StoreError, ToolPreparation, ToolRejectionCode, isToolRejectionCode } from './store';
 import { StreamEvent } from './stream';
 import { isConfirmedQueryFailure, rejectedToolActivity, rejectedToolOutput, reportRejectedToolInput, ToolExecutor } from './tools';
+import { appendExchange, budgetSnapshot, initialContext } from './active-context';
+import { MAX_GROUP_BYTES, nativeBlocks, protocolError } from './response';
 
 type ToolCall = Extract<ChatEvent, { entity_type: 'TOOL_CALL' }>;
 interface PreparedCall { call: ToolCall; request?: ToolRequest; rejection?: ToolRejectionCode }
 
-/** Implements the bounded model loop without giving the model an AWS identity or direct query access. */
+/** Owns one attempt's append-only native exchange; retries/finalization use fresh evidence-only contexts. */
 export class Orchestrator {
   public phase = 'recovery';
   public toolCalls = 0;
@@ -21,138 +22,124 @@ export class Orchestrator {
   private finalizationOnly = false;
   private readonly model: ModelRunner;
   public readonly tools: ToolExecutor;
+  private active: Message[] = [];
+  private readonly toolIds = new Set<string>();
 
-  /**
-   * Connects the accepted attempt's store, model runner, tool executor, time budget, and safe event emitter.
-   *
-   * Example Input (dependencies and lease abbreviated):
-   * new Orchestrator(config, ConversationStore <authorized store>,
-   *   { conversationId: 'conversation-A', turnId: '<turn-uuid>', attemptId: '<attempt-uuid>', version: 1, expiresAt: <future-epoch-seconds> },
-   *   TurnBudget <time remaining>, async (event) => { ... })
-   * Example Output (selected initial instance state):
-   * { phase: 'recovery', toolCalls: 0, inputTokens: 0, outputTokens: 0, tools: ToolExecutor <instance> }
-   * Constructing the object does not start a query or a model request.
-   */
+  /** Binds the admitted attempt without model, storage or tool dispatch during construction. */
   public constructor(private readonly config: Configuration, private readonly store: ConversationStore,
     private readonly lease: Lease, private readonly budget: TurnBudget,
     private readonly emit: (event: StreamEvent) => Promise<void>, cleanupStore = store) {
-    this.model = new ModelRunner(config);
+    this.model = new ModelRunner(config, (input, output) => { this.inputTokens += input; this.outputTokens += output; });
     this.tools = new ToolExecutor(config, budget, store, lease, emit, cleanupStore);
   }
 
-  /**
-   * Reuses durable evidence, runs calls sequentially, and reserves a no-tools final answer request.
-   *
-   * Example Input (initialEvents reduced; matches this instance's current lease turn):
-   * [{ entity_type: 'USER_MESSAGE', turn_id: '<turn-uuid>', event_sequence: 1, content: 'Describe waf_events.', ... }]
-   * Example Output (illustrative final model response):
-   * { text: 'The WAF table contains request and rule evidence.', toolUses: [], stopReason: 'end_turn', inputTokens: 1200, outputTokens: 40 }
-   * Side effects may include TOOL_CALL/TOOL_RESULT persistence and activity/text_delta events.
-   * This method does not append ASSISTANT_MESSAGE or emit complete; the handler does that after return.
-   */
+  /** Recovers once and compacts only at entry; no later round rebuilds a signed active prefix. */
   public async run(initialEvents: readonly ChatEvent[]): Promise<ModelResponse> {
     this.toolCalls = initialEvents.filter(event => event.turn_id === this.lease.turnId && event.entity_type === 'TOOL_CALL').length;
+    for (const event of initialEvents) if (event.entity_type === 'TOOL_CALL') this.toolIds.add(event.tool_use_id);
     await this.budget.checkpoint();
     this.finalizationOnly = await this.tools.recover(initialEvents);
+    const entryAllowsTools = !this.finalizationOnly && this.toolCalls < MAX_TOOL_CALLS && this.budget.canDispatch(200_000);
+    this.active = initialContext(await this.context(entryAllowsTools, true), this.toolCalls, entryAllowsTools);
     while (true) {
       this.budget.check();
-      const messages = await this.context();
-      const toolCallsUsed = this.toolCalls;
-      const finalizationOnly = this.finalizationOnly;
-      const allowTools = !finalizationOnly && toolCallsUsed < MAX_TOOL_CALLS && this.budget.canDispatch(200_000);
+      let allowTools = !this.finalizationOnly && this.toolCalls < MAX_TOOL_CALLS && this.budget.canDispatch(200_000);
+      if (allowTools && this.model.bytes(this.active, true) + MAX_GROUP_BYTES > MAX_CONTEXT_BYTES) allowTools = false;
+      const messages = allowTools ? this.active : initialContext(await this.context(false, false), this.toolCalls, false);
       this.phase = allowTools ? 'model' : 'finalization';
       await this.emit({ type: 'activity', stage: allowTools ? 'investigating' : 'finalizing' });
       if (this.config.environment === 'dev') {
-        // Temporary metadata-only diagnosis; use the same snapshot supplied to the model below.
-        const remainingCalls = Math.max(0, MAX_TOOL_CALLS - toolCallsUsed);
+        const remainingCalls = Math.max(0, MAX_TOOL_CALLS - this.toolCalls);
         console.info(JSON.stringify({ event: 'dev_tool_budget', conversationId: this.lease.conversationId,
           turnId: this.lease.turnId, attemptId: this.lease.attemptId, maxToolCalls: MAX_TOOL_CALLS,
-          toolCallsUsed, remainingCalls, availableCalls: allowTools ? remainingCalls : 0,
-          allowTools, finalizationOnly, remainingMs: this.budget.remaining() }));
+          toolCallsUsed: this.toolCalls, remainingCalls, availableCalls: allowTools ? remainingCalls : 0,
+          allowTools, finalizationOnly: this.finalizationOnly, remainingMs: this.budget.remaining() }));
       }
       const response = await this.model.respond(messages, allowTools, this.budget,
-        text => this.emit({ type: 'text_delta', text }), toolCallsUsed);
-      this.inputTokens += response.inputTokens;
-      this.outputTokens += response.outputTokens;
-      if (response.toolUses.length === 0) {
-        if (!['end_turn', 'stop_sequence', 'max_tokens'].includes(response.stopReason)) {
-          throw new ChatError('MODEL_INCOMPLETE_RESPONSE', 'The model did not complete an answer.');
-        }
-        return response;
-      }
+        text => this.emit({ type: 'text_delta', text }), () => this.emit({ type: 'activity', stage: 'thinking' }));
+      if (!response.toolUses.length) return response;
+      if (!allowTools) throw protocolError();
       this.phase = 'tools';
       const prepared = await this.prepare(response);
+      const assistant = nativeBlocks(response.blocks);
+      const results: ContentBlock[] = [];
       for (let index = 0; index < prepared.length; index++) {
         const item = prepared[index];
         let confirmedFailure = false;
+        let haltQueue = false;
         try {
           await this.budget.checkpoint();
           if (item.rejection) {
             if (item.rejection === 'INVALID_TOOL') this.finalizationOnly = true;
             await this.rejected(item.call, item.rejection);
-          } else if (!this.budget.canDispatch(200_000)) {
+          } else if (!this.budget.canDispatch(200_000) || !this.hasHeadroom(assistant, results, prepared, index)) {
             this.finalizationOnly = true;
             await this.rejected(item.call, 'FINALIZATION_REQUIRED');
+            haltQueue = true;
           } else {
             const output = await this.tools.execute(item.call, item.request!);
             confirmedFailure = !isRagRequest(item.request!) && isConfirmedQueryFailure(output);
           }
         } catch (error) {
-          // These remaining calls are known not to have been dispatched. Keep their original grouping.
           for (const remaining of prepared.slice(index + 1)) await this.rejected(remaining.call, 'NOT_EXECUTED');
           throw error;
         }
-        if (confirmedFailure) {
+        if (confirmedFailure || haltQueue) {
           this.finalizationOnly = true;
-          // Keep this outside the catch: an uncertain rejection write must not be attempted twice.
           for (const remaining of prepared.slice(index + 1)) await this.rejected(remaining.call, 'NOT_EXECUTED');
           break;
         }
+        // Use the actual persisted terminal representation, including errors, in the matching native result order.
+        const events = await this.store.reload(this.lease);
+        const result = selectToolResult(events, item.call);
+        if (!result || !isTerminalToolResult(result)) throw new ChatError('STORAGE_ERROR', 'The tool outcome could not be confirmed.', 503, false);
+        results.push({ toolResult: { toolUseId: item.call.tool_use_id, status: result.status, content: [{ json: structuredClone(result.output) }] } });
+      }
+      if (!this.finalizationOnly) {
+        if (results.length !== prepared.length) throw protocolError();
+        this.active = appendExchange(this.active, assistant, results, this.toolCalls,
+          this.toolCalls < MAX_TOOL_CALLS && this.budget.canDispatch(200_000));
       }
     }
   }
 
-  /**
-   * Persists every block before dispatch, including invalid or excess calls, so retries cannot reset the cap.
-   *
-   * Example Input:
-   * { text: '', toolUses: [{ id: 'tool-1', name: 'describe_table', index: 0, input: { table: 'waf_events' } }],
-   *   stopReason: 'tool_use', inputTokens: 900, outputTokens: 30 }
-   * Example Output (stored ChatEvent abbreviated):
-   * [{ call: { entity_type: 'TOOL_CALL', tool_use_id: 'tool-1', tool_name: 'describe_table',
-   *            arguments: { table: 'waf_events' }, assistant_message_id: '<generated-group-uuid>', content_block_index: 0, ... },
-   *    request: { operation: 'describe_table', table: 'waf_events' }, rejection: undefined }]
-   * An invalid/excess block instead has request: undefined and a rejection code; preparation never dispatches it.
-   */
+  /** Reserves one real tool's worst-case result plus exact queued nonexecution/control envelopes before dispatch. */
+  private hasHeadroom(assistant: readonly ContentBlock[], results: readonly ContentBlock[], prepared: readonly PreparedCall[], index: number): boolean {
+    const rest: ContentBlock[] = prepared.slice(index).map((item, offset) => ({ toolResult: { toolUseId: item.call.tool_use_id,
+      status: offset === 0 ? 'success' : 'error', content: [{ json: offset === 0 ? {} : rejectedToolOutput(item.call, item.rejection ?? 'NOT_EXECUTED') }] } }));
+    const projected: Message[] = [...this.active, { role: 'assistant', content: [...assistant] },
+      { role: 'user', content: [...results, ...rest, budgetSnapshot(this.toolCalls, true)] }];
+    const maximum = isRagRequest(prepared[index].request!) ? 32_768 : 65_536;
+    return this.model.bytes(projected, true) + maximum - 2 <= MAX_CONTEXT_BYTES;
+  }
+
+  /** Classifies all original calls and commits their complete response group before any execution can begin. */
   private async prepare(response: ModelResponse): Promise<PreparedCall[]> {
-    const assistantMessageId = randomUUID();
-    const prepared: PreparedCall[] = [];
+    const prepared = new Map<string, { request?: ToolRequest; rejection?: ToolRejectionCode }>();
+    const decisions = new Map<string, ToolPreparation>();
     for (const tool of response.toolUses) {
       this.budget.check();
-      this.toolCalls++;
+      if (this.toolIds.has(tool.id)) throw protocolError();
+      this.toolIds.add(tool.id); this.toolCalls++;
       let request: ToolRequest | undefined;
       let rejection: ToolRejectionCode | undefined;
       let validation: ToolValidation | undefined;
       if (this.toolCalls > MAX_TOOL_CALLS) rejection = 'TOOL_LIMIT_REACHED';
       else if (!this.budget.canDispatch(200_000)) rejection = 'FINALIZATION_REQUIRED';
       else {
-        try { request = validateTool(tool.name, tool.input, this.config); }
+        try { request = validateTool(tool.name, structuredClone(tool.input), this.config); }
         catch (error) {
           if (!(error instanceof ChatError) || !isToolRejectionCode(error.code)) throw error;
           rejection = error.code;
           if (error instanceof ToolInputError && rejection === 'INVALID_TOOL_INPUT') validation = error.validation;
         }
       }
-      // Invalid inputs are not copied into audit history; the bounded rejection still counts as a call.
-      const args = request ? Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'operation')) as JsonObject : {};
-      const event = await this.store.append(this.lease, { entity_type: 'TOOL_CALL', assistant_message_id: assistantMessageId,
-        content_block_index: tool.index, tool_use_id: tool.id, tool_name: tool.name, arguments: args,
-        preparation: rejection === 'INVALID_TOOL_INPUT' ? { status: 'rejected', code: rejection, ...(validation ? { validation } : {}) }
-          : rejection ? { status: 'rejected', code: rejection } : { status: 'approved' } });
-      if (event.entity_type !== 'TOOL_CALL') throw new ChatError('STORAGE_ERROR', 'Conversation state could not be saved.');
-      prepared.push({ call: event, request, rejection });
+      decisions.set(tool.id, rejection === 'INVALID_TOOL_INPUT' ? { status: 'rejected', code: rejection, ...(validation ? { validation } : {}) }
+        : rejection ? { status: 'rejected', code: rejection } : { status: 'approved' });
+      prepared.set(tool.id, { request, rejection });
     }
-    return prepared;
+    const events = await this.store.appendResponse(this.lease, response, decisions);
+    return events.filter((event): event is ToolCall => event.entity_type === 'TOOL_CALL').map(call => ({ call, ...prepared.get(call.tool_use_id)! }));
   }
 
   /**
@@ -182,7 +169,7 @@ export class Orchestrator {
    * Larger eligible histories may produce a persisted summary and a summarizing activity before returning bounded messages.
    * No audit events are deleted, and an unsafe compaction boundary is not crossed.
    */
-  private async context(): Promise<Message[]> {
+  private async context(allowTools: boolean, compact: boolean): Promise<Message[]> {
     this.phase = 'context';
     const events = await this.store.reload(this.lease);
     let summary = await this.store.loadSummary(this.lease);
@@ -191,7 +178,8 @@ export class Orchestrator {
       let messages: Message[] | undefined;
       try { messages = buildContext(events, this.lease.turnId, this.lease.attemptId, summary); }
       catch (error) { if (!(error instanceof StoreError) || error.code !== 'CONTEXT_LIMIT') throw error; }
-      if (messages && Buffer.byteLength(JSON.stringify(messages), 'utf8') <= 98_304) return messages;
+      if (messages && (!compact || this.model.bytes(initialContext(messages, this.toolCalls, allowTools), allowTools) <= 98_304)) return messages;
+      if (!compact) throw new ChatError('CONTEXT_LIMIT', 'The conversation exceeds its finalization context limit.', 413, false);
       const plan = planCompaction(events, this.lease.turnId, summary);
       if (!plan.coversThrough || plan.eligibleEvents.length === 0) {
         if (messages) return messages;

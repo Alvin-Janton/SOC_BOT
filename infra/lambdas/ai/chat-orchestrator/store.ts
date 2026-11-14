@@ -1,3 +1,6 @@
+import { GroupedPayload, groupedBlock, responsePayloads, validateResponseGroups } from './response-events';
+import { ModelResponse, toolOutputBytes } from './response';
+import { boundRecord, boundResponseTransaction } from './response-transaction';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, TransactWriteCommandInput, UpdateCommand,
@@ -68,9 +71,10 @@ interface EventBase {
 export type EventPayload =
   | { entity_type: 'USER_MESSAGE'; role: 'user'; content: string }
   | { entity_type: 'TOOL_CALL'; assistant_message_id: string; content_block_index: number; tool_use_id: string; tool_name: string;
-    arguments: JsonObject; preparation?: ToolPreparation }
+    arguments: JsonObject; preparation?: ToolPreparation; response_format?: never; model_input?: never }
   | { entity_type: 'TOOL_RESULT'; tool_use_id: string; tool_name: string; status: 'success' | 'error'; output: JsonObject }
-  | { entity_type: 'ASSISTANT_MESSAGE'; role: 'assistant'; model_id: string; stop_reason: string; content: string }
+  | { entity_type: 'ASSISTANT_MESSAGE'; role: 'assistant'; model_id: string; stop_reason: string; content: string; assistant_message_id?: string }
+  | GroupedPayload
   | { entity_type: 'TURN_OUTCOME'; outcome: 'failed' | 'timed_out' | 'cancelled' | 'abandoned'; retryable: boolean; failure_phase: string; error_code: string };
 
 export type ChatEvent = EventBase & EventPayload;
@@ -129,7 +133,7 @@ const MAX_RECORD_BYTES = 98_304;
 const MAX_HISTORY_BYTES = 8 * 1024 * 1024;
 const MAX_HISTORY_EVENTS = 10_000;
 const MAX_HISTORY_PAGES = 128;
-const EVENT_TYPES = ['USER_MESSAGE', 'TOOL_CALL', 'TOOL_RESULT', 'ASSISTANT_MESSAGE', 'TURN_OUTCOME'];
+const EVENT_TYPES = ['USER_MESSAGE', 'TOOL_CALL', 'TOOL_RESULT', 'ASSISTANT_MESSAGE', 'TURN_OUTCOME', 'THINKING', 'ASSISTANT_TEXT'];
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 
 /** Carries a bounded application failure that may be returned without provider diagnostics. */
@@ -195,7 +199,7 @@ function boundedJson(value: unknown, limit = MAX_RECORD_BYTES): void {
     throw new StoreError('INVALID_RECORD', 'Conversation record is not valid JSON.');
   };
   visit(value, 0);
-  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > limit) throw new StoreError('RECORD_LIMIT', 'Conversation record exceeds its storage limit.');
+  try { boundRecord(value, limit); } catch { throw new StoreError('RECORD_LIMIT', 'Conversation record exceeds its storage limit.'); }
 }
 
 /**
@@ -285,11 +289,21 @@ function validatePayload(payload: EventPayload): void {
   let valid: boolean;
   switch (payload.entity_type) {
     case 'USER_MESSAGE': valid = payload.role === 'user' && text(payload.content, 32_768); break;
-    case 'ASSISTANT_MESSAGE': valid = payload.role === 'assistant' && text(payload.content, 32_768) && text(payload.model_id, 256) && text(payload.stop_reason, 64); break;
-    case 'TOOL_CALL': valid = text(payload.assistant_message_id, 128) && text(payload.tool_use_id, 128) && text(payload.tool_name, 128)
-      && Number.isInteger(payload.content_block_index) && payload.content_block_index >= 0 && payload.content_block_index <= 128 && jsonObject(payload.arguments)
-      && (payload.preparation === undefined || validToolPreparation(payload.preparation))
-      && (payload.preparation?.status !== 'rejected' || Object.keys(payload.arguments).length === 0); break;
+    case 'ASSISTANT_MESSAGE': valid = payload.role === 'assistant' && text(payload.content, 32_768) && text(payload.model_id, 256) && text(payload.stop_reason, 64)
+      && (payload.assistant_message_id === undefined || UUID.test(payload.assistant_message_id)); break;
+    case 'THINKING': case 'ASSISTANT_TEXT': projection(() => groupedBlock(payload)); valid = true; break;
+    case 'TOOL_CALL':
+      if (payload.response_format === 1) {
+        projection(() => groupedBlock(payload));
+        valid = validToolPreparation(payload.preparation);
+      } else {
+        valid = !['model_input', 'response_format', 'response_block_count', 'model_id', 'stop_reason', 'purpose'].some(key => Object.hasOwn(payload, key))
+          && text(payload.assistant_message_id, 128) && text(payload.tool_use_id, 128) && text(payload.tool_name, 128)
+          && Number.isInteger(payload.content_block_index) && payload.content_block_index >= 0 && payload.content_block_index <= 128 && jsonObject(payload.arguments)
+          && (payload.preparation === undefined || validToolPreparation(payload.preparation))
+          && (payload.preparation?.status !== 'rejected' || Object.keys(payload.arguments).length === 0);
+      }
+      break;
     case 'TOOL_RESULT': valid = text(payload.tool_use_id, 128) && text(payload.tool_name, 128) && ['success', 'error'].includes(payload.status)
       && jsonObject(payload.output) && validResultValidation(payload); break;
     case 'TURN_OUTCOME': valid = ['failed', 'timed_out', 'cancelled', 'abandoned'].includes(payload.outcome) && typeof payload.retryable === 'boolean'
@@ -298,8 +312,8 @@ function validatePayload(payload: EventPayload): void {
   }
   if (!valid) throw new StoreError('INVALID_RECORD', 'Conversation event fields are invalid.');
   boundedJson(payload);
-  if (payload.entity_type === 'TOOL_RESULT') boundedJson(payload.output, 65_536);
-  if (payload.entity_type === 'TOOL_CALL') boundedJson(payload.arguments, 20_480);
+  if (payload.entity_type === 'TOOL_RESULT') boundedJson(payload.output, toolOutputBytes(payload.tool_name));
+  if (payload.entity_type === 'TOOL_CALL' && payload.response_format !== 1) boundedJson(payload.arguments, 20_480);
 }
 
 /** Recognizes only the exact intent transition that may change TURN without an audit sequence advance. */
@@ -597,8 +611,72 @@ export class ConversationStore {
    * Original USER_MESSAGE writes are rejected here; they belong to begin().
    */
   public async append(lease: Lease, payload: EventPayload): Promise<ChatEvent> {
-    if (payload.entity_type === 'USER_MESSAGE') throw new StoreError('INVALID_RECORD', 'Original user messages must be created through turn acquisition.');
+    if (payload.entity_type === 'USER_MESSAGE' || payload.entity_type === 'THINKING' || payload.entity_type === 'ASSISTANT_TEXT'
+      || Object.hasOwn(payload, 'response_format') || (payload.entity_type === 'ASSISTANT_MESSAGE' && payload.assistant_message_id)) {
+      throw new StoreError('INVALID_RECORD', 'This event requires its atomic admission or response group.');
+    }
     return this.appendFor(lease, payload, lease.turnId, lease.attemptId);
+  }
+
+  /** Atomically commits one complete response before tools, or its private blocks plus public completion.
+   * An identical TURN Put fences private groups without changing status/revision or adding IAM actions.
+   * Only definite META/intent conflicts may rebuild; unknown acknowledgments never reallocate or resubmit.
+   */
+  public async appendResponse(lease: Lease, response: ModelResponse, decisions: ReadonlyMap<string, ToolPreparation> = new Map()): Promise<ChatEvent[]> {
+    const privatePayloads = projection(() => responsePayloads(response, decisions));
+    const final = response.toolUses.length === 0;
+    const payloads: EventPayload[] = [...privatePayloads, ...(final ? [{ entity_type: 'ASSISTANT_MESSAGE' as const,
+      role: 'assistant' as const, model_id: response.modelId, stop_reason: response.stopReason, content: response.text,
+      assistant_message_id: response.responseId }] : [])];
+    payloads.forEach(validatePayload);
+    const createdAt = new Date().toISOString();
+    const eventIds = payloads.map(() => randomUUID());
+    for (let build = 0; build < 3; build++) {
+      const metadata = await this.metadata(lease.conversationId);
+      this.assertLease(metadata, lease);
+      const previous = await this.readTurn(lease.conversationId, lease.turnId);
+      if (!previous || previous.status !== 'running' || previous.attempt_id !== lease.attemptId
+        || previous.lease_version !== lease.version || previous.user_event_id === null) throw new StoreError('LEASE_LOST', 'Response attempt is no longer current.');
+      if (previous.cancel_requested_at) throw new StoreError('TURN_CANCEL_REQUESTED', 'Cancellation prevents response persistence.');
+      const records: ChatEvent[] = payloads.map((payload, index) => {
+        const sequence = metadata.last_event_sequence + index + 1;
+        if (!Number.isSafeInteger(sequence) || sequence > 9_999_999_999) throw new StoreError('HISTORY_LIMIT', 'Conversation sequence limit reached.');
+        const event: ChatEvent = { ...payload, PK: metadata.PK, SK: `EVT#${createdAt}#${String(sequence).padStart(10, '0')}#${eventIds[index]}`,
+          schema_version: 1, conversation_id: lease.conversationId, event_id: eventIds[index], event_sequence: sequence,
+          turn_id: lease.turnId, attempt_id: lease.attemptId, created_at: createdAt };
+        boundedJson(event); return event;
+      });
+      projection(() => validateResponseGroups(records));
+      const last = records[records.length - 1];
+      const history = final ? projection(() => historyRecord(last)) : undefined;
+      const next = history ? projection(() => transitionedTurn(previous, history, lease)) : previous;
+      if (!next) throw new StoreError('INVALID_RECORD', 'Response projection is invalid.');
+      const updatedAt = metadata.updated_at > createdAt ? metadata.updated_at : createdAt;
+      const transaction: TransactionItem[] = [{ Update: {
+        TableName: this.tableName, Key: { PK: metadata.PK, SK: 'META' },
+        ConditionExpression: 'owner_id = :owner AND active_turn_id = :turn AND active_attempt_id = :attempt AND lease_version = :version AND lease_expires_at > :now AND last_event_sequence = :previous AND history_projection_version = :projection AND retry_projection_version = :projection AND latest_turn_id = :turn AND history_through_sequence = :previous',
+        UpdateExpression: 'SET last_event_sequence = :sequence, history_through_sequence = :sequence, last_event_id = :event, updated_at = :updated, GSI1SK = :index',
+        ExpressionAttributeValues: { ':owner': this.trustedOwnerId, ':turn': lease.turnId, ':attempt': lease.attemptId, ':version': lease.version,
+          ':now': Math.floor(Date.now() / 1000), ':previous': metadata.last_event_sequence, ':projection': 1,
+          ':sequence': last.event_sequence, ':event': last.event_id, ':updated': updatedAt, ':index': `CONV#${updatedAt}#${lease.conversationId}` },
+      } }, this.turnPut(previous, next), ...records.map(event => ({ Put: { TableName: this.tableName, Item: event, ConditionExpression: 'attribute_not_exists(PK)' } }))];
+      if (history) transaction.push({ Put: { TableName: this.tableName, Item: history, ConditionExpression: 'attribute_not_exists(PK)' } });
+      boundResponseTransaction(transaction);
+      try {
+        await this.client.send(new TransactWriteCommand({ ClientRequestToken: randomUUID(), TransactItems: transaction }), { abortSignal: this.requestSignal() });
+        return records;
+      } catch (error) {
+        const failed = failedTransactionConditions(error, transaction.length);
+        if (!failed) throw error;
+        if (failed.some(index => index >= 2)) throw new StoreError('INVALID_RECORD', 'Response event or history key already exists.');
+        const fresh = await this.metadata(lease.conversationId);
+        this.assertLease(fresh, lease);
+        const controlled = await this.readTurn(lease.conversationId, lease.turnId);
+        if (controlled && intentTransition(previous, controlled)) throw new StoreError('TURN_CANCEL_REQUESTED', 'Cancellation prevents response persistence.');
+        if (fresh.last_event_sequence <= metadata.last_event_sequence) throw new StoreError('INVALID_RECORD', 'Response conflict could not be reconciled.');
+      }
+    }
+    throw new StoreError('LEASE_LOST', 'Conversation changed before response persistence.');
   }
 
   /**
@@ -803,7 +881,9 @@ export class ConversationStore {
       cursor = result.LastEvaluatedKey;
       if (!cursor) {
         events.sort((left, right) => left.event_sequence - right.event_sequence);
-        if (new Set(events.map((event) => event.event_sequence)).size !== events.length) throw new StoreError('INVALID_RECORD', 'Conversation event sequence is inconsistent.');
+        if (new Set(events.map((event) => event.event_sequence)).size !== events.length
+          || new Set(events.map(event => event.event_id)).size !== events.length) throw new StoreError('INVALID_RECORD', 'Conversation event sequence is inconsistent.');
+        projection(() => validateResponseGroups(events));
         return events;
       }
     }

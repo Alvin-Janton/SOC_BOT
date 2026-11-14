@@ -36,7 +36,7 @@ MAX_LINE_BYTES = 256 * 1024
 CONVERSATION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,128}")
 STAGES = {
-    "investigating": "Investigating...", "finalizing": "Preparing the final answer...",
+    "thinking": "Thinking...", "investigating": "Investigating...", "finalizing": "Preparing the final answer...",
     "summarizing": "Summarizing earlier context...", "query_started": "Query tool started...",
     "query_completed": "Query tool completed.", "rag_started": "Playbook tool started...",
     "rag_completed": "Playbook tool completed.", "tool_request_rejected": "Tool request rejected.",

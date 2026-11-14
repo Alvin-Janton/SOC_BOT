@@ -1,3 +1,4 @@
+import { callInput } from './response-events';
 import { InvokeCommand, InvokeCommandOutput, LambdaClient } from '@aws-sdk/client-lambda';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_RESPONSE_BYTES, QUERY_DEADLINE_SECONDS } from '../../../lib/stacks/ai/query-contract';
@@ -523,7 +524,7 @@ export class ToolExecutor {
       throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
     }
     const original = responseObject(output.query);
-    const request = validateTool(String(call.tool_name), call.arguments, this.config);
+    const request = validateTool(String(call.tool_name), structuredClone(callInput(call)), this.config);
     if (isRagRequest(request) || request.operation === 'describe_table'
       || canonicalJson(request as unknown as JsonObject) !== canonicalJson(original)) {
       throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous query checkpoint is invalid.', 409, false);
@@ -615,7 +616,7 @@ export class ToolExecutor {
           await this.emit(rejectedToolActivity(call, 'TOOL_LIMIT_REACHED'));
           continue;
         }
-        const request = validateTool(call.tool_name, call.arguments, this.config);
+        const request = validateTool(call.tool_name, structuredClone(callInput(call)), this.config);
         if (!isRagRequest(request)) throw new ChatError('TOOL_PROTOCOL_ERROR', 'A previous playbook request is invalid.', 409, false);
         // Only this read-only family may be reissued with no result; keep the original logical use ID/count.
         await this.execute(call, request);

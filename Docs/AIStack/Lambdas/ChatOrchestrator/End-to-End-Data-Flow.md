@@ -1,5 +1,7 @@
 # End-to-End Chat Data Flow
 
+> These concrete snapshots illustrate the pre-adaptive-thinking exchange. The current private group/encoded-input and active native replay additions are documented in [Adaptive Thinking](Adaptive-Thinking.md); historical input/settings examples below are not the current writer or request configuration.
+
 This walkthrough follows one illustrative successful `query_events` turn admitted through authenticated CloudFront `/api/chat`. The [Frontend guide](../../../FrontendStack/Authenticated-Chat.md) explains origin/session admission; the AI-owned legacy API/Regional WAF is retired without migrating existing data. Frontend supplies a verified Cognito sub through API Gateway authorizer context; React integration remains unimplemented. The model proposes an investigation; application code validates and executes it. See [AI infrastructure](../../Infra/README.md) for ownership and operator deployment boundaries.
 
 ```mermaid

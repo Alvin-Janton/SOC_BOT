@@ -10,7 +10,7 @@ export type ChatEvent = { type: 'conversation'; conversationId: string; attemptI
 const MAX_LINE_BYTES = 256 * 1024;
 const encoder = new TextEncoder();
 const STAGES: Record<string, string> = {
-  cancelling: 'Stopping the investigation', investigating: 'Investigating the available evidence', finalizing: 'Preparing the answer', summarizing: 'Summarizing earlier context',
+  thinking: 'Thinking through the investigation', cancelling: 'Stopping the investigation', investigating: 'Investigating the available evidence', finalizing: 'Preparing the answer', summarizing: 'Summarizing earlier context',
   query_started: 'Query started', query_completed: 'Query completed', rag_started: 'Reading playbook metadata',
   rag_completed: 'Playbook request completed', tool_request_rejected: 'Tool request rejected', tool_error: 'Tool returned an error',
   tool_invocation_failed: 'Tool invocation could not be confirmed', tool_response_invalid: 'Tool response could not be verified',
