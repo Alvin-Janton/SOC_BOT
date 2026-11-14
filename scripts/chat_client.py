@@ -32,8 +32,6 @@ else:
         session_argument, terminal_text, write_text,
     )
 
-# Import-only compatibility for the unchanged evaluator, not a CLI default/fallback.
-DEFAULT_API_URL = "https://1vg8z8ov16.execute-api.us-east-1.amazonaws.com/dev/chat"
 MAX_LINE_BYTES = 256 * 1024
 CONVERSATION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 LABEL = re.compile(r"[A-Za-z0-9_-]{1,128}")

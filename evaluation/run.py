@@ -6,10 +6,10 @@ import re
 import subprocess
 import sys
 import time
-from urllib.parse import urlsplit
 import uuid
 
-from scripts.chat_client import DEFAULT_API_URL, endpoint_argument, message_argument, terminal_text
+from scripts.chat_client import message_argument
+from scripts.client_common import AUTH_PATHS, ClientError, SessionState, base_argument, session_argument, terminal_text
 from . import VERSION, api, evidence, judge, report
 from .common import EvaluationError, diagnostic, digest, encoded, integer, now, object_json, require, text, utc
 
@@ -22,7 +22,8 @@ def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description="Run the private SOC Bot dev investigation baseline (paid API + judge calls).")
     cli.add_argument('--cases', type=Path, default=Path('evaluation/cases.json'))
     cli.add_argument('--case-ids', nargs='+', help='Known case IDs; selection retains file order.')
-    cli.add_argument('--api-url', type=endpoint_argument, default=DEFAULT_API_URL)
+    cli.add_argument('--base-url', type=base_argument, required=True, help='Explicit generated dev CloudFront HTTPS origin.')
+    cli.add_argument('--session-file', type=session_argument, required=True, help='Existing private opaque BFF session; read-only.')
     cli.add_argument('--chat-table', required=True, help='Explicit dev base table: SOC-BOT-DEV-CHAT-HISTORY')
     cli.add_argument('--region', default='us-east-1')
     cli.add_argument('--profile', help='Existing evaluator SDK profile (not deployment credentials).')
@@ -158,11 +159,9 @@ def preflight(args) -> tuple[list[dict], bytes, str]:
         require(len(set(args.case_ids)) == len(args.case_ids) and set(args.case_ids) <= {case['case_id'] for case in cases}, 'Unknown or duplicate selected case IDs.')
         cases = [case for case in cases if case['case_id'] in args.case_ids]
 
-    endpoint_argument(args.api_url)
-    url = urlsplit(args.api_url)
-    require(url.path == '/dev/chat' and not url.query, 'This initial evaluator accepts only a full /dev/chat endpoint without query parameters.')
-    require(args.chat_table == 'SOC-BOT-DEV-CHAT-HISTORY', 'This initial evaluator accepts only SOC-BOT-DEV-CHAT-HISTORY.')
-    require(bool(re.fullmatch(r'[a-z]{2}(?:-[a-z]+)+-\d', args.region)), 'Invalid AWS Region.')
+    require(base_argument(args.base_url) == args.base_url, 'Unexpected CloudFront origin.')
+    require(args.chat_table == 'SOC-BOT-DEV-CHAT-HISTORY', 'This evaluator accepts only SOC-BOT-DEV-CHAT-HISTORY.')
+    require(args.region == 'us-east-1', 'This dev evaluator accepts only us-east-1.')
     require(text(args.judge_model, 2048) and bool(re.fullmatch(r'[A-Za-z0-9:/_.-]+', args.judge_model)), 'Invalid judge model identifier.')
 
     # Managed-prompt ARNs replace the Converse controls and are not supported here.
@@ -205,8 +204,9 @@ def make_run(args, cases: list[dict], raw: bytes, prompt: str) -> dict:
                          'judge_prompt_version': judge.PROMPT_VERSION, 'judge_prompt_sha256': digest(prompt.encode('utf-8')),
                          'judge_prompt': prompt, 'cases_sha256': digest(raw), 'cases_path': str(args.cases),
                          'selected_case_ids': [case['case_id'] for case in cases], 'revision': revision(),
-                         'configuration': {'environment': 'dev', 'api_url': args.api_url, 'chat_table': args.chat_table,
+                         'configuration': {'environment': 'dev', 'api_url': args.base_url + AUTH_PATHS['chat'], 'chat_table': args.chat_table,
                                            'region': args.region, 'profile_name': args.profile, 'judge_model': args.judge_model},
+                         'authentication': {'status': 'not_run'},
                          'judge_settings': judge.settings(args.judge_model),
                          'model_override_note': 'Unrecognized model controls are omitted, never guessed. No thinking is requested; non-text/reasoning responses are rejected.',
                          'limits': {'api': api.LIMITS, 'evidence': evidence.LIMITS, 'judge': judge.LIMITS, 'artifact_bytes': report.ARTIFACT_BYTES}},
@@ -215,14 +215,18 @@ def make_run(args, cases: list[dict], raw: bytes, prompt: str) -> dict:
                        'judge': {'status': 'not_run'}, 'execution_checks': None, 'total': None} for case in cases]}
 
 
-def evaluate_case(session, args, case: dict, prompt: str, checkpoint) -> None:
+def evaluate_case(session, pinned: SessionState, user_id: str, args, case: dict, prompt: str, checkpoint) -> None:
     """Execute one fresh request, audit evidence, then judge only a verified completion."""
 
     case['status'] = 'running'
     case['application']['status'] = 'incomplete'
     checkpoint()
-    api.collect(args.api_url, case['reference_key']['question'], case['application'])
+    api.collect(pinned, case['reference_key']['question'], case['application'])
     checkpoint()
+
+    if case['application']['admission_rejected']:
+        case['status'] = 'error'
+        raise EvaluationError('CHAT_ADMISSION_REJECTED', 'Chat authentication/authorization or pinned-session expiry halted further submissions; no renewal or retry was attempted.')
 
     if not case['application']['conversation_id']:
         case['status'] = 'incomplete'
@@ -233,9 +237,12 @@ def evaluate_case(session, args, case: dict, prompt: str, checkpoint) -> None:
     stage.update(status='incomplete', statistics={}, started_at=now())
     checkpoint()
     started = time.monotonic()
+    ownership_failed = False
 
     try:
-        records = evidence.read_events(session, args.chat_table, case['application']['conversation_id'], stage['statistics'])
+        stage['ownership'] = {'verified': False}
+        records = evidence.read_events(session, args.chat_table, case['application']['conversation_id'], stage['statistics'],
+                                       user_id, stage['ownership'])
         stage['data'] = evidence.select(records, case['reference_key'], case['application'])
         stage['status'] = stage['data']['status']
         case['execution_checks'] = evidence.execution_checks(case['reference_key'], case['application'], stage['data'])
@@ -247,11 +254,15 @@ def evaluate_case(session, args, case: dict, prompt: str, checkpoint) -> None:
     except Exception as exc:
         stage.update(status='error', error=diagnostic(exc))
         case['status'] = 'error'
+        ownership_failed = isinstance(exc, EvaluationError) and exc.code == 'OWNERSHIP_NOT_VERIFIED'
 
     finally:
         stage['wall_seconds'] = round(time.monotonic() - started, 6)
         stage['finished_at'] = now()
     checkpoint()
+
+    if ownership_failed:
+        raise EvaluationError('OWNERSHIP_NOT_VERIFIED', 'Conversation ownership could not be verified; further submissions halted.')
 
     if (case['application']['terminal'] or {}).get('truncated') is True:
         case['status'] = 'incomplete'
@@ -315,6 +326,14 @@ def main(argv: list[str] | None = None) -> int:
     except (EvaluationError, OSError, ValueError, TypeError, KeyError, argparse.ArgumentTypeError) as exc:
         cli.error(diagnostic(exc)['message'])
 
+    try:
+        pinned = SessionState(args.base_url, args.session_file, creating=False)
+        api.require_active_session(pinned)
+    except (ClientError, OSError, ValueError, TypeError):
+        cli.error('Use a valid existing private session file for the chosen CloudFront origin; authenticate explicitly if needed.')
+    except EvaluationError as exc:
+        cli.error(diagnostic(exc)['message'])
+
     run = make_run(args, cases, raw, prompt)
     directory = args.output_dir / (run['metadata']['started_at'].replace(':', '').replace('.', '') + '-' + run['metadata']['run_id'])
     current = None
@@ -355,14 +374,27 @@ def main(argv: list[str] | None = None) -> int:
         owns_directory = True
         checkpoint()
 
+        authentication = run['metadata']['authentication']
+        try:
+            api.inspect_session(pinned, authentication)
+        except Exception as exc:
+            authentication.update(status='error', error=diagnostic(exc))
+            raise
+        checkpoint()
+
         # Lazy import: help/configuration checks never resolve credentials or need boto3.
         import boto3
         session = boto3.Session(profile_name=args.profile, region_name=args.region)
         run['status'] = 'running'
 
         for current in run['cases']:
+            try:
+                api.require_active_session(pinned, authentication['expiresAt'])
+            except EvaluationError as exc:
+                authentication.update(status='expired', error=diagnostic(exc))
+                raise
             progress(f"{current['case_id']}: starting one fresh request")
-            evaluate_case(session, args, current, prompt, checkpoint)
+            evaluate_case(session, pinned, authentication['userId'], args, current, prompt, checkpoint)
 
             if artifact_failed:
                 raise EvaluationError('ARTIFACT_WRITE', 'Artifact failure halted the run; no additional cases dispatched.')

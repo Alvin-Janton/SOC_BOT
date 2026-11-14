@@ -1,6 +1,6 @@
 # Local investigation evaluator
 
-This operator-run package evaluates the four reviewed cases against the existing **dev** chat API. The application receives only `{ "turnId": "<fresh UUID>", "message": "<case question>" }`, never the answer key. A separate local judge receives the reviewed key and the evidence actually returned to the agent. Nothing here is deployed or imported by runtime assets.
+This operator-run package evaluates the four reviewed cases through the explicitly configured **dev CloudFront `/api/chat`** route with an existing opaque BFF session. The application receives only `{ "turnId": "<fresh UUID>", "message": "<case question>" }`, never the answer key. A separate local judge receives the reviewed key and the evidence actually returned to the agent. Nothing here is deployed or imported by runtime assets.
 
 The first paid baseline and human calibration have **not** been run during implementation. Confirm deployed normalized records/identifiers match [cases.json](cases.json) before using the scores. Source facts, old verification notes and reviewed scopes in that file remain historical snapshots; only its obsolete no-total policy wording changed. A successful query or local Git SHA does not prove dataset/deployment parity.
 
@@ -19,21 +19,33 @@ python -m evaluation.run --help
 
 Required data/service permissions, provisioned separately by the operator:
 
-- `dynamodb:Query` on only `arn:<partition>:dynamodb:<region>:<account>:table/SOC-BOT-DEV-CHAT-HISTORY`. The evaluator does not use `GetItem`, `Scan`, indexes, writes, or table discovery.
+- `dynamodb:GetItem` and `dynamodb:Query` on only `arn:<partition>:dynamodb:us-east-1:<account>:table/SOC-BOT-DEV-CHAT-HISTORY`. GetItem projects only the exact conversation META ownership fields; Query reads only its EVT partition. No Scan, indexes, writes or table discovery are used. Provision the new GetItem permission separately for the local evaluator identity; application/foundation IAM is unchanged.
 - `bedrock:InvokeModel` for the approved inference-profile ARN and its required underlying foundation-model resources/destination Regions. Match your existing approved profile/model conditions; this document does not create policies or expand the application roles.
 - No S3, Athena, CloudWatch, application-deployment, or remediation permissions are used by this evaluator.
 
-The HTTPS request must still pass the existing dev WAF gate from the operator's currently allowlisted address. Local AWS credentials are **not** forwarded to the API and do not bypass WAF/authentication. There are no cookies, redirects, custom auth workarounds or browser automation. Future authenticated evaluation needs a separately reviewed slice.
+The HTTPS requests must pass the existing dev CloudFront IPv4 WAF gate from the operator's currently allowlisted address. Manually confirm the distribution belongs to dev and corresponds to the explicit dev chat table in `us-east-1`; a generated CloudFront hostname alone does not prove that mapping. The initial authenticated GET and later META ownership check cannot establish that association before the first POST. No infrastructure discovery is performed.
+
+Two identities are required: the **BFF session** identifies the application user, while the **SDK profile** permits local DynamoDB evidence reads and Bedrock judging. Neither substitutes for the other. AWS credentials are never forwarded to the application. The evaluator reads one bounded existing session file through the shared manual-client primitives and pins that cookie snapshot for the run; it never rereads a changed file between cases, adopts Set-Cookie, saves/clears the file, renews, logs in or logs out. Keep this plaintext credential file in an existing private directory outside Git and synced folders. Cookie scope and TLS validation do not make the Python evaluator a browser or prove browser CSRF/SameSite behavior.
 
 Use an authorized account/profile, confirm the exact table/Region and model availability, verify deployed data parity, and budget for both application and judge invocations before running. The CLI does not verify cloud prerequisites by making extra discovery calls.
 
 ## Run after review
 
-From the repository root:
+From the repository root, replace the example distribution and email with your approved dev values. These are explicit operator commands, not implementation-time checks:
 
 ```powershell
-python -m evaluation.run --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile soc-bot-evaluator
-python -m evaluation.run --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile soc-bot-evaluator --case-ids waf-mixed-001
+$base = 'https://dexample.cloudfront.net'
+$session = Join-Path $env:LOCALAPPDATA '.soc-bot-chat-session-evaluator.json'
+python scripts/api_client.py --action login --base-url $base --session-file $session --email 'you@example.com'
+python scripts/api_client.py --action me --base-url $base --session-file $session
+
+# Begin with the benign case only, after reviewing the prerequisites.
+python -m evaluation.run --base-url $base --session-file $session --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile soc-bot-evaluator --case-ids app-benign-001
+# Full reviewed selection, only after transport/ownership validation.
+python -m evaluation.run --base-url $base --session-file $session --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile soc-bot-evaluator
+
+# Optional explicit logout; the evaluator never performs this automatically.
+python scripts/api_client.py --action logout --base-url $base --session-file $session
 ```
 
 The profile name is illustrative. Omit `--profile` to use normal SDK default credential resolution. Options:
@@ -42,33 +54,46 @@ The profile name is illustrative. Omit `--profile` to use normal SDK default cre
 | --- | --- |
 | `--cases` | `evaluation/cases.json`; strict version-1 document, at most 1 MiB |
 | `--case-ids` | All in file order; otherwise one or more known, distinct IDs, still in file order |
-| `--api-url` | Full dev URL from [the manual client](../scripts/chat_client.py); HTTPS `/dev/chat`, no query string, credentials or fragment |
+| `--base-url` | Required generated HTTPS CloudFront root; only fixed `/api/auth/me` and `/api/chat` are constructed. The old `--api-url` is rejected. |
+| `--session-file` | Required existing private `.soc-bot-chat-session-<label>.json`, scoped to this origin and containing a non-null unexpired cookie; never recorded in artifacts |
 | `--chat-table` | Required; initial runner accepts only `SOC-BOT-DEV-CHAT-HISTORY` |
-| `--region` | `us-east-1`; overrides do not establish verified dataset scope |
+| `--region` | `us-east-1` only; other Regions are rejected |
 | `--profile` | Optional existing SDK profile; only its name, not contents, is recorded |
 | `--judge-model` | `us.anthropic.claude-sonnet-4-6`; no silent model fallback |
 | `--output-dir` | `artifacts/evaluation`; repository-local overrides must remain under ignored `artifacts/`; external local directories are allowed |
 
 Each run exclusively creates a UTC timestamp + UUID directory containing `results.json` and `report.html`. Fresh UUID turns are saved before dispatch; conversation IDs are assigned by the API. Cases are sequential, with exactly one application POST per case and no supplied IDs/repeats or automatic replay. Do not immediately rerun an uncertain request assuming it did nothing. Closing a socket/pressing Ctrl+C does **not** cancel application or judge work remotely.
 
-The runner continues case-local failures. It stops on Ctrl+C or an artifact failure. Exit codes: `0` all selected cases fully scored, even with low scores; `1` any execution/evidence/judge/artifact error or incomplete case, including any application answer returned with `truncated: true`; `2` invalid configuration; `130` interruption. Truncated answers remain incomplete even when persistence agrees: their partial text, evidence and diagnostics are preserved, Bedrock judging is skipped (`judge.status=not_run`, `skip_reason=APPLICATION_TRUNCATED`), and scores/total stay unset. JSON and HTML distinguish truncated answers from untruncated completions and exclude them from scored aggregates. An unexpected replay is not a fresh baseline and is never graded.
+The runner continues ordinary case-local failures. It halts further submissions on initial session-check failure, local pinned-session expiry, chat HTTP 401/403, ownership-verification failure, Ctrl+C or artifact failure. A rejected case stays unscored and later cases stay `not_run`; no automatic reauthentication, resend or cancellation occurs. Exit codes: `0` all selected cases fully scored, even with low scores; `1` any execution/evidence/judge/artifact error or incomplete case, including any application answer returned with `truncated: true`; `2` invalid configuration; `130` interruption. Truncated answers remain incomplete even when persistence agrees: their partial text, evidence and diagnostics are preserved, Bedrock judging is skipped (`judge.status=not_run`, `skip_reason=APPLICATION_TRUNCATED`), and scores/total stay unset. JSON and HTML distinguish truncated answers from untruncated completions and exclude them from scored aggregates. An unexpected replay is not a fresh baseline and is never graded.
 
 ## Modules and data boundaries
 
 | File | Responsibility |
 | --- | --- |
 | [run.py](run.py) | Offline preflight, fresh case IDs, sequential stages and incremental artifact lifecycle |
-| [api.py](api.py) | One structured HTTPS/NDJSON request; exact deltas, bounded activities, terminal and partial outcomes |
-| [evidence.py](evidence.py) | Strong base-table Query, durable validation, cross-attempt terminal selection and declared coverage checks |
+| [api.py](api.py) | One bounded session inspection, pinned-cookie HTTPS/NDJSON chat, exact deltas, attempt/cancellation identities and partial outcomes |
+| [evidence.py](evidence.py) | Strong exact META ownership lookup before EVT Query, durable validation, cross-attempt terminal selection and declared coverage checks |
 | [judge.py](judge.py) / [judge_prompt.txt](judge_prompt.txt) | Versioned complete-evidence projection, bounded Converse request, strict judgment validation, Python totals |
 | [report.py](report.py) | Authoritative strict JSON, atomic replacement and escaped self-contained HTML |
 | [common.py](common.py) | Shared safe errors, JSON/UTC validation and bounded SDK attempts; no plugin framework |
 
-Only safe pure validation/JSON helpers are imported from the existing manual client; that client is not modified or run as a subprocess. This package does not depend on Spark, datasets or application Python internals.
+Origin/session/cookie validation reuses `scripts/client_common.py`; pure message/UUID/JSON helpers remain shared with the manual chat client. Its obsolete default endpoint constant is removed; streaming/authentication behavior is unchanged and no client is invoked as a subprocess. This package does not depend on Spark, datasets or application Python internals.
+
+## Authenticated admission and diagnostics
+
+Offline arguments, cases and prompt are validated before the existing session file is loaded or any SDK/network work begins. Import and `--help` do not access session files or resolve credentials. The initial artifact checkpoint precedes all application/judge requests; a failed checkpoint prevents dispatch.
+
+One read-only GET `/api/auth/me` uses the pinned host-only Secure cookie and matching Origin, verified TLS, no redirect/retry, an 8-KiB JSON cap, ten-second inactivity limit and fifteen-second absolute wait covering connect/headers/body. Only the exact public `userId` and UTC `expiresAt` shape is accepted; expiry must be future and agree with the pinned cookie to whole-second precision. A daemon worker bounds even an OS resolver wait; deadline cleanup interrupts established sockets and late connections must check shutdown/deadline before issuing the GET. A late result cannot authorize cases. No response cookie is adopted or saved. The metadata disclosure shows `authentication.status`, confirmed public identity/expiry/check time, and safe timing/status/error diagnostics; it never includes the session object, cookie or session-file path.
+
+The pinned cookie and confirmed expiry are checked locally before each case; the backend independently authorizes every POST, including account/session-version revocation. An earlier successful me response is not permanent authorization. A 401 session rejection stays distinct from a 403 authorization/WAF/origin denial, whose exact gate is not inferred; network, protocol and service failures remain separate controlled diagnostics. Expired/revoked/rejected sessions require deliberate operator authentication and a new run, never automatic continuation.
+
+Chat retains one fresh question-only POST per case, the 60-second inactivity/900-second absolute transport bounds, 256-KiB lines, 1-MiB streams, 32-KiB exact answers and 1,024 activities. HTTP failure bodies are inspected at most 8 KiB, archiving only validated public error codes, identifiers and fixed inspection labels, never body/message/header text. Exactly `{error, requestId}` (auth) or `{error, correlationId}` (orchestrator) is recognized, with exactly `code` and `message` inside `error`. Auth request IDs require 1-128 ASCII letters, digits, underscores or hyphens; orchestrator correlation IDs retain strict UUID validation. Missing/malformed identifiers, unknown fields and envelopes containing both identifier fields are unrecognized. Current conversation events may carry a validated UUID `attemptId`; repeated identities must agree. A fresh completion requires that acquired identity, whereas a replay omits it and stays unexpected/unscored. Only nonretryable `TURN_CANCELLED` errors may include an optional matching `conversationId`. Failed, cancelled, partial, truncated and unexpected-replay answers remain unscored. These execution/authentication diagnostics stay outside the unchanged judge projection.
 
 ## Durable evidence and execution checks
 
-The reader queries `PK=CONV#<returned conversationId>` and `begins_with(SK, 'EVT#')` on the explicit base table with `ConsistentRead=True`. It follows `LastEvaluatedKey` even through an empty page. It validates envelope, UUIDs, sequence/key consistency, payload sizes, duplicate IDs and metadata; other turns are counted but excluded, not archived. DynamoDB integers stay integers and nonintegral Decimals become exact decimal strings, never lossy floats.
+Before any EVT Query, the reader performs a strongly consistent exact-key GetItem on `PK=CONV#<returned conversationId>, SK=META`, projecting only PK, SK, entity_type, schema_version, conversation_id and owner_id. Its exact shape/version/key must match and its owner must equal the me-confirmed userId; the projected JSON is capped at 2 KiB. Missing, foreign, malformed or unavailable ownership fails closed and halts later submissions without querying events or judging. The check shares the existing sixty-second evidence deadline and bounded SDK retry policy. Only a verified flag/check time and separate ownership-read statistics enter stage diagnostics, never the META item or foreign owner's value. This protects evaluator correctness without narrowing the operator's AWS authority.
+
+After verification, the reader queries `PK=CONV#<returned conversationId>` and `begins_with(SK, 'EVT#')` on the explicit base table with `ConsistentRead=True`. It follows `LastEvaluatedKey` even through an empty page. It validates envelope, UUIDs, sequence/key consistency, payload sizes, duplicate IDs and metadata; other turns are counted but excluded, not archived. DynamoDB integers stay integers and nonintegral Decimals become exact decimal strings, never lossy floats.
 
 Exactly one persisted user event must match the question. A completed stream must exactly match the persisted assistant text and stop reason/truncation. Evidence is cut off at that assistant's sequence. These audit checks still run for a truncated completion; its case remains incomplete and unscored regardless of the evidence-stage outcome, with any evidence errors preserved. Missing/mismatched persistence, contradictory terminals, orphan results, duplicate calls, inconsistent groups or unresolved completed-turn calls produce evidence errors, not guesses. Failed/incomplete API calls may still yield an audit bundle if their conversation ID was received, but cannot be promoted into scored completions.
 
@@ -90,9 +115,10 @@ An error result may contain these same hints only under `output.error.validation
 
 | Stage | Bounds |
 | --- | --- |
+| Session inspection | One GET; 10-second inactivity / 15-second absolute wait; 8 KiB JSON; no retry, redirect or cookie adoption |
 | Application | 60-second socket inactivity; 900-second overall transport deadline; 256 KiB/line; 1 MiB cumulative stream; 32 KiB exact answer; 1,024 activities |
-| Evidence | 60-second stage; 128 pages, 100 items/page, 10,000 records, 8 MiB decoded JSON; 96 KiB/event, 64 KiB/result, 20 KiB/arguments; nesting 24 |
-| DynamoDB request | 5-second connect / 10-second read; at most three attempts per page, with bounded transient backoff |
+| Evidence | Shared 60-second ownership + event stage; 2 KiB projected META; 128 pages, 100 items/page, 10,000 records, 8 MiB decoded JSON; 96 KiB/event, 64 KiB/result, 20 KiB/arguments; nesting 24 |
+| DynamoDB request | 5-second connect / 10-second read; at most three attempts per ownership lookup or event page, with bounded transient backoff |
 | Judge | 512 KiB complete serialized Converse request; 4,096 output tokens; 64 KiB combined UTF-8 response text, including surrounding whitespace/fences; 10-second connect / 120-second read; 400-second stage; at most three attempts |
 | Artifacts | 16 MiB each for complete JSON and rendered HTML |
 
@@ -202,7 +228,7 @@ After pointer-shape validation, optional `reference_origin` and `reference_path`
 
 Inspect the authoritative `results.json` in the run's authorized local output directory, or the inert **Rejected judgment - UNVALIDATED / UNSCORED** disclosure in `report.html`. The latter shows the response, parsed object and validation details using the existing escaped JSON rendering; compare them with the preserved exact application answer. Rejected criteria/discrepancies are untrusted debug output, never validated findings or summary-table grades. `judge.status` and case status remain `error`, `judge.judgment` remains absent, `total` remains unset, the case is excluded from scored aggregates, and the overall run exits `1`. A completed application answer or judge `end_turn` does not establish a valid evaluation score or the semantic correctness of a rejected discrepancy.
 
-These are backward-compatible optional fields under result schema version 1. Newly generated artifacts identify evaluator patch version `1.0.5`: `1.0.1` introduced quote capture, `1.0.2` added missed-findings consistency capture, `1.0.3` added controlled invalid-reference capture, `1.0.4` added runtime safe-preparation compatibility, and `1.0.5` adds local artifact diagnostics/sharing retries without changing judging. The current judge prompt is `investigation_judge_v4`; projection `complete_terminal_pairs_v1`, acceptance/scoring rules, request settings and SDK retry behavior remain unchanged by the diagnostic capture and prompt guidance. The existing exception/finally/checkpoint flow saves the diagnostic alongside application/evidence, usage, stop reason, timings and request/input hashes. Complete JSON/HTML remain capped at 16 MiB each: no clipping or partial score is used to make diagnostics fit, and artifact-write failures remain explicit. All other validation/provider failures retain controlled errors without this payload capture. Older artifacts without the field still render; discarded judgments from previous runs cannot be reconstructed, and those runs are not rewritten. Any later reproduction requires a fresh operator-authorized paid run and may not fail identically. Neither the exact earlier missed-findings mismatch nor the latest discarded invalid pointer can be recovered; rerunning the WAF case is pending operator review/deployment, not automatic recovery or regrading.
+These are backward-compatible optional fields under result schema version 1. Newly generated artifacts identify evaluator patch version `1.0.6` (authenticated CloudFront sessions and ownership checks): `1.0.1` introduced quote capture, `1.0.2` added missed-findings consistency capture, `1.0.3` added controlled invalid-reference capture, `1.0.4` added runtime safe-preparation compatibility, and `1.0.5` adds local artifact diagnostics/sharing retries without changing judging. The current judge prompt is `investigation_judge_v4`; projection `complete_terminal_pairs_v1`, acceptance/scoring rules, request settings and SDK retry behavior remain unchanged by the diagnostic capture and prompt guidance. The existing exception/finally/checkpoint flow saves the diagnostic alongside application/evidence, usage, stop reason, timings and request/input hashes. Complete JSON/HTML remain capped at 16 MiB each: no clipping or partial score is used to make diagnostics fit, and artifact-write failures remain explicit. All other validation/provider failures retain controlled errors without this payload capture. Older artifacts without the field still render; discarded judgments from previous runs cannot be reconstructed, and those runs are not rewritten. Any later reproduction requires a fresh operator-authorized paid run and may not fail identically. Neither the exact earlier missed-findings mismatch nor the latest discarded invalid pointer can be recovered; rerunning the WAF case is pending operator review/deployment, not automatic recovery or regrading.
 
 Python computes the unweighted earned/applicable total: 0–6 for the benign case and 0–8 otherwise. N/A is `null`, not zero or automatic full credit. Aggregate totals include **only fully scored cases** and explicitly show scored/attempted/selected counts and excluded cases. No pass/fail threshold exists. Same-family model judging remains potentially biased and nondeterministic; calibrate all four initial results manually against source truth.
 
@@ -214,4 +240,4 @@ Open `report.html` manually; no browser is launched. It contains native disclosu
 
 The rejected-judgment capture is a narrowly scoped **private artifact** exception: it can repeat credentials, security evidence, hidden evaluator material or malicious text. Keep it within the same local output protections; never put it into Git, CI/console logs, S3 corpora, public hosting, runtime assets or application prompts. No raw response content enters progress/error messages. Escaping prevents active HTML/controls in the display, not disclosure to someone who can read the report. Git ignore is not access control.
 
-Offline verification covers syntax/imports, help, strict cases/config preflight, source/diff review and the normal writer's manual private-copy checks described above. Rejected-judgment, lock/retry, cleanup-failure, checkpoint/final-save failure and interruption branches are not dynamically exercised. No tests, fixtures, recorded test responses, mock servers, harnesses or permanent diagnostic utilities are added or changed. **Do not run a valid CLI invocation as an offline check**: it intentionally makes a paid application request followed by authorized DynamoDB and Bedrock calls. No AWS calls, live baseline or deployment are part of implementation verification. Source review and normal writes do not establish the original failure's cause, failure-path recovery or semantic judge compliance.
+Offline verification covers syntax/imports, help, strict cases/config preflight, source/diff review and the normal writer's manual private-copy checks described above. Rejected-judgment, lock/retry, cleanup-failure, checkpoint/final-save failure and interruption branches are not dynamically exercised. No tests, fixtures, recorded test responses, mock servers, harnesses or permanent diagnostic utilities are added or changed. **Do not run a valid CLI invocation as an offline check**: it intentionally makes a paid application request followed by authorized DynamoDB and Bedrock calls. No AWS calls, live baseline or deployment are part of implementation verification. Source review and normal writes do not establish the original failure's cause, failure-path recovery or semantic judge compliance. The new authentication/ownership/error paths are source-reviewed only, not dynamically validated. After review, explicitly validate the benign case through the approved dev distribution first, then ownership/stream/report agreement and separately authorized expiry/revocation/wrong-origin/permission-denial scenarios. No new paid baseline or authentication improvement in model scores is claimed.

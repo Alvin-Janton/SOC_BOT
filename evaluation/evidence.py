@@ -5,10 +5,10 @@ from pathlib import Path
 import re
 import time
 
-from .common import encoded, integer, object_json, require, sdk_call, text, utc
+from .common import EvaluationError, encoded, integer, now, object_json, require, sdk_call, text, utc
 
 LIMITS = {"pages": 128, "records": 10000, "decoded_bytes": 8388608, "deadline_seconds": 60,
-          "record_bytes": 98304, "connect_seconds": 5, "read_seconds": 10, "page_limit": 100}
+          "record_bytes": 98304, "connect_seconds": 5, "read_seconds": 10, "page_limit": 100, "ownership_bytes": 2048}
 PENDING = {"SUBMITTED", "QUEUED", "RUNNING", "UNKNOWN"}
 UUID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z")
 BASE = {"PK", "SK", "schema_version", "conversation_id", "event_id", "event_sequence", "turn_id", "attempt_id", "created_at", "entity_type"}
@@ -96,13 +96,14 @@ def decoded(value, depth: int = 0):
     return value
 
 
-def read_events(session, table: str, conversation_id: str, statistics: dict) -> list[dict]:
-    """Read a conversation's EVT# records using strongly consistent base-table queries.
+def read_events(session, table: str, conversation_id: str, statistics: dict, user_id: str, ownership: dict) -> list[dict]:
+    """Verify the session user's META ownership, then strongly query only that conversation's EVT# records.
 
     Follow every pagination cursor, including those on empty pages, normalize
     DynamoDB values with decoded(), and update statistics with page/record/byte
-    counts and SDK attempts. Enforce the read limits here; event validation and
-    filtering to a particular turn happen later in select().
+    counts and SDK attempts. The ownership read shares the same 60-second budget
+    and has separate diagnostics; it never enters the selected evidence or judge input.
+    Event validation and filtering to a particular turn happen later in select().
 
     Example input:
         session = boto3.Session(
@@ -111,6 +112,8 @@ def read_events(session, table: str, conversation_id: str, statistics: dict) -> 
         table = "SOC-BOT-DEV-CHAT-HISTORY"
         conversation_id = "conversation-001"
         statistics = {}
+        user_id = "44444444-1111-4444-8111-111111111111"  # Confirmed /auth/me identity.
+        ownership = {}
 
     Example output (one record shown; remaining stored fields/records omitted):
         [
@@ -127,15 +130,48 @@ def read_events(session, table: str, conversation_id: str, statistics: dict) -> 
 
     statistics after a successful one-page read (illustrative sizes):
         {"pages": 1, "records": 1, "decoded_bytes": 480, "service_attempts": 1}
+    Ownership diagnostics are recorded separately, without the META item or owner value.
     """
-
-    from botocore.config import Config
 
     deadline = time.monotonic() + LIMITS["deadline_seconds"]
     records = []
     cursor = None
     seen_cursors = set()
     statistics.update(pages=0, records=0, decoded_bytes=0)
+    ownership.update(verified=False, statistics={})
+
+    def get_owner(stop_at):
+        """Read only six ownership fields at the exact META key under the shared evidence deadline."""
+        resource = session.resource("dynamodb", config=Config(connect_timeout=5, read_timeout=10,
+                                    retries={"total_max_attempts": 1}))
+        try:
+            require(time.monotonic() < stop_at, "Evidence deadline exceeded.", "STAGE_DEADLINE")
+            return resource.Table(table).get_item(
+                Key={"PK": "CONV#" + conversation_id, "SK": "META"}, ConsistentRead=True,
+                ProjectionExpression="#pk, #sk, #entity, #schema, #conversation, #owner",
+                ExpressionAttributeNames={"#pk": "PK", "#sk": "SK", "#entity": "entity_type", "#schema": "schema_version",
+                                          "#conversation": "conversation_id", "#owner": "owner_id"})
+        finally:
+            resource.meta.client.close()
+
+    try:
+        from botocore.config import Config
+
+        result = sdk_call(get_owner, deadline, ownership['statistics'])
+        metadata = decoded(result.get('Item'))
+        require(isinstance(metadata, dict) and len(encoded(metadata)) <= LIMITS['ownership_bytes']
+                and set(metadata) == {'PK', 'SK', 'entity_type', 'schema_version', 'conversation_id', 'owner_id'}
+                and metadata['PK'] == 'CONV#' + conversation_id and metadata['SK'] == 'META'
+                and metadata['entity_type'] == 'CONVERSATION' and type(metadata['schema_version']) is int
+                and metadata['schema_version'] == 1 and metadata['conversation_id'] == conversation_id
+                and text(user_id, 128) and metadata['owner_id'] == user_id,
+                'Conversation ownership could not be verified.', 'OWNERSHIP_NOT_VERIFIED')
+        ownership.update(verified=True, checked_at=now())
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:
+        ownership['checked_at'] = now()
+        raise EvaluationError('OWNERSHIP_NOT_VERIFIED', 'Conversation ownership could not be verified; no event query was issued.') from exc
 
     while True:
 
