@@ -34,6 +34,7 @@ const PUBLIC_CODES = ['MODEL_PROTOCOL_ERROR', 'MODEL_GROUP_LIMIT', 'MODEL_TOOL_I
 type Index = number | 'missing' | 'invalid';
 type Kind = 'text' | 'thinking' | 'tool_use' | 'missing' | 'unknown';
 type InputKind = 'object' | 'array' | 'null' | 'string' | 'number' | 'boolean' | 'unknown';
+type ToolTypeCategory = 'missing' | 'null' | 'tool_use' | 'client_tool_use' | 'server_tool_use' | 'other_string' | 'non_string';
 export interface ParserState {
   expectedNextIndex: number; blockCount: number; toolBlockCount: number; openBlockCount: number;
   messageStarted: boolean; messageStopped: boolean; metadataSeen: boolean; thinkingActivityEmitted: boolean;
@@ -43,13 +44,26 @@ export interface ParserState {
 interface UnionSummary { member: string; knownMembers: string[]; unknownMemberCount: number }
 interface EventSummary {
   ordinal: number; event: UnionSummary; start: UnionSummary; delta: UnionSummary; reasoning: UnionSummary; toolDelta: UnionSummary;
-  blockIndex: Index; messageStarted: boolean; messageStopped: boolean; metadataSeen: boolean; blockOpen: boolean; blockStopped: boolean;
+  blockIndex: Index; toolType: ToolTypeCategory; messageStarted: boolean; messageStopped: boolean; metadataSeen: boolean; blockOpen: boolean; blockStopped: boolean;
   blockCount: number; openBlockCount: number;
 }
 
 /** Reads structural own data only; diagnostic collection never invokes provider accessors. */
 function field(value: unknown, key: string): unknown {
   return value && typeof value === 'object' ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+}
+
+/** Classifies only the SDK start's type metadata; recognized labels do not grant parser acceptance. */
+function toolTypeCategory(value: unknown): ToolTypeCategory {
+  if (value === undefined) return 'missing';
+  if (value === null) return 'null';
+  if (typeof value !== 'string') return 'non_string';
+  switch (value) {
+    case 'tool_use': return 'tool_use';
+    case 'client_tool_use': return 'client_tool_use';
+    case 'server_tool_use': return 'server_tool_use';
+    default: return 'other_string';
+  }
 }
 
 /** Returns fixed member labels/counts, never an unexpected property name or payload value. */
@@ -74,6 +88,7 @@ export class ParserDiagnostics {
   private ordinal = 0;
   private omitted = 0;
   private emitted = false;
+  private toolType: ToolTypeCategory = 'missing';
   public blockIndex: Index = 'missing';
   public constructor(private readonly environment: 'dev', private readonly purpose: ResponsePurpose, private readonly allowTools: boolean) {}
 
@@ -89,12 +104,13 @@ export class ParserDiagnostics {
     try {
       this.ordinal = count(this.ordinal + 1);
       const start = field(event, 'contentBlockStart'); const delta = field(event, 'contentBlockDelta'); const stop = field(event, 'contentBlockStop');
+      this.toolType = toolTypeCategory(field(field(field(start, 'start'), 'toolUse'), 'type'));
       const index = field(start ?? delta ?? stop, 'contentBlockIndex');
       this.blockIndex = index === undefined ? 'missing' : typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < 64 ? index : 'invalid';
       const state = snapshot();
       this.recent.push({ ordinal: this.ordinal, event: union(event, EVENTS), start: union(field(start, 'start'), STARTS),
         delta: union(field(delta, 'delta'), DELTAS), reasoning: union(field(field(delta, 'delta'), 'reasoningContent'), REASONING),
-        toolDelta: union(field(field(delta, 'delta'), 'toolUse'), ['input']), blockIndex: this.blockIndex,
+        toolDelta: union(field(field(delta, 'delta'), 'toolUse'), ['input']), blockIndex: this.blockIndex, toolType: this.toolType,
         messageStarted: state.messageStarted === true, messageStopped: state.messageStopped === true, metadataSeen: state.metadataSeen === true,
         blockOpen: state.blockOpen === true, blockStopped: state.blockStopped === true,
         blockCount: count(state.blockCount), openBlockCount: count(state.openBlockCount) });
@@ -121,7 +137,7 @@ export class ParserDiagnostics {
       } : null;
       const record = { event: 'dev_model_parser_diagnostic', diagnosticId: this.id, purpose: this.purpose, allowTools: this.allowTools,
         failureCode: reason ?? 'UNCLASSIFIED_PROTOCOL_ERROR', failureStage: stage, originalCode: error.code,
-        eventOrdinal: this.ordinal, blockIndex: this.blockIndex, current: state, omittedSummaries: this.omitted, recentEvents: [...this.recent] };
+        eventOrdinal: this.ordinal, blockIndex: this.blockIndex, toolType: this.toolType, current: state, omittedSummaries: this.omitted, recentEvents: [...this.recent] };
       let encoded = JSON.stringify(record);
       while (Buffer.byteLength(encoded, 'utf8') > 8_192 && record.recentEvents.length) {
         record.recentEvents.shift(); record.omittedSummaries = count(record.omittedSummaries + 1); encoded = JSON.stringify(record);
