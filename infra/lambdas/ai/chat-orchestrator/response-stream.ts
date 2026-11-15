@@ -100,10 +100,12 @@ export class ResponseAssembler {
       if (!this.allowTools) throw diagnosticFailure(new ChatError('TOOLS_DISABLED', 'The model requested a tool after tool execution was disabled.', 502), 'TOOLS_DISABLED_START', this.diagnostics);
       const tool = start.toolUse;
       if (Object.keys(tool).some(key => !['toolUseId', 'name', 'type'].includes(key))) throw protocolError('TOOL_FIELDS_UNEXPECTED', this.diagnostics);
+      // The installed SDK declares only the server marker; validate the observed runtime type without coercion.
+      const toolType: unknown = tool.type;
       if (typeof tool.toolUseId !== 'string' || typeof tool.name !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(tool.toolUseId)
         || !/^[A-Za-z0-9_-]{1,64}$/.test(tool.name) || this.ids.has(tool.toolUseId)
-        || tool.type !== undefined) throw protocolError(
-          tool.type !== undefined ? 'TOOL_TYPE_UNSUPPORTED' : typeof tool.toolUseId === 'string' && this.ids.has(tool.toolUseId) ? 'TOOL_IDENTITY_DUPLICATE' : 'TOOL_IDENTITY_INVALID', this.diagnostics);
+        || (toolType !== undefined && toolType !== 'tool_use')) throw protocolError(
+          toolType !== undefined && toolType !== 'tool_use' ? 'TOOL_TYPE_UNSUPPORTED' : typeof tool.toolUseId === 'string' && this.ids.has(tool.toolUseId) ? 'TOOL_IDENTITY_DUPLICATE' : 'TOOL_IDENTITY_INVALID', this.diagnostics);
       if (this.blocks.has(event.contentBlockStart.contentBlockIndex!)) throw protocolError('TOOL_START_DUPLICATE', this.diagnostics);
       const block = this.block(event.contentBlockStart.contentBlockIndex, 'tool_use');
       block.id = tool.toolUseId; block.name = tool.name; this.ids.add(tool.toolUseId);
