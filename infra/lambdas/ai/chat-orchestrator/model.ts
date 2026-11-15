@@ -1,3 +1,4 @@
+import { createParserDiagnostics, FailureStage, ParserDiagnostics } from './parser-diagnostics';
 import { BedrockRuntimeClient, ConverseStreamCommand, ConverseStreamCommandInput, Message } from '@aws-sdk/client-bedrock-runtime';
 import { ChatError, Configuration, FINALIZATION_RESERVE_MS, MAX_OUTPUT_BYTES, MAX_OUTPUT_TOKENS, OUTCOME_RESERVE_MS, TurnBudget } from './config';
 import { bedrockTools, tableFacts } from './contracts';
@@ -25,8 +26,8 @@ export class ModelRunner {
   }
 
   /** Builds an independent SDK payload without mutating or adapting any already-sent message. */
-  private input(messages: readonly Message[], allowTools: boolean, summary = false): ConverseStreamCommandInput {
-    if (!allowTools && messages.some(message => message.content?.some(block => block.reasoningContent || block.toolUse || block.toolResult))) throw protocolError();
+  private input(messages: readonly Message[], allowTools: boolean, summary = false, diagnostics?: ParserDiagnostics): ConverseStreamCommandInput {
+    if (!allowTools && messages.some(message => message.content?.some(block => block.reasoningContent || block.toolUse || block.toolResult))) throw protocolError('REQUEST_NATIVE_BLOCKS_NOT_ALLOWED', diagnostics);
     const request: ConverseStreamCommandInput = {
       modelId: this.config.modelId, messages: structuredClone([...messages]),
       system: [...this.system, ...(summary ? [{ text: SUMMARY_INSTRUCTION }] : [{ text: CONTROL_INSTRUCTION }]),
@@ -64,16 +65,20 @@ export class ModelRunner {
     if (available <= 0) throw new ChatError('TURN_TIMED_OUT', 'The investigation reached its time limit.', 504);
     const controller = new AbortController();
     const requestSignal = AbortSignal.any([budget.workSignal, AbortSignal.timeout(Math.max(1, Math.min(MODEL_REQUEST_MS, available))), controller.signal]);
+    const diagnostics = createParserDiagnostics(this.config.environment, summary ? 'summary' : allowTools ? 'investigation' : 'finalization', allowTools);
+    let stage: FailureStage = 'request_validation';
+    let parser: ResponseAssembler | undefined;
     let closeStream: (() => Promise<unknown>) | undefined;
     try {
-      const input = this.input(messages, allowTools, summary);
-      boundRequest(input);
+      const input = this.input(messages, allowTools, summary, diagnostics);
+      boundRequest(input, diagnostics);
       const ids = new Set(messages.flatMap(message => (message.content ?? []).flatMap(block => block.toolUse?.toolUseId ? [block.toolUse.toolUseId] : [])));
-      const parser = new ResponseAssembler(this.config.modelId, summary ? 'summary' : allowTools ? 'investigation' : 'finalization',
+      parser = new ResponseAssembler(this.config.modelId, summary ? 'summary' : allowTools ? 'investigation' : 'finalization',
         allowTools, summary ? SUMMARY_OUTPUT_BYTES : MAX_OUTPUT_BYTES, summary ? SUMMARY_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
-        async text => { budget.check(); await emitText(text); }, emitThinking, ids, this.usage);
+        async text => { budget.check(); await emitText(text); }, emitThinking, ids, this.usage, diagnostics);
       const response = await this.client.send(new ConverseStreamCommand(input), { abortSignal: requestSignal });
-      if (!response.stream) throw protocolError();
+      stage = 'stream_accept';
+      if (!response.stream) throw protocolError('MISSING_RESPONSE_STREAM', diagnostics);
       const iterator = response.stream[Symbol.asyncIterator]();
       closeStream = async () => iterator.return?.();
       const providerEvents = { [Symbol.asyncIterator]: () => iterator };
@@ -84,9 +89,14 @@ export class ModelRunner {
       }
       budget.check();
       if (requestSignal.aborted) throw new ChatError('MODEL_TIMED_OUT', 'The model response reached its time limit.', 504);
+      stage = 'response_validation';
       return await parser.finish();
     } catch (error) {
-      if (error instanceof ChatError) throw error;
+      if (error instanceof ChatError) {
+        // Only fixed parser classifications are logged; SDK/callback/cancellation failures remain unchanged.
+        if (diagnostics) { try { diagnostics.emit(error, stage, parser?.diagnosticState()); } catch { /* Best effort only. */ } }
+        throw error;
+      }
       budget.check();
       if (requestSignal.aborted) throw new ChatError('MODEL_TIMED_OUT', 'The model response reached its time limit.', 504);
       throw new ChatError('MODEL_SERVICE_ERROR', 'The model could not complete the response.');

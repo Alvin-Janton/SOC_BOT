@@ -1,3 +1,4 @@
+import { diagnosticFailure, ParserDiagnostics } from './parser-diagnostics';
 import type { ContentBlock, ConverseStreamCommandInput } from '@aws-sdk/client-bedrock-runtime';
 import { ChatError, MAX_CONTEXT_BYTES } from './config';
 import { jsonBytes, jsonValue, protocolError } from './private-json';
@@ -21,41 +22,41 @@ export interface ModelResponse {
 }
 
 /** Rejects noncanonical encodings while preserving opaque bytes, including empty binary content. */
-export function redactedBytes(data: unknown): Uint8Array {
+export function redactedBytes(data: unknown, diagnostics?: ParserDiagnostics): Uint8Array {
   if (typeof data !== 'string' || data.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)
-    || Buffer.from(data, 'base64').toString('base64') !== data) throw protocolError();
+    || Buffer.from(data, 'base64').toString('base64') !== data) throw protocolError('BASE64_INVALID', diagnostics);
   return new Uint8Array(Buffer.from(data, 'base64'));
 }
 
 /** Validates the complete ordered group once; indexes remain the provider's original ordinals. */
-export function validateBlocks(blocks: readonly AssistantBlock[], stopReason: string, purpose: ResponsePurpose): void {
-  if (!Array.isArray(blocks) || blocks.length < 1 || blocks.length > MAX_CONTENT_BLOCKS || groupBytes(blocks) > MAX_GROUP_BYTES) {
-    throw new ChatError('MODEL_GROUP_LIMIT', 'The complete model response exceeds its supported group limit.', 502);
+export function validateBlocks(blocks: readonly AssistantBlock[], stopReason: string, purpose: ResponsePurpose, diagnostics?: ParserDiagnostics): void {
+  if (!Array.isArray(blocks) || blocks.length < 1 || blocks.length > MAX_CONTENT_BLOCKS || groupBytes(blocks, diagnostics) > MAX_GROUP_BYTES) {
+    throw diagnosticFailure(new ChatError('MODEL_GROUP_LIMIT', 'The complete model response exceeds its supported group limit.', 502), 'GROUP_SIZE_OR_COUNT_LIMIT', diagnostics);
   }
   const ids = new Set<string>();
   for (const [index, block] of blocks.entries()) {
-    if (block.index !== index) throw protocolError();
-    jsonValue(block as unknown);
+    if (block.index !== index) throw protocolError('BLOCK_ORDER_INVALID', diagnostics);
+    jsonValue(block as unknown, 0, diagnostics);
     if (block.type === 'text') {
-      if (Object.keys(block).length !== 3 || typeof block.text !== 'string') throw protocolError();
+      if (Object.keys(block).length !== 3 || typeof block.text !== 'string') throw protocolError('TEXT_BLOCK_INVALID', diagnostics);
     } else if (block.type === 'thinking') {
-      if (purpose === 'summary' || Object.keys(block).length !== 3 || !block.thinking || typeof block.thinking !== 'object') throw protocolError();
+      if (purpose === 'summary' || Object.keys(block).length !== 3 || !block.thinking || typeof block.thinking !== 'object') throw protocolError('THINKING_BLOCK_INVALID', diagnostics);
       const thinking = block.thinking;
       if (thinking.type === 'text') {
         if (Object.keys(thinking).length !== 3 || typeof thinking.text !== 'string'
-          || typeof thinking.signature !== 'string' || !thinking.signature) throw protocolError();
+          || typeof thinking.signature !== 'string' || !thinking.signature) throw protocolError('SIGNED_THINKING_INVALID', diagnostics);
       } else if (thinking.type === 'redacted') {
-        if (Object.keys(thinking).length !== 2) throw protocolError();
-        redactedBytes(thinking.data);
-      } else throw protocolError();
+        if (Object.keys(thinking).length !== 2) throw protocolError('REDACTED_BLOCK_INVALID', diagnostics);
+        redactedBytes(thinking.data, diagnostics);
+      } else throw protocolError('THINKING_VARIANT_INVALID', diagnostics);
     } else if (block.type === 'tool_use') {
       if (purpose !== 'investigation' || Object.keys(block).length !== 5
         || typeof block.id !== 'string' || typeof block.name !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(block.id) || !/^[A-Za-z0-9_-]{1,64}$/.test(block.name)
-        || ids.has(block.id) || jsonBytes(encodeModelInput(block.input)) > MAX_TOOL_INPUT_BYTES) throw protocolError();
+        || ids.has(block.id) || jsonBytes(encodeModelInput(block.input)) > MAX_TOOL_INPUT_BYTES) throw protocolError('TOOL_BLOCK_INVALID', diagnostics);
       ids.add(block.id);
-    } else throw protocolError();
+    } else throw protocolError('BLOCK_VARIANT_INVALID', diagnostics);
   }
-  if ((ids.size > 0) !== (stopReason === 'tool_use') || !['tool_use', 'end_turn', 'stop_sequence', 'max_tokens'].includes(stopReason)) throw protocolError();
+  if ((ids.size > 0) !== (stopReason === 'tool_use') || !['tool_use', 'end_turn', 'stop_sequence', 'max_tokens'].includes(stopReason)) throw protocolError('STOP_TOOL_RELATIONSHIP_INVALID', diagnostics);
 }
 
 /** Restores exact native blocks; every JSON input and byte array is copied before SDK ownership. */
@@ -71,8 +72,8 @@ export function nativeBlocks(blocks: readonly AssistantBlock[]): ContentBlock[] 
 export function requestBytes(input: ConverseStreamCommandInput): number { return jsonBytes(input); }
 
 /** Fails closed before SDK dispatch rather than pruning signed blocks or evidence to fit. */
-export function boundRequest(input: ConverseStreamCommandInput): void {
-  if (requestBytes(input) > MAX_CONTEXT_BYTES) throw new ChatError('CONTEXT_LIMIT', 'The bounded model request requires safe compaction.', 413, false);
+export function boundRequest(input: ConverseStreamCommandInput, diagnostics?: ParserDiagnostics): void {
+  if (requestBytes(input) > MAX_CONTEXT_BYTES) throw diagnosticFailure(new ChatError('CONTEXT_LIMIT', 'The bounded model request requires safe compaction.', 413, false), 'REQUEST_SIZE_LIMIT', diagnostics);
 }
 
 /** Returns the existing persisted output ceiling for the known read-only tool family. */
@@ -81,9 +82,10 @@ export function toolOutputBytes(name: string): number {
 }
 
 /** Measures the actual encoded content payloads; per-record group/envelope metadata has its separate item bound. */
-export function groupBytes(blocks: readonly AssistantBlock[]): number {
-  return jsonBytes(blocks.map(block => block.type === 'text'
+export function groupBytes(blocks: readonly AssistantBlock[], diagnostics?: ParserDiagnostics): number {
+  try { return jsonBytes(blocks.map(block => block.type === 'text'
     ? { content_block_index: block.index, entity_type: 'ASSISTANT_TEXT', text: block.text }
     : block.type === 'thinking' ? { content_block_index: block.index, entity_type: 'THINKING', thinking: block.thinking }
       : { content_block_index: block.index, entity_type: 'TOOL_CALL', tool_use_id: block.id, tool_name: block.name, model_input: encodeModelInput(block.input) }));
+  } catch (error) { throw diagnosticFailure(error, 'ENCODED_INPUT_REJECTED', diagnostics); }
 }
