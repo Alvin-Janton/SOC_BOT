@@ -82,7 +82,7 @@ After compatible-reader rollout, use fresh conversations for the four existing e
 
 ### Schemas and provider adaptation
 
-The profile remains `us.anthropic.claude-sonnet-4-6` in `us-east-1`. Investigation/fresh finalization use adaptive thinking, medium effort, `maxTokens:8192` and no temperature/top-P/top-K. Thinking and public output share those tokens; public text remains 32 KiB and completion is not guaranteed. Summary requests remain thinking-disabled, temperature zero, 1,024 tokens/8 KiB. Judge configuration and IAM are unchanged. See [adaptive thinking](Adaptive-Thinking.md) for the storage/replay/rollout contract.
+The selected agent profile is `us.anthropic.claude-opus-4-6-v1` in `us-east-1` for a controlled comparison. Investigation/fresh retry/finalization retain adaptive thinking, medium effort, `maxTokens:8192` and no temperature/top-P/top-K. Thinking and public output share those tokens; public text remains 32 KiB and completion is not guaranteed. Internal summaries use the same Opus selection while retaining thinking-disabled, temperature zero, 1,024 tokens/8 KiB settings. The separate evaluator judge remains Sonnet 4.6 with unchanged configuration and IAM. The agent's boundary/identity resources follow the shared Opus selection; prompt policy, tools, model request construction and runtime controls remain unchanged. See [adaptive thinking and coordinated rollout](Adaptive-Thinking.md#opus-46-model-comparison).
 
 [contracts.ts](../../../../infra/lambdas/ai/chat-orchestrator/contracts.ts) derives all six Bedrock JSON Schemas from strict Zod definitions:
 
