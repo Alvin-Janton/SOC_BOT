@@ -3,12 +3,13 @@ import { PlaybookDocument, PlaybookSection, playbookDocumentSchema, playbookIdSc
 
 export const MAX_REQUEST_BYTES = 4_096;
 export const MAX_RESPONSE_BYTES = 32_768;
+export const MAX_SECTIONS_PER_REQUEST = 3;
 
 export const describeDocumentsRequestSchema = z.strictObject({ operation: z.literal('describe_documents') });
 export const describeDocumentRequestSchema = z.strictObject({ operation: z.literal('describe_document'), document_id: playbookIdSchema });
 export const retrieveSectionsRequestSchema = z.strictObject({
   operation: z.literal('retrieve_sections'), document_id: playbookIdSchema,
-  section_ids: z.array(playbookIdSchema).min(1).max(3)
+  section_ids: z.array(playbookIdSchema).min(1).max(MAX_SECTIONS_PER_REQUEST)
     .refine(ids => new Set(ids).size === ids.length, 'Section IDs must be distinct.'),
 });
 export const requestSchema = z.discriminatedUnion('operation', [
@@ -69,7 +70,7 @@ export const responseSchema = z.union([
     document: documentSchema, sections: z.array(sectionSchema).min(1) }),
   z.strictObject({ ok: z.literal(true), operation: z.literal('retrieve_sections'), correlation_id: correlationSchema,
     document: documentSchema, sections: z.array(z.strictObject({ section_id: playbookIdSchema,
-      title: playbookSectionSchema.shape.title, markdown: z.string().min(1).refine(value => /\S/u.test(value)) })).min(1).max(3) }),
+      title: playbookSectionSchema.shape.title, markdown: z.string().min(1).refine(value => /\S/u.test(value)) })).min(1).max(MAX_SECTIONS_PER_REQUEST) }),
   z.strictObject({ ok: z.literal(false), operation: z.enum(['describe_documents', 'describe_document', 'retrieve_sections']).nullable(),
     correlation_id: correlationSchema, error: z.strictObject({ code: z.enum(errorCodes), message: z.string().min(1).max(512),
       retryable: z.boolean() }) }).superRefine((response, context) => {

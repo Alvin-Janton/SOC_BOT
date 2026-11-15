@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { Tool } from '@aws-sdk/client-bedrock-runtime';
-import { compileQuery, ContractError, groupingFields, QueryToolRequest } from '../../../lib/stacks/ai/query-contract';
+import { compileQuery, ContractError, DEFAULT_RESULT_LIMIT, groupingFields, MAX_FILTERS, MAX_GROUPING_FIELDS, MAX_IN_VALUES,
+  MAX_METRICS, MAX_RESULT_LIMIT, MAX_SELECTED_FIELDS, QueryToolRequest } from '../../../lib/stacks/ai/query-contract';
 import { TABLE_COLUMNS, TableName } from '../../../lib/shared/catalog-schema';
 import { ToolValidation, toolValidation } from '../../../lib/shared/tool-validation';
-import { RagError, RagOperation, RagRequest, describeDocumentRequestSchema, describeDocumentsRequestSchema,
+import { MAX_SECTIONS_PER_REQUEST, RagError, RagOperation, RagRequest, describeDocumentRequestSchema, describeDocumentsRequestSchema,
   parseRequest as parseRagRequest, retrieveSectionsRequestSchema } from '../rag-tool/contracts';
 import { ChatError, Configuration } from './config';
 import { JsonObject } from './store';
@@ -12,33 +13,65 @@ import { ChatRequest, chatRequestSchema } from '../../../lib/shared/chat-request
 export { chatRequestSchema };
 export type { ChatRequest };
 
-const table = z.enum(['application_events', 'waf_events', 'vpc_flow_events', 'cloudtrail_events']);
+const table = z.enum(['application_events', 'waf_events', 'vpc_flow_events', 'cloudtrail_events'])
+  .describe('Exact approved source table. Column types come from describe_table; aggregate grouping has a narrower allowlist in tableFacts.operation_semantics.aggregate_group_by.');
 const field = z.string().min(1).max(128);
 const scalar = z.union([z.string().max(1_024), z.number().int()]);
 
 const filter = z.strictObject({
-  field, operator: z.enum(['eq', 'ne', 'in', 'is_null', 'is_not_null', 'gt', 'gte', 'lt', 'lte', 'contains', 'starts_with']),
-  value: z.union([scalar, z.array(scalar).min(1).max(10)]).optional(),
+  field: field.describe('Exact approved column in the selected table; its type determines supported operators and values.'),
+  operator: z.enum(['eq', 'ne', 'in', 'is_null', 'is_not_null', 'gt', 'gte', 'lt', 'lte', 'contains', 'starts_with'])
+    .describe('eq/ne and ordered comparisons exclude SQL NULL; use is_null/is_not_null explicitly. Ordered comparisons need integer/timestamp columns. contains/starts_with are literal string operations, not regex or JSON-path parsing.'),
+  value: z.union([scalar, z.array(scalar).min(1).max(MAX_IN_VALUES)]).optional()
+    .describe(`Use a scalar for comparisons/string operations, or a nonempty array of at most ${MAX_IN_VALUES} values for in. Omit value for is_null/is_not_null. Values must match the column type; backend type checks remain authoritative.`),
 });
 
 const queryFields = {
-  table, start_time: z.string().min(1).max(32), end_time: z.string().min(1).max(32),
-  filters: z.array(filter).max(8).optional(), limit: z.number().int().min(1).max(100).optional(),
+  table,
+  start_time: z.string().min(1).max(32)
+    .describe('Inclusive UTC ISO timestamp ending in Z, with supported fractional precision. Preserve the requested subwindow; the maximum window is tableFacts.utc_query_window_days.'),
+  end_time: z.string().min(1).max(32)
+    .describe('Exclusive UTC ISO timestamp ending in Z. To include a requested final second, place this bound after that second. Preserve requested precision/scope; do not widen to an entire day.'),
+  filters: z.array(filter).max(MAX_FILTERS).optional()
+    .describe(`At most ${MAX_FILTERS} predicates, all combined with AND; no OR expressions. Omitted or empty filters add no predicates. Do not silently drop excess filters or IN values.`),
+  limit: z.number().int().min(1).max(MAX_RESULT_LIMIT).optional()
+    .describe(`Positive row allowance: default ${DEFAULT_RESULT_LIMIT}, maximum ${MAX_RESULT_LIMIT}. For aggregates this limits groups, not matching events. Byte bounds can return fewer rows. truncated=true means query-result rows were omitted; false establishes completeness only for this query's scope/projection.`),
 };
 
+const documentIdDescription = 'Actual indexed document_id returned by describe_documents; do not invent IDs or supply a URL/S3 key. Metadata lookup and section text retrieval are separate operations.';
 const ragToolSchemas = {
-  describe_documents: describeDocumentsRequestSchema.omit({ operation: true }),
-  describe_document: describeDocumentRequestSchema.omit({ operation: true }),
-  retrieve_sections: retrieveSectionsRequestSchema.omit({ operation: true }),
+  describe_documents: describeDocumentsRequestSchema.omit({ operation: true })
+    .describe('Empty object only: discovery metadata, without time range, search text or section contents.'),
+  describe_document: describeDocumentRequestSchema.omit({ operation: true }).extend({
+    document_id: describeDocumentRequestSchema.shape.document_id.describe(documentIdDescription),
+  }),
+  retrieve_sections: retrieveSectionsRequestSchema.omit({ operation: true }).extend({
+    document_id: retrieveSectionsRequestSchema.shape.document_id.describe(documentIdDescription),
+    section_ids: retrieveSectionsRequestSchema.shape.section_ids
+      .describe(`Nonempty selection of at most ${MAX_SECTIONS_PER_REQUEST} distinct section IDs returned by describe_document for this same document. Complete text/context is returned in requested order; narrow oversized selections without claiming omitted guidance was retrieved.`),
+  }),
 };
 
 export const toolSchemas = {
   describe_table: z.strictObject({ table }),
-  query_events: z.strictObject({ ...queryFields, fields: z.array(field).min(1).max(20).optional(),
-    sort: z.strictObject({ field, direction: z.enum(['asc', 'desc']) }).optional() }),
-  aggregate_events: z.strictObject({ ...queryFields, group_by: z.array(field).max(3).optional(),
-    metrics: z.array(z.union([z.strictObject({ function: z.literal('count') }),
-      z.strictObject({ function: z.enum(['sum', 'avg', 'min', 'max']), field })])).min(1).max(5).optional() }),
+  query_events: z.strictObject({ ...queryFields,
+    fields: z.array(field.describe('Exact selectable column for this source table, including relevant payload/match fields when needed.')).min(1).max(MAX_SELECTED_FIELDS).optional()
+      .describe(`Nonempty projection of at most ${MAX_SELECTED_FIELDS} requested fields. Required provenance is automatically retained, so more columns may return. Omission uses compact evidence metadata, not every source payload field.`),
+    sort: z.strictObject({ field: field.describe('Exact approved sort column in the selected table.'),
+      direction: z.enum(['asc', 'desc']).describe('Ascending or descending order; provenance tie-breakers are fixed by the backend.') }).optional()
+      .describe('Event queries only. Omission sorts by event_time ascending; this is not an aggregate sort control.'),
+  }),
+  aggregate_events: z.strictObject({ ...queryFields,
+    group_by: z.array(field.describe('Exact allowed grouping dimension from tableFacts.operation_semantics.aggregate_group_by for this table, not any selectable column.')).max(MAX_GROUPING_FIELDS).optional()
+      .describe(`At most ${MAX_GROUPING_FIELDS} distinct approved dimensions relevant to the uncertainty. Omitted/empty grouping produces an overall aggregate; do not supply every available field.`),
+    metrics: z.array(z.union([
+      z.strictObject({ function: z.literal('count').describe('Count matching events; takes no field and returns count_rows.') }),
+      z.strictObject({ function: z.enum(['sum', 'avg', 'min', 'max'])
+        .describe('Aggregate an approved integer column; output name is function_field. avg returns decimal, sum bigint, and min/max preserve the integer column type.'),
+      field: field.describe('Required approved int/bigint column for sum/avg/min/max; not a string or timestamp column.') }),
+    ])).min(1).max(MAX_METRICS).optional()
+      .describe(`Nonempty list of at most ${MAX_METRICS} metrics when supplied; omission defaults to count. Generated output names must be unique. Groups are ordered by the first metric descending with fixed group tie-breakers.`),
+  }),
   ...ragToolSchemas,
 };
 
@@ -69,12 +102,12 @@ export function isRagToolName(name: string): name is RagOperation { return Objec
 export function isRagRequest(request: ToolRequest): request is RagRequest { return isRagToolName(request.operation); }
 
 const toolDescriptions: Record<ToolName, string> = {
-  describe_table: 'Describe the approved table columns without scanning events.',
-  query_events: 'Return bounded event evidence from one approved table within a UTC time range.',
-  aggregate_events: 'Aggregate approved numeric fields and groups within a bounded UTC time range.',
-  describe_documents: 'Discover all indexed playbooks and their context/section counts; no time range or search input.',
-  describe_document: 'Inspect one indexed playbook and its section IDs, summaries, source and version before retrieval.',
-  retrieve_sections: 'Retrieve one to three distinct indexed sections from one playbook, preserving full guidance, context and source metadata.',
+  describe_table: 'Get approved column/type metadata without scanning events. Use when the table schema is unknown; this returns no event evidence and does not enumerate every operation-specific operator/grouping allowance. Consult tableFacts.operation_semantics.aggregate_group_by for grouping. Example input: {"table":"waf_events"}',
+  query_events: `Inspect individual events and provenance in a bounded UTC range; explicitly project relevant payload/match columns instead of assuming defaults include them. Up to ${MAX_FILTERS} AND filters, ${MAX_IN_VALUES} IN values and ${MAX_SELECTED_FIELDS} selected fields; default ${DEFAULT_RESULT_LIMIT}/maximum ${MAX_RESULT_LIMIT} result rows, also byte-bounded. No arbitrary SQL, joins, OR, cursor pagination or automatic access to unreturned rows. Example input: ${JSON.stringify({ table: 'waf_events', start_time: '2028-04-10T00:00:00Z', end_time: '2028-04-11T00:00:00Z', fields: ['action', 'path', 'labels'], filters: [{ field: 'action', operator: 'eq', value: 'ALLOW' }], limit: DEFAULT_RESULT_LIMIT })}`,
+  aggregate_events: `Get compact scoped counts/distributions or supported numeric metrics, with at most ${MAX_GROUPING_FIELDS} useful grouping dimensions and ${MAX_METRICS} metrics; default ${DEFAULT_RESULT_LIMIT}/maximum ${MAX_RESULT_LIMIT} result groups. Rows are groups, not individual events; aggregates do not inspect every payload or establish authorization/impact. Example input: ${JSON.stringify({ table: 'waf_events', start_time: '2028-04-10T00:00:00Z', end_time: '2028-04-11T00:00:00Z', group_by: ['action', 'method'], metrics: [{ function: 'count' }], filters: [{ field: 'action', operator: 'in', value: ['ALLOW', 'BLOCK'] }, { field: 'actor', operator: 'is_null' }] })}`,
+  describe_documents: 'Discover indexed playbook IDs, titles, versions, context and section counts when choosing guidance. Takes only an empty object, with no time range/search input; discovery does not retrieve procedural text. Example input: {}',
+  describe_document: 'Inspect one discovered playbook for metadata, source/version and actual section IDs/summaries before selecting sections. This does not retrieve section text. The following ID is illustrative, not guaranteed to exist; replace it with a returned discovery ID. Example input: {"document_id":"example-playbook"}',
+  retrieve_sections: `Read complete text for a nonempty selection of at most ${MAX_SECTIONS_PER_REQUEST} distinct sections from the same document, retaining context/source metadata. Narrow oversized selections without implying omitted safety guidance was retrieved; no arbitrary S3 keys or free-text search. These IDs illustrate shape only: replace them with IDs from discovery/metadata. Example input: {"document_id":"example-playbook","section_ids":["example-triage"]}`,
 };
 
 /**

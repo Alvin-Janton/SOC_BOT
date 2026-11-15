@@ -3,6 +3,11 @@ import type { ValidationSeed } from '../../shared/tool-validation';
 
 export const DEFAULT_RESULT_LIMIT = 25;
 export const MAX_RESULT_LIMIT = 100;
+export const MAX_FILTERS = 8;
+export const MAX_IN_VALUES = 10;
+export const MAX_SELECTED_FIELDS = 20;
+export const MAX_GROUPING_FIELDS = 3;
+export const MAX_METRICS = 5;
 export const MAX_RESPONSE_BYTES = 65_536;
 export const QUERY_DEADLINE_SECONDS = 180;
 export const DEFAULT_QUERY_WINDOW_DAYS = 30;
@@ -156,7 +161,7 @@ function literal(value: unknown, type: ResultType, path: readonly PropertyKey[] 
 function filtersSql(table: TableName, value: unknown): string[] {
   if (value === undefined) return [];
 
-  if (!Array.isArray(value) || value.length > 8) throw new ContractError('At most eight filters are allowed.', { path: ['filters'], code: 'FILTER_LIMIT' });
+  if (!Array.isArray(value) || value.length > MAX_FILTERS) throw new ContractError('At most eight filters are allowed.', { path: ['filters'], code: 'FILTER_LIMIT' });
 
   return value.map((item, index) => {
     const filter = object(item);
@@ -171,7 +176,7 @@ function filtersSql(table: TableName, value: unknown): string[] {
     }
 
     if (operator === 'in') {
-      if (!Array.isArray(filter.value) || !filter.value.length || filter.value.length > 10) throw new ContractError('IN requires one to ten values.', { path: ['filters', index, 'value'], code: 'IN_VALUES' });
+      if (!Array.isArray(filter.value) || !filter.value.length || filter.value.length > MAX_IN_VALUES) throw new ContractError('IN requires one to ten values.', { path: ['filters', index, 'value'], code: 'IN_VALUES' });
       return `${name} IN (${filter.value.map((entry, valueIndex) => literal(entry, field.type, ['filters', index, 'value', valueIndex])).join(', ')})`;
     }
 
@@ -328,7 +333,7 @@ export function compileQuery(value: unknown, database: string, maxDays: number):
   if (operation === 'query_events') {
     const fields = request.fields ?? DEFAULT_FIELDS;
 
-    if (!Array.isArray(fields) || !fields.length || fields.length > 20) throw new ContractError('Projection requires one to twenty fields.', { path: ['fields'], code: 'PROJECTION' });
+    if (!Array.isArray(fields) || !fields.length || fields.length > MAX_SELECTED_FIELDS) throw new ContractError('Projection requires one to twenty fields.', { path: ['fields'], code: 'PROJECTION' });
 
     columns = [...new Set([...fields.map((field, index) => column(table, field, ['fields', index]).name), ...PROVENANCE_FIELDS])].map((field) => column(table, field));
     select = columns.map((field) => `"${field.name}"`).join(', ');
@@ -342,13 +347,13 @@ export function compileQuery(value: unknown, database: string, maxDays: number):
   else {
     const groups = request.group_by ?? [];
 
-    if (!Array.isArray(groups) || groups.length > 3 || groups.some((field) => typeof field !== 'string' || !GROUP_FIELDS[table].includes(field)) || new Set(groups).size !== groups.length) {
+    if (!Array.isArray(groups) || groups.length > MAX_GROUPING_FIELDS || groups.some((field) => typeof field !== 'string' || !GROUP_FIELDS[table].includes(field)) || new Set(groups).size !== groups.length) {
       throw new ContractError('Select at most three distinct approved grouping fields.', { path: ['group_by'], code: 'GROUP_BY' });
     }
 
     const metrics = request.metrics ?? [{ function: 'count' }];
 
-    if (!Array.isArray(metrics) || !metrics.length || metrics.length > 5) throw new ContractError('Select one to five metrics.', { path: ['metrics'], code: 'METRICS' });
+    if (!Array.isArray(metrics) || !metrics.length || metrics.length > MAX_METRICS) throw new ContractError('Select one to five metrics.', { path: ['metrics'], code: 'METRICS' });
 
     columns = groups.map((field) => column(table, field));
     const expressions = columns.map((field) => `"${field.name}"`);
