@@ -45,8 +45,9 @@ Signup, email confirmation and public password recovery now opt into the same
 compact presentation, with route-specific headings and visible password-policy
 help before the confirmation field. Resend/reset-code buttons remain explicit
 secondary actions. Generic registration/recovery responses and all password and
-session behavior are unchanged. Account settings/change-password, Google linking,
-callback-result pages, session gates and chat retain their existing appearance.
+session behavior are unchanged. Callback-result pages, session gates and chat
+retain their existing appearance. Account settings use the separate settings
+presentation described below; login and public account forms stay unchanged.
 Small/short screens, zoom and expanding notices/errors use natural page scrolling;
 taller signup/reset forms are not clipped to one viewport. The local preview
 notice stays visible. Presentation changes do not connect local authentication or
@@ -61,6 +62,39 @@ verify signup, confirmation and explicit resend; forgot/reset-password; generic
 responses that do not confirm account existence/delivery; invalid-code display;
 and session invalidation after a confirmed reset. These are operator-only live
 checks, not results of the disconnected visual review.
+
+## Account settings presentation
+
+Account settings uses a settings-only, top-aligned 784-pixel content area with
+Back to investigation near the top and three semantic sections: Change password,
+Google sign-in and Session. Desktop explanations and 400-pixel controls align in
+two tracks; smaller screens stack them and scroll naturally. Login/public account,
+callback and chat presentations are unchanged.
+
+The linking field explicitly requests the current SOC_BOT password, not the
+Google password. Required proof, the departure/draft warning, reauthentication
+consequence, errors and recovery actions remain outside the passive native
+“About Google linking” disclosure. That disclosure only explains the authorization
+flow and limits; opening it performs no lookup, mutation, proof clearing or
+navigation lock. No linked-provider status is inferred or displayed. Session
+expiry uses only the existing public session value when present, with unchanged
+formatting; preview supplies no identity, expiry or active mutation form.
+
+Handlers, validation, password clearing, busy/unknown/linkStopped guards and
+partial/unknown outcomes are unchanged. Sign out still ends only this browser
+session without cancelling accepted investigations. Its existing guard remains
+separate from the mutation guard so unknown-password recovery can still direct
+the user to explicit sign-out. Logout failures continue through the single shared
+account-error region, retaining the local view when the outcome is unconfirmed.
+
+Use `/?preview=account` on the disconnected Vite server for visual review only;
+password and sign-out controls remain disabled. Enabled proof entry, actual
+browser zoom/autofill and live error/outcome states require separate operator
+verification. After reviewed deployment, use designated accounts through
+CloudFront to check Back to investigation, valid/invalid current-password change,
+reauthentication and session revocation after confirmed success, Google linking
+and departure/return, and sign-out followed by `/auth/me`. No new route, API or
+publishing workflow is required; no live checks are performed by this UI slice.
 
 ## Application boundaries
 
