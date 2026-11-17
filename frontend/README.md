@@ -34,6 +34,25 @@ configuration. Google departure is also blocked locally; the controls and
 build calls relative APIs and must be served through its configured CloudFront
 origin for authenticated operation.
 
+## Login presentation
+
+Login uses an opt-in compact presentation: a solid charcoal background, a centered
+400-pixel form (with narrow-screen gutters), the short “Sign in to SOC_BOT” heading
+and 48-pixel Google/email/Sign in controls. Supporting text stays sans-serif; the
+modest serif heading retains the existing identity. The official, locally bundled
+dark Google artwork keeps its original 40-pixel display size; see [asset provenance](src/assets/README.md).
+Shared signup, confirmation, recovery, Account and callback-result layouts retain
+their existing appearance. Small/short screens, zoom and expanding notices/errors
+use natural page scrolling. The local preview notice stays visible; presentation
+changes do not connect local authentication or change production cookies, OAuth,
+validation, navigation locks or API contracts.
+
+After operator deployment, check through CloudFront: password login, Google
+departure/return, session restoration, invalid-credential display, account/recovery
+navigation, keyboard/mobile usability, actual browser zoom and password-manager
+autofill. Those live checks remain separate from disconnected visual inspection;
+no route or publication change is required.
+
 ## Application boundaries
 
 - `src/api/` validates bounded public auth responses and incrementally reads UTF-8

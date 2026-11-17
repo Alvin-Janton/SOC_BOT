@@ -198,3 +198,35 @@ button svg { flex-shrink: 0; }
 .stop-button { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid #9b8770; border-radius: .55rem; padding: .5rem .65rem; color: #f4e2cc; background: #3a3028; font-size: .8rem; white-space: nowrap; }
 .stop-button:disabled { opacity: .55; cursor: default; }
 .stop-button:focus-visible { outline: 2px solid #e1c39d; outline-offset: 3px; }
+
+/* Login opts in; shared account, recovery and callback presentations retain their existing dimensions. */
+body:has(.login-page--compact) { min-width: 0; }
+.login-page--compact { background: #191c1b; font-family: var(--font-sans); }
+.login-page--compact .login-header { padding: 1.25rem 2rem; }
+.login-page--compact .login-main { width: min(100% - 2.5rem, 25rem); min-width: 0; padding: 1.5rem 0 1.75rem; }
+.login-page--compact .login-intro { margin-bottom: 1.5rem; }
+.login-page--compact .login-intro h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .75rem; overflow-wrap: anywhere; }
+.login-page--compact .login-intro > p { font-family: var(--font-sans); font-size: .9375rem; line-height: 1.6; }
+.login-page--compact .notice, .login-page--compact .form-error { font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
+.login-page--compact .notice { margin-bottom: 1.25rem; padding: .625rem .875rem; }
+.login-page--compact .login-form { gap: 1rem; }
+.login-page--compact .field { gap: .5rem; }
+.login-page--compact .field label { font-size: .875rem; }
+.login-page--compact .field input { height: 3rem; min-height: 3rem; padding: .625rem .875rem; font-family: var(--font-sans); font-size: .9375rem; line-height: 1.5; }
+.login-page--compact .field input::placeholder { color: #969f98; }
+.login-page--compact .password-field input { padding-right: 3.5rem; }
+.login-page--compact .password-toggle { width: 2.75rem; height: 2.75rem; right: .125rem; top: 50%; transform: translateY(-50%); }
+.login-page--compact .primary-button { min-height: 3rem; margin-top: 0; font-family: var(--font-sans); font-size: .9375rem; }
+.login-page--compact .google-button { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem; gap: 0; min-height: 3rem; padding: .1875rem .75rem; font-family: var(--font-sans); line-height: 1.4; }
+.login-page--compact .google-button span { padding-right: 0; }
+.login-page--compact .auth-separator { font-size: .875rem; margin: 1rem 0; }
+.login-page--compact .auth-links { margin-top: .5rem; gap: .25rem 1rem; }
+.login-page--compact .text-button { min-height: 2.75rem; padding: .5rem 0; font-family: var(--font-sans); font-size: .875rem; line-height: 1.5; }
+.login-page--compact .login-security { margin-top: 1rem; font-size: .8125rem; line-height: 1.5; }
+.login-page--compact .login-security svg { flex-shrink: 0; }
+.login-page--compact .login-footer { padding: 1rem 2rem; gap: .5rem 1rem; flex-wrap: wrap; font-size: .75rem; }
+@media (max-width: 640px) {
+  .login-page--compact .login-header { padding: 1.25rem; }
+  .login-page--compact .login-main { padding-top: 1rem; }
+  .login-page--compact .login-footer { padding: 1rem 1.25rem; }
+}
