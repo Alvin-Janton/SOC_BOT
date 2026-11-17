@@ -12,10 +12,10 @@ export type OpenAccount = (path: PagePath, email?: string, notice?: Notice) => v
 const REGISTRATION_NOTICE = 'If account confirmation is needed, check your email for a confirmation code. This response does not confirm account creation or delivery.';
 const RECOVERY_NOTICE = 'If this account is eligible for password recovery, check your email for a reset code. This response does not confirm eligibility or delivery.';
 const COPY: Record<PublicAccountPath, { title: string; description: string; submit: string }> = {
-  '/signup': { title: 'Create your account.', description: 'Use email and a password to request access to your investigation workspace.', submit: 'Create account' },
-  '/confirm-signup': { title: 'Confirm your email.', description: 'Enter the email and confirmation code. If already confirmed, return to sign in.', submit: 'Confirm account' },
-  '/forgot-password': { title: 'Recover your access.', description: 'Request a reset code for an eligible email/password account.', submit: 'Request reset code' },
-  '/reset-password': { title: 'Set a new password.', description: 'Enter your email and reset code, then choose a new password.', submit: 'Update password' },
+  '/signup': { title: 'Create account', description: 'Use your email and a password to get started.', submit: 'Create account' },
+  '/confirm-signup': { title: 'Confirm your email', description: 'Enter your email address and confirmation code.', submit: 'Confirm account' },
+  '/forgot-password': { title: 'Reset your password', description: 'Request a reset code for your email/password account.', submit: 'Request reset code' },
+  '/reset-password': { title: 'Set a new password', description: 'Enter your email and reset code, then choose a new password.', submit: 'Update password' },
 };
 
 interface Props {
@@ -89,7 +89,7 @@ export function PublicAccountPage({ path, initialEmail, notice, open, lock, pass
       reason => { clearSecrets(); setError(reason.message); });
   }
 
-  return <AuthLayout title={COPY[path].title} description={COPY[path].description} notice={showHandoff ? notice : undefined}
+  return <AuthLayout presentation="public-account" title={COPY[path].title} description={COPY[path].description} notice={showHandoff ? notice : undefined}
     footer={<><button className="text-button" disabled={action.busy} onClick={() => open('/login', normalizedEmail)}>Back to sign in</button>
       {path !== '/signup' && <button className="text-button" disabled={action.busy} onClick={() => open('/signup', normalizedEmail)}>Create account</button>}</>}>
     {result && <div className={`notice ${result.warning ? 'notice-warning' : ''}`} role={result.warning ? 'alert' : 'status'}>{result.message}</div>}
@@ -97,8 +97,8 @@ export function PublicAccountPage({ path, initialEmail, notice, open, lock, pass
       <EmailField value={email} change={editEmail} busy={busy} errorId="account-error" />
       {withCode && <CodeField value={code} change={setCode} busy={busy} label={path === '/reset-password' ? 'Reset code' : 'Confirmation code'} />}
       {withPassword && <><PasswordField id="new-password" label="New password" value={password} change={setPassword} busy={busy} errorId="account-error password-policy" />
-        <PasswordField id="confirm-password" label="Confirm new password" value={confirmation} change={setConfirmation} busy={busy} errorId="account-error password-policy" />
-        <p id="password-policy" className="fine">15–256 characters, without whitespace. No required mix of uppercase, numbers or symbols.</p></>}
+        <p id="password-policy" className="fine">15–256 characters, without whitespace. No required mix of uppercase, numbers or symbols.</p>
+        <PasswordField id="confirm-password" label="Confirm new password" value={confirmation} change={setConfirmation} busy={busy} errorId="account-error password-policy" /></>}
       <p id="account-error" className="form-error" role={error ? 'alert' : undefined}>{error}</p>
       <AuthSubmit busy={action.busy} disabled={stopped}>{COPY[path].submit}</AuthSubmit>
       {withCode && <button type="button" className="secondary-button" disabled={busy} onClick={requestCode}>
@@ -109,6 +109,7 @@ export function PublicAccountPage({ path, initialEmail, notice, open, lock, pass
         {authenticated ? 'Review account / sign out' : 'Verify sign-in access'}</button>
       <button className="text-button" onClick={() => open('/forgot-password', normalizedEmail, { message: PASSWORD_UNKNOWN, warning: true })}>Request fresh recovery proof</button>
     </nav>}
-    {path === '/signup' && <p className="fine">Submitting requests registration only. You will confirm separately, then sign in.</p>}
+    {path === '/signup' && <p className="fine">Confirm your email before signing in.</p>}
+    {path === '/confirm-signup' && <p className="fine">Already confirmed? Return to sign in.</p>}
   </AuthLayout>;
 }

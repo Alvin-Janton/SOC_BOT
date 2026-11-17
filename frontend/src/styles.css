@@ -199,7 +199,7 @@ button svg { flex-shrink: 0; }
 .stop-button:disabled { opacity: .55; cursor: default; }
 .stop-button:focus-visible { outline: 2px solid #e1c39d; outline-offset: 3px; }
 
-/* Login opts in; shared account, recovery and callback presentations retain their existing dimensions. */
+/* Login and public account forms opt in; protected account and callback pages keep their existing dimensions. */
 body:has(.login-page--compact) { min-width: 0; }
 .login-page--compact { background: #191c1b; font-family: var(--font-sans); }
 .login-page--compact .login-header { padding: 1.25rem 2rem; }
@@ -230,3 +230,8 @@ body:has(.login-page--compact) { min-width: 0; }
   .login-page--compact .login-main { padding-top: 1rem; }
   .login-page--compact .login-footer { padding: 1rem 1.25rem; }
 }
+
+.public-account-page .fine { font-size: .875rem; line-height: 1.6; }
+.public-account-page #password-policy { margin: -.5rem 0 0; }
+.public-account-page .login-main > .fine { margin: 1rem 0 0; }
+.public-account-page .login-form > .secondary-button { min-height: 3rem; justify-content: center; font-size: .875rem; line-height: 1.5; white-space: normal; }

@@ -41,17 +41,26 @@ Login uses an opt-in compact presentation: a solid charcoal background, a center
 and 48-pixel Google/email/Sign in controls. Supporting text stays sans-serif; the
 modest serif heading retains the existing identity. The official, locally bundled
 dark Google artwork keeps its original 40-pixel display size; see [asset provenance](src/assets/README.md).
-Shared signup, confirmation, recovery, Account and callback-result layouts retain
-their existing appearance. Small/short screens, zoom and expanding notices/errors
-use natural page scrolling. The local preview notice stays visible; presentation
-changes do not connect local authentication or change production cookies, OAuth,
-validation, navigation locks or API contracts.
+Signup, email confirmation and public password recovery now opt into the same
+compact presentation, with route-specific headings and visible password-policy
+help before the confirmation field. Resend/reset-code buttons remain explicit
+secondary actions. Generic registration/recovery responses and all password and
+session behavior are unchanged. Account settings/change-password, Google linking,
+callback-result pages, session gates and chat retain their existing appearance.
+Small/short screens, zoom and expanding notices/errors use natural page scrolling;
+taller signup/reset forms are not clipped to one viewport. The local preview
+notice stays visible. Presentation changes do not connect local authentication or
+change production cookies, OAuth, validation, navigation locks or API contracts.
 
 After operator deployment, check through CloudFront: password login, Google
 departure/return, session restoration, invalid-credential display, account/recovery
 navigation, keyboard/mobile usability, actual browser zoom and password-manager
 autofill. Those live checks remain separate from disconnected visual inspection;
-no route or publication change is required.
+no route or publication change is required. For the public account pages, also
+verify signup, confirmation and explicit resend; forgot/reset-password; generic
+responses that do not confirm account existence/delivery; invalid-code display;
+and session invalidation after a confirmed reset. These are operator-only live
+checks, not results of the disconnected visual review.
 
 ## Application boundaries
 
