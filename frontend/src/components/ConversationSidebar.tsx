@@ -26,8 +26,9 @@ export function ConversationSidebar(props: Props) {
   }, []);
   const working = props.phase !== 'idle';
   const content = <>
-    <div className="history-actions"><button className="secondary-button" disabled={props.busy} onClick={() => { props.newChat(); setOpen(false); }}><Plus size={15} aria-hidden="true" /> New chat</button>
+    <div className="history-actions"><button className="secondary-button sidebar-new-chat" disabled={props.busy} onClick={() => { props.newChat(); setOpen(false); }}><Plus size={15} aria-hidden="true" /> New chat</button>
       <button className="history-icon" title="Refresh conversation list" aria-label="Refresh conversation list" disabled={working || props.busy} onClick={props.refresh}><RefreshCw size={15} aria-hidden="true" /></button></div>
+    <div className="history-scroll">
     {working && <p className="history-status" role="status"><LoaderCircle size={14} className="spin" aria-hidden="true" />{props.phase === 'page' ? 'Loading more…' : props.phase === 'refresh' ? 'Refreshing…' : 'Loading conversations…'}</p>}
     {props.error && <div className="history-error" role="status"><p>{props.error}</p><button className="text-button" disabled={working || props.busy} onClick={props.refresh}>Retry list</button></div>}
     {props.loaded && !props.rows.length && !props.error && <p className="history-status">No conversations in the loaded list.</p>}
@@ -40,6 +41,7 @@ export function ConversationSidebar(props: Props) {
     {props.selected && !props.rows.some(row => row.conversationId === props.selected) && <p className="history-status">The selected conversation is not in the loaded pages. It remains selected.</p>}
     {props.pageError && <p className="history-error" role="status">{props.pageError}</p>}
     {props.nextCursor && <button className="secondary-button history-more" disabled={working || props.busy} onClick={props.more}>{props.pageError ? 'Retry loading more' : 'Load more'}</button>}
+    </div>
   </>;
   return <>
     <button ref={trigger} className="history-toggle" aria-label="Open conversations" title="Open conversations" aria-haspopup="dialog" aria-expanded={open} disabled={props.busy} onClick={() => setOpen(true)}><History size={18} aria-hidden="true" /><span>Conversations</span></button>

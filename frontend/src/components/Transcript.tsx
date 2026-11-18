@@ -2,7 +2,7 @@ import { LoaderCircle, ShieldCheck } from 'lucide-react';
 import { HistoryMessage, TurnStatus } from '../api/messages';
 import { Turn } from '../chat/useChat';
 import { Confirmation } from '../conversations/useMessages';
-import { ActivityList } from './ActivityList';
+import { ProgressStatus, ToolIssueWarning } from './ProgressStatus';
 import { Answer } from './Answer';
 
 interface DisplayMessage {
@@ -79,10 +79,10 @@ export function Transcript({ messages, statuses, turns, confirmations, retry, re
     return <div key={message.key} data-message-id={message.key} className="transcript-message">
       {message.role === 'user' ? <article className="user-message"><span className="message-label">You{!message.saved && <span>Local request</span>}</span><p>{message.content}</p></article>
         : <article className="assistant-message"><div className="message-label"><span className="assistant-mark"><ShieldCheck size={16} aria-hidden="true" /> SOC_BOT</span><span>{label}</span></div>
-          {local && <ActivityList entries={local.activity} />}
-          {message.content ? <Answer text={message.content} /> : localRunning
-            ? <p className="thinking" role="status"><LoaderCircle className="spin" size={15} aria-hidden="true" /> Gathering the available evidence…</p>
-            : <p className="muted">No verified answer was received.</p>}
+          {localRunning && <ProgressStatus entries={local.activity} stopping={local.stopping} />}
+          {local && !localRunning && local.activity.some(entry => entry.error) && !cancelled && !(uncertain && local.error)
+            && !(noticeHere && state?.error) && <ToolIssueWarning />}
+          {message.content ? <Answer text={message.content} /> : !localRunning && <p className="muted">No verified answer was received.</p>}
           {cancelled && <div className="turn-notice">The investigation was cancelled. Any retained partial text is not a saved assistant answer. No retry is offered.</div>}
           {local?.stopping && localRunning && <div className="turn-notice" role="status">Stopping was requested; cancellation is not yet confirmed.</div>}
           {uncertain && message.content && <p className="fine">This retained local partial answer is unconfirmed; it is not a saved final response.</p>}

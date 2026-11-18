@@ -34,6 +34,68 @@ configuration. Google departure is also blocked locally; the controls and
 build calls relative APIs and must be served through its configured CloudFront
 origin for authenticated operation.
 
+## Login presentation
+
+Login uses an opt-in compact presentation: a solid charcoal background, a centered
+400-pixel form (with narrow-screen gutters), the short “Sign in to SOC_BOT” heading
+and 48-pixel Google/email/Sign in controls. Supporting text stays sans-serif; the
+modest serif heading retains the existing identity. The official, locally bundled
+dark Google artwork keeps its original 40-pixel display size; see [asset provenance](src/assets/README.md).
+Signup, email confirmation and public password recovery now opt into the same
+compact presentation, with route-specific headings and visible password-policy
+help before the confirmation field. Resend/reset-code buttons remain explicit
+secondary actions. Generic registration/recovery responses and all password and
+session behavior are unchanged. Callback-result pages, session gates and chat
+retain their existing appearance. Account settings use the separate settings
+presentation described below; login and public account forms stay unchanged.
+Small/short screens, zoom and expanding notices/errors use natural page scrolling;
+taller signup/reset forms are not clipped to one viewport. The local preview
+notice stays visible. Presentation changes do not connect local authentication or
+change production cookies, OAuth, validation, navigation locks or API contracts.
+
+After operator deployment, check through CloudFront: password login, Google
+departure/return, session restoration, invalid-credential display, account/recovery
+navigation, keyboard/mobile usability, actual browser zoom and password-manager
+autofill. Those live checks remain separate from disconnected visual inspection;
+no route or publication change is required. For the public account pages, also
+verify signup, confirmation and explicit resend; forgot/reset-password; generic
+responses that do not confirm account existence/delivery; invalid-code display;
+and session invalidation after a confirmed reset. These are operator-only live
+checks, not results of the disconnected visual review.
+
+## Account settings presentation
+
+Account settings uses a settings-only, top-aligned 784-pixel content area with
+Back to investigation near the top and three semantic sections: Change password,
+Google sign-in and Session. Desktop explanations and 400-pixel controls align in
+two tracks; smaller screens stack them and scroll naturally. Login/public account,
+callback and chat presentations are unchanged.
+
+The linking field explicitly requests the current SOC_BOT password, not the
+Google password. Required proof, the departure/draft warning, reauthentication
+consequence, errors and recovery actions remain outside the passive native
+“About Google linking” disclosure. That disclosure only explains the authorization
+flow and limits; opening it performs no lookup, mutation, proof clearing or
+navigation lock. No linked-provider status is inferred or displayed. Session
+expiry uses only the existing public session value when present, with unchanged
+formatting; preview supplies no identity, expiry or active mutation form.
+
+Handlers, validation, password clearing, busy/unknown/linkStopped guards and
+partial/unknown outcomes are unchanged. Sign out still ends only this browser
+session without cancelling accepted investigations. Its existing guard remains
+separate from the mutation guard so unknown-password recovery can still direct
+the user to explicit sign-out. Logout failures continue through the single shared
+account-error region, retaining the local view when the outcome is unconfirmed.
+
+Use `/?preview=account` on the disconnected Vite server for visual review only;
+password and sign-out controls remain disabled. Enabled proof entry, actual
+browser zoom/autofill and live error/outcome states require separate operator
+verification. After reviewed deployment, use designated accounts through
+CloudFront to check Back to investigation, valid/invalid current-password change,
+reauthentication and session revocation after confirmed success, Google linking
+and departure/return, and sign-out followed by `/auth/me`. No new route, API or
+publishing workflow is required; no live checks are performed by this UI slice.
+
 ## Application boundaries
 
 - `src/api/` validates bounded public auth responses and incrementally reads UTF-8
@@ -57,8 +119,8 @@ origin for authenticated operation.
   confirmed logout/password revocation or a different account removes it. Account
   navigation and browser back/forward route changes are blocked during an active
   turn, logout or form request. This is not a backend cancellation mechanism.
-- `src/pages/` and `src/components/` render plain user/activity/error text and
-  bounded answer Markdown. Raw HTML and images are disabled; links permit explicit
+- `src/pages/` and `src/components/` render plain user/error text, fixed coarse
+  progress labels and bounded answer Markdown. Raw HTML and images are disabled; links permit explicit
   HTTP(S) URLs without embedded credentials and open with no opener/referrer.
   Code and tables contain their own horizontal scrolling.
 
@@ -638,3 +700,104 @@ publication/invalidation, then operator validation. Valid durable-retry records
 may omit only the new cancellation field; no data cleanup/backfill is needed.
 The Vite Stop presentation is inert and disconnected, not a simulated authenticated
 attempt. Existing checks do not establish live persistence/cancellation/UI races.
+
+
+## Main chat workspace presentation
+
+Chat uses its own neutral charcoal palette, system sans-serif typography, a
+260-pixel desktop history sidebar and an 832-pixel maximum reading/composer
+column. Authentication and account surfaces retain their existing presentation.
+Normal New chat appears in the sidebar above 900 pixels and in the header at
+900 pixels or below; the native mobile drawer retains close and refresh controls
+above its independently scrolling history. Recovery-specific New chat actions
+remain available.
+
+The new-conversation heading and four compact suggestions are draft-only:
+choosing a suggestion fills and focuses the existing textarea without sending.
+The composer has one outer focus indicator, a transparent textarea, a secondary
+character count and wrapping actions. Keyboard instructions remain available to
+screen readers, and the evidence-verification guidance stays visible. Multiline
+drafts retain the existing auto-height calculation and 180-pixel cap; short
+landscape viewports apply a smaller visual maximum to keep actions reachable.
+User messages use neutral bubbles; assistant evidence, statuses, recovery
+controls, Markdown tables and code keep their existing rendering and scroll
+behavior. No transport, state, history, retry, cancellation or auth contract changes.
+
+Use `npm run frontend:dev` and open `http://127.0.0.1:5173/?preview=chat`.
+The existing disconnected DEV-only surface now offers **Empty** and
+**Transcript** presentation choices; they select inert layout only, retain the
+draft, add no route/query contract and do not authenticate or dispatch work.
+Transcript remains the initial preview. Preview send, Stop and recovery controls
+remain inert. These choices and the presentation sample are absent from the
+production UI. The local preview contains only the two existing history examples;
+long live lists, loading/error races and real pagination were not manufactured.
+
+Before accepting a deployed change, the operator should check through CloudFront:
+
+- Existing/new conversation selection, refresh and URL restoration.
+- Follow-up streaming, draft retention and automatic titles.
+- History pagination anchoring, refresh and Jump to latest.
+- Exact local/durable retries and Stop, including unconfirmed outcomes.
+- Account navigation, logout and session restoration.
+- Desktop/mobile drawer keyboard behavior, real long histories and native 200% zoom.
+
+Local visual review does not establish live streaming, ownership, authentication,
+pagination, retry or cancellation correctness. No deployment is performed here.
+
+
+## Compact progress and new-chat reveal
+
+The detailed Investigation activity dropdown is replaced by one coarse live
+status in each retained local running assistant turn, including while public
+text streams. Fixed labels describe investigation, log queries, result review,
+playbook review, context preparation and response preparation. Playbook activity
+includes metadata discovery; neither tool completion nor a thinking signal
+establishes a finding or completes the turn. No arbitrary event message, detail,
+internal counter, SQL or model reasoning is rendered by the status component.
+
+Stopping takes precedence when the existing local stopping flag is set. Known
+rejected/failed/invalid/unconfirmed/not-executed tool stages use fixed warning
+wording. The stable polite, atomic status region changes only its coarse label;
+equivalent stages do not key/remount it. Progress disappears when the local turn
+settles, independent of saved-history refresh. A restored running history record
+keeps its static disconnected-stream explanation instead of a live spinner.
+One static warning can preserve retained nonfatal tool issues after settlement;
+existing cancellation/fatal-error notices suppress redundant warning presentation.
+All terminal, truncation, unknown-outcome, saved/local and retry notices remain.
+
+Technical activity events, validation, heartbeat handling and the existing
+200-entry local retention/reset rules are unchanged. No activity is reconstructed
+from saved messages, and no new event, polling, timer-driven stage, percentage,
+ETA, action or successful outcome is inferred.
+
+The genuine blank-workspace heading and four suggestions use five finite browser
+animations: 200 ms each, delayed 0/40/80/120/160 ms, with opacity and a 5-pixel
+vertical translation only (360 ms total). Existing layout space and all handlers
+are available immediately. Focusing a suggestion reveals it immediately. One
+remembered blank workspace key is consumed on first visible entry; typing,
+refresh, resizing and returning to the same workspace do not replay the entrance.
+Leaving/hiding cancels it; selected/history/error views never start it. A genuinely
+fresh New chat workspace may reveal again without changing reset/navigation logic,
+keys, drafts, Composer or Transcript mounting. React StrictMode effect rechecks do
+not consume a second reveal or cancel the initial one.
+
+Reduced motion skips the entrance, cancels an in-progress reveal when enabled,
+and explicitly keeps content opaque/untransformed; the existing reduced-motion
+spinner rule remains. Base content is visible without animation support, with no
+animation-completion dependency or persisted preference.
+
+At `http://127.0.0.1:5173/?preview=chat`, Transcript includes clearly labelled
+**static status specimens** for visual review only, alongside the existing inert
+evidence/error/retry presentation. These do not create turns, feed events to hooks,
+authenticate, dispatch tools or simulate backend results. Empty still uses the
+actual new-chat intro. Specimens are excluded from the production UI.
+
+Later operator-only CloudFront checks: query/RAG/thinking/finalization labels,
+public streaming text, disappearance on all terminal outcomes, recoverable and
+fatal failures, completed replay, restored history, Stop/cancellation, exact and
+durable retry, return from Account settings, and ordinary login/logout. Local
+inspection cannot establish live event ordering, cancellation, persistence,
+retry or session behavior. Native 200% zoom, reduced-motion OS/browser settings,
+and the hidden-but-mounted Account return remain operator checks; the local
+pass inspected reduced-width reflow and source-reviewed these guards without
+changing system settings or manufacturing authenticated state.

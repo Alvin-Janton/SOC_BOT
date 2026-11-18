@@ -43,7 +43,7 @@ export function LoginPage({ notice, initialEmail, signIn, check, open, lock }: L
     open(path, email.trim().toLowerCase());
   }
 
-  return <AuthLayout title={<>A clearer view<br />of what happened.</>} description="Sign in to investigate your security data, connect the evidence, and decide what comes next." notice={notice}
+  return <AuthLayout presentation="login" title="Sign in to SOC_BOT" description="Investigate security logs and review supporting evidence." notice={notice}
     footer={<><button className="text-button" disabled={busy} onClick={() => leave('/signup')}>Create account</button>
       <button className="text-button" disabled={busy} onClick={() => leave('/forgot-password')}>Forgot password?</button></>}>
     <GoogleButton busy={busy} click={continueWithGoogle} />

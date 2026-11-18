@@ -28,7 +28,7 @@ export function Composer({ draft, change, send, busy, preparing = false, blocked
           }
         }} />
       <div className="composer-bottom"><span>{busy ? <><span className="processing-dot" />{preparing ? 'Checking retry' : stopPhase === 'stopping' ? 'Stopping · not yet confirmed' : 'Investigating'} · you can keep drafting</> : 'Read-only investigation'}</span>
-        <div className="flex items-center gap-3"><span className={invalid ? 'input-count over-limit' : 'input-count'}>{draft.length.toLocaleString()} / 8,192</span>
+        <div className="composer-actions"><span className={invalid ? 'input-count over-limit' : 'input-count'}>{draft.length.toLocaleString()} / 8,192</span>
           {stopVisible && <button className="stop-button" type="button" onClick={stop} disabled={preview || stopDisabled || stopPhase === 'sending' || stopPhase === 'stopping'}
             aria-label={stopPhase === 'stopping' ? 'Stopping requested; cancellation not yet confirmed' : 'Stop current attempt'}
             title="Request cooperative cancellation of this exact attempt. Acceptance is not terminal confirmation.">
@@ -37,6 +37,6 @@ export function Composer({ draft, change, send, busy, preparing = false, blocked
       </div>
     </form>
     <p id="composer-error" className="composer-error" role={error || invalid ? 'alert' : undefined}>{error || (invalid ? 'Shorten the message to 8,192 characters before sending.' : '')}</p>
-    <p id="composer-guidance" className="composer-guidance">Enter to send · Shift + Enter for a new line. Verify important conclusions against the cited evidence.</p>
+    <p id="composer-guidance" className="composer-guidance"><span className="sr-only">Enter to send · Shift + Enter for a new line. </span>Verify important conclusions against the cited evidence.</p>
   </div>;
 }

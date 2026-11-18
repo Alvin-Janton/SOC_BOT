@@ -41,6 +41,8 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
   const leaving = useRef(false);
   const scroll = useRef<HTMLDivElement>(null);
   const form = useRef<HTMLDivElement>(null);
+  const intro = useRef<HTMLElement>(null);
+  const welcome = useRef<{ key?: string; animations: Animation[] }>({ animations: [] });
   const olderButton = useRef<HTMLButtonElement>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
   const anchor = useRef<ScrollAnchor | undefined>(undefined);
@@ -48,6 +50,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
   const [following, setFollowing] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [previewEmpty, setPreviewEmpty] = useState(false);
 
   /** Captures the reader's first visible message before a real page read, not on scroll or render. */
   const capture = useCallback((kind: 'newest' | 'older') => {
@@ -69,6 +72,27 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
   const latest = messages.messages.at(-1);
   const latestStatus = latest && messages.statuses.find(status => status.turnId === latest.turnId)?.status;
   const blockedHistory = latestStatus === 'running' || latestStatus === 'incomplete';
+  const emptyWorkspace = !selection.error && !selection.id && !chat.turns.length && !(import.meta.env.DEV && preview && !previewEmpty);
+
+  // Consume one blank workspace on first visible entry; bounded browser animations never drive chat state.
+  useLayoutEffect(() => {
+    const cancel = () => welcome.current.animations.forEach(animation => animation.cancel());
+    if (!visible || !emptyWorkspace) { cancel(); return; }
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (welcome.current.key !== chat.workspaceKey) {
+      cancel(); welcome.current.key = chat.workspaceKey;
+      if (!motion.matches && intro.current && typeof intro.current.animate === 'function') {
+        welcome.current.animations = [...intro.current.querySelectorAll('h1, .suggestion')].map((element, index) => element.animate([
+          { opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'translateY(0)' },
+        ], { duration: 200, delay: index * 40, easing: 'ease-out', fill: 'backwards' }));
+      }
+    }
+    const reduce = () => { if (motion.matches) cancel(); };
+    motion.addEventListener('change', reduce);
+    // Do not cancel on effect cleanup: StrictMode rechecks effects without a new visible workspace.
+    // Hiding/leaving cancels above; otherwise these five finite animations finish without callbacks.
+    return () => motion.removeEventListener('change', reduce);
+  }, [chat.workspaceKey, emptyWorkspace, visible]);
 
   /** Moves deliberately to the bottom; ordinary history pagination never enables follow-to-bottom. */
   function jump() {
@@ -110,14 +134,19 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
 
   return <div className="chat-page"><a className="skip-link" href="#investigation-message">Skip to message composer</a>
     <header className="chat-header"><div className="header-start"><Brand /><span className="header-divider" /><span className="conversation-title" title={chat.title}>{chat.title}</span></div>
-      <div className="header-actions"><button className="header-button" disabled={chat.busy || loggingOut} title="New chat — does not delete server history" onClick={() => { if (!leaving.current) { chat.reset(); jump(); } }}><Plus size={17} aria-hidden="true" /><span className="button-label">New chat</span></button>
+      <div className="header-actions"><button className="header-button mobile-new-chat" disabled={chat.busy || loggingOut} title="New chat — does not delete server history" onClick={() => { if (!leaving.current) { chat.reset(); jump(); } }}><Plus size={17} aria-hidden="true" /><span className="button-label">New chat</span></button>
         <details className="account-menu"><summary aria-label="Account menu" title={preview ? 'Disconnected preview' : 'Account menu'}><span className="account-dot" /><span className="account-label">{preview ? 'Preview' : 'Account'}</span><ChevronDown size={13} aria-hidden="true" /></summary>
           <div className="account-popover"><p>{session ? 'Signed in' : 'Disconnected preview'}</p>{session && <p className="fine">Session expires {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(session.expiresAt))}</p>}
             <button className="account-logout" disabled={chat.busy || loggingOut || preview} onClick={() => { if (!leaving.current) account?.(); }}>Account settings</button>
             <button className="account-logout" disabled={chat.busy || loggingOut || preview} onClick={() => { void leave(); }}><LogOut size={15} aria-hidden="true" />{loggingOut ? 'Signing out…' : 'Sign out'}</button></div>
         </details>
       </div></header>
-    {import.meta.env.DEV && preview && <div className="preview-bar">Development-only layout preview · no session, API connection or active send.</div>}
+    {import.meta.env.DEV && preview && <div className="preview-bar">
+      <span>Development-only layout preview · no session, API connection or active send.</span>
+      <div className="preview-choices" role="group" aria-label="Preview presentation">
+        <button type="button" aria-pressed={previewEmpty} onClick={() => setPreviewEmpty(true)}>Empty</button>
+        <button type="button" aria-pressed={!previewEmpty} onClick={() => setPreviewEmpty(false)}>Transcript</button>
+      </div></div>}
     {notice && <div className="page-notice" role={notice.warning ? 'alert' : 'status'}>{notice.message}</div>}
     {logoutError && <div className="page-notice" role="alert">{logoutError} Your local view was retained because logout was not confirmed.</div>}
     {chat.retryNotice && <div className="page-notice" role="status">{chat.retryNotice}</div>}
@@ -127,7 +156,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
     <div className="workspace-main">
     {selection.error && <div className="page-notice" role="alert">{selection.error} <button className="text-button" onClick={chat.reset} disabled={chat.busy || loggingOut}>Start New chat</button></div>}
     <div className="chat-body"><div className="chat-scroll" ref={scroll} onScroll={() => { const element = scroll.current; if (element) { followingRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; setFollowing(followingRef.current); } }}>
-      {import.meta.env.DEV && preview && !selection.error ? <PreviewTranscript /> : (selection.id || chat.turns.length) && !selection.error ? <main className="transcript-column" aria-label="Conversation">
+      {import.meta.env.DEV && preview && !previewEmpty && !selection.error ? <PreviewTranscript /> : (selection.id || chat.turns.length) && !selection.error ? <main className="transcript-column" aria-label="Conversation">
         {selection.id && <div className="messages-toolbar">
           <div>{messages.nextCursor !== null && !messages.unavailable && <button ref={olderButton} className="secondary-button" disabled={messageBusy || chat.busy || loggingOut || preview || !messages.ready} onClick={messages.more}>
             {messages.phase === 'page' ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : null}Load older messages</button>}</div>
@@ -149,7 +178,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
           <p>{messages.nextCursor !== null ? 'This page contains no displayed messages. Load older messages to continue; history is not yet known to be empty.' : 'No saved messages in this conversation.'}</p>
         </div>}
       </main> : selection.error ? <main className="selected-conversation"><span className="eyebrow">Selection unavailable</span><h1>Choose a conversation to continue.</h1><p>Choose a valid conversation or start New chat. No message will be sent for this selection.</p></main>
-      : <main className="empty-state"><span className="eyebrow"><span className="status-dot" /> Your investigation starts here</span><h1>What would you like<br />to understand?</h1><p>Ask a question. Follow the evidence.<br />Build a clearer picture, one turn at a time.</p>
+      : <main className="empty-state" ref={intro} onFocusCapture={event => event.target.getAnimations?.().forEach(animation => animation.cancel())}><h1>What would you like to investigate?</h1>
         <div className="suggestion-grid">{SUGGESTIONS.map(({ icon: Icon, label, text }) => <button key={label} className="suggestion" onClick={() => { chat.setDraft(text); form.current?.querySelector('textarea')?.focus(); }}>
           <Icon size={18} aria-hidden="true" strokeWidth={1.5} /><span>{label}</span><ArrowUpRight size={15} aria-hidden="true" /></button>)}</div>
       </main>}
