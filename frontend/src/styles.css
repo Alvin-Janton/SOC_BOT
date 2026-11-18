@@ -126,13 +126,6 @@ button svg { flex-shrink: 0; }
 .table-scroll table { border-collapse: collapse; min-width: 100%; width: max-content; font-size: .8125rem; }
 .table-scroll th, .table-scroll td { padding: .7rem .9rem; border-bottom: 1px solid #354138; text-align: left; max-width: 30rem; }
 .table-scroll th { font-weight: 500; background: #273129; }
-.activity-list { margin: .25rem 0 1rem; padding: .35rem 0; color: #9fb09e; font-size: .75rem; }
-.activity-list summary { display: flex; align-items: center; gap: .5rem; cursor: pointer; list-style: none; width: fit-content; padding: .3rem .25rem; }
-.activity-list summary::after { content: '+'; margin-left: .5rem; }.activity-list[open] summary::after { content: '−'; }
-.activity-count { font-size: .6875rem; color: #879c88; }
-.activity-list ol { list-style: none; padding: .5rem 0 .25rem .5rem; margin-left: .5rem; border-left: 1px solid #425443; }
-.activity-list li { display: flex; align-items: start; gap: .65rem; padding: .5rem .4rem; }.activity-list li > svg { margin-top: .15rem; flex-shrink: 0; }
-.activity-list li p { margin: 0; overflow-wrap: anywhere; }.activity-detail { color: #879c86; font-size: .6875rem; line-height: 1.7; }
 .turn-notice { border: 1px solid #58664f; background: #283025; border-radius: .5rem; color: #d6dfca; padding: 1rem; margin-top: 1.3rem; font-size: .8125rem; line-height: 1.7; }
 .turn-notice p { margin: 0 0 .6rem; }.turn-notice .secondary-button { margin: .3rem 0 .8rem; }.turn-notice .fine { margin-bottom: 0; }
 .thinking { display: flex; align-items: center; gap: .6rem; color: #9dac9b; font-size: .8125rem; }
@@ -308,12 +301,12 @@ body:has(.chat-page) { min-width: 0; }
 .chat-page .user-message { border: 0; border-radius: .5rem; background: #383838; }
 .chat-page .user-message > p, .chat-page .answer-markdown { color: #e5e5e5; }
 .chat-page .assistant-message { background: transparent; }
-.chat-page .message-label, .chat-page .message-label > span:last-child, .chat-page .activity-list, .chat-page .activity-detail, .chat-page .activity-count { color: var(--chat-muted); }
+.chat-page .message-label, .chat-page .message-label > span:last-child { color: var(--chat-muted); }
 .chat-page .answer-markdown h1, .chat-page .answer-markdown h2, .chat-page .answer-markdown h3, .chat-page .answer-markdown h4 { color: var(--chat-text); }
 .chat-page .answer-markdown pre { background: #202020; border-color: var(--chat-border); }
 .chat-page .answer-markdown :not(pre) > code { background: #383838; }
 .chat-page .answer-markdown blockquote { border-color: #888; color: #ccc; }
-.chat-page .table-scroll, .chat-page .table-scroll th, .chat-page .table-scroll td, .chat-page .activity-list ol { border-color: var(--chat-border); }
+.chat-page .table-scroll, .chat-page .table-scroll th, .chat-page .table-scroll td { border-color: var(--chat-border); }
 .chat-page .table-scroll th { background: #333; }
 .chat-page .preview-caption { color: var(--chat-muted); border-color: var(--chat-border); }
 .chat-page .messages-empty { color: #ccc; border-color: var(--chat-border); }
@@ -357,4 +350,15 @@ body:has(.chat-page) { min-width: 0; }
 @media (max-height: 500px) {
   .chat-page .composer textarea { min-height: 2.5rem; max-height: 4.5rem; }
   .chat-page .empty-state { padding-block: 1rem; }
+}
+
+/* Coarse live progress is separate from terminal notices and retained technical events. */
+.chat-page .progress-status { display: flex; align-items: flex-start; gap: .5rem; margin: .5rem 0 1rem; color: var(--chat-muted); font-size: .8125rem; line-height: 1.6; overflow-wrap: anywhere; }
+.chat-page .progress-status svg { flex-shrink: 0; margin-top: .15rem; }
+.chat-page .progress-warning { color: #e5c39a; }
+.chat-page .progress-specimens { border-bottom: 1px solid var(--chat-border); margin-bottom: 1rem; }
+.chat-page .progress-specimens > .fine { margin: 0 0 .75rem; }
+.chat-page .empty-state .suggestion:focus-visible { opacity: 1 !important; transform: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-page .empty-state h1, .chat-page .empty-state .suggestion { animation: none !important; opacity: 1 !important; transform: none !important; transition: none !important; }
 }

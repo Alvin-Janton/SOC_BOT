@@ -1,3 +1,4 @@
+import { ProgressStatus, ToolIssueWarning } from '../components/ProgressStatus';
 import { Answer } from '../components/Answer';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 
@@ -5,6 +6,15 @@ import { LoaderCircle, RefreshCw } from 'lucide-react';
 export function PreviewTranscript() {
   if (!import.meta.env.DEV) return null;
   return <div className="transcript-column"><div className="preview-caption">Presentation sample · not an investigation or an API response</div>
+    <section className="progress-specimens" aria-label="Static progress presentation specimens">
+      <p className="fine">Static status specimens · no active turn, tool results or live events.</p>
+      <ProgressStatus entries={[]} />
+      <ProgressStatus entries={[{ stage: 'query_started', message: '', details: [], error: false }]} />
+      <ProgressStatus entries={[{ stage: 'rag_completed', message: '', details: [], error: false }]} />
+      <ProgressStatus entries={[{ stage: 'tool_invocation_failed', message: '', details: [], error: true }]} />
+      <ProgressStatus entries={[]} stopping />
+      <ToolIssueWarning />
+    </section>
     <div className="messages-toolbar"><button className="secondary-button" disabled>Load older messages</button>
       <button className="history-icon" disabled title="Refresh messages" aria-label="Refresh messages"><RefreshCw size={16} aria-hidden="true" /></button></div>
     <p className="history-status"><LoaderCircle size={14} aria-hidden="true" /> History loading indicator · presentation only</p>

@@ -41,6 +41,8 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
   const leaving = useRef(false);
   const scroll = useRef<HTMLDivElement>(null);
   const form = useRef<HTMLDivElement>(null);
+  const intro = useRef<HTMLElement>(null);
+  const welcome = useRef<{ key?: string; animations: Animation[] }>({ animations: [] });
   const olderButton = useRef<HTMLButtonElement>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
   const anchor = useRef<ScrollAnchor | undefined>(undefined);
@@ -70,6 +72,27 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
   const latest = messages.messages.at(-1);
   const latestStatus = latest && messages.statuses.find(status => status.turnId === latest.turnId)?.status;
   const blockedHistory = latestStatus === 'running' || latestStatus === 'incomplete';
+  const emptyWorkspace = !selection.error && !selection.id && !chat.turns.length && !(import.meta.env.DEV && preview && !previewEmpty);
+
+  // Consume one blank workspace on first visible entry; bounded browser animations never drive chat state.
+  useLayoutEffect(() => {
+    const cancel = () => welcome.current.animations.forEach(animation => animation.cancel());
+    if (!visible || !emptyWorkspace) { cancel(); return; }
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (welcome.current.key !== chat.workspaceKey) {
+      cancel(); welcome.current.key = chat.workspaceKey;
+      if (!motion.matches && intro.current && typeof intro.current.animate === 'function') {
+        welcome.current.animations = [...intro.current.querySelectorAll('h1, .suggestion')].map((element, index) => element.animate([
+          { opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'translateY(0)' },
+        ], { duration: 200, delay: index * 40, easing: 'ease-out', fill: 'backwards' }));
+      }
+    }
+    const reduce = () => { if (motion.matches) cancel(); };
+    motion.addEventListener('change', reduce);
+    // Do not cancel on effect cleanup: StrictMode rechecks effects without a new visible workspace.
+    // Hiding/leaving cancels above; otherwise these five finite animations finish without callbacks.
+    return () => motion.removeEventListener('change', reduce);
+  }, [chat.workspaceKey, emptyWorkspace, visible]);
 
   /** Moves deliberately to the bottom; ordinary history pagination never enables follow-to-bottom. */
   function jump() {
@@ -155,7 +178,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
           <p>{messages.nextCursor !== null ? 'This page contains no displayed messages. Load older messages to continue; history is not yet known to be empty.' : 'No saved messages in this conversation.'}</p>
         </div>}
       </main> : selection.error ? <main className="selected-conversation"><span className="eyebrow">Selection unavailable</span><h1>Choose a conversation to continue.</h1><p>Choose a valid conversation or start New chat. No message will be sent for this selection.</p></main>
-      : <main className="empty-state"><h1>What would you like to investigate?</h1>
+      : <main className="empty-state" ref={intro} onFocusCapture={event => event.target.getAnimations?.().forEach(animation => animation.cancel())}><h1>What would you like to investigate?</h1>
         <div className="suggestion-grid">{SUGGESTIONS.map(({ icon: Icon, label, text }) => <button key={label} className="suggestion" onClick={() => { chat.setDraft(text); form.current?.querySelector('textarea')?.focus(); }}>
           <Icon size={18} aria-hidden="true" strokeWidth={1.5} /><span>{label}</span><ArrowUpRight size={15} aria-hidden="true" /></button>)}</div>
       </main>}

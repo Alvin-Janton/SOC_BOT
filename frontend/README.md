@@ -119,8 +119,8 @@ publishing workflow is required; no live checks are performed by this UI slice.
   confirmed logout/password revocation or a different account removes it. Account
   navigation and browser back/forward route changes are blocked during an active
   turn, logout or form request. This is not a backend cancellation mechanism.
-- `src/pages/` and `src/components/` render plain user/activity/error text and
-  bounded answer Markdown. Raw HTML and images are disabled; links permit explicit
+- `src/pages/` and `src/components/` render plain user/error text, fixed coarse
+  progress labels and bounded answer Markdown. Raw HTML and images are disabled; links permit explicit
   HTTP(S) URLs without embedded credentials and open with no opener/referrer.
   Code and tables contain their own horizontal scrolling.
 
@@ -743,3 +743,61 @@ Before accepting a deployed change, the operator should check through CloudFront
 
 Local visual review does not establish live streaming, ownership, authentication,
 pagination, retry or cancellation correctness. No deployment is performed here.
+
+
+## Compact progress and new-chat reveal
+
+The detailed Investigation activity dropdown is replaced by one coarse live
+status in each retained local running assistant turn, including while public
+text streams. Fixed labels describe investigation, log queries, result review,
+playbook review, context preparation and response preparation. Playbook activity
+includes metadata discovery; neither tool completion nor a thinking signal
+establishes a finding or completes the turn. No arbitrary event message, detail,
+internal counter, SQL or model reasoning is rendered by the status component.
+
+Stopping takes precedence when the existing local stopping flag is set. Known
+rejected/failed/invalid/unconfirmed/not-executed tool stages use fixed warning
+wording. The stable polite, atomic status region changes only its coarse label;
+equivalent stages do not key/remount it. Progress disappears when the local turn
+settles, independent of saved-history refresh. A restored running history record
+keeps its static disconnected-stream explanation instead of a live spinner.
+One static warning can preserve retained nonfatal tool issues after settlement;
+existing cancellation/fatal-error notices suppress redundant warning presentation.
+All terminal, truncation, unknown-outcome, saved/local and retry notices remain.
+
+Technical activity events, validation, heartbeat handling and the existing
+200-entry local retention/reset rules are unchanged. No activity is reconstructed
+from saved messages, and no new event, polling, timer-driven stage, percentage,
+ETA, action or successful outcome is inferred.
+
+The genuine blank-workspace heading and four suggestions use five finite browser
+animations: 200 ms each, delayed 0/40/80/120/160 ms, with opacity and a 5-pixel
+vertical translation only (360 ms total). Existing layout space and all handlers
+are available immediately. Focusing a suggestion reveals it immediately. One
+remembered blank workspace key is consumed on first visible entry; typing,
+refresh, resizing and returning to the same workspace do not replay the entrance.
+Leaving/hiding cancels it; selected/history/error views never start it. A genuinely
+fresh New chat workspace may reveal again without changing reset/navigation logic,
+keys, drafts, Composer or Transcript mounting. React StrictMode effect rechecks do
+not consume a second reveal or cancel the initial one.
+
+Reduced motion skips the entrance, cancels an in-progress reveal when enabled,
+and explicitly keeps content opaque/untransformed; the existing reduced-motion
+spinner rule remains. Base content is visible without animation support, with no
+animation-completion dependency or persisted preference.
+
+At `http://127.0.0.1:5173/?preview=chat`, Transcript includes clearly labelled
+**static status specimens** for visual review only, alongside the existing inert
+evidence/error/retry presentation. These do not create turns, feed events to hooks,
+authenticate, dispatch tools or simulate backend results. Empty still uses the
+actual new-chat intro. Specimens are excluded from the production UI.
+
+Later operator-only CloudFront checks: query/RAG/thinking/finalization labels,
+public streaming text, disappearance on all terminal outcomes, recoverable and
+fatal failures, completed replay, restored history, Stop/cancellation, exact and
+durable retry, return from Account settings, and ordinary login/logout. Local
+inspection cannot establish live event ordering, cancellation, persistence,
+retry or session behavior. Native 200% zoom, reduced-motion OS/browser settings,
+and the hidden-but-mounted Account return remain operator checks; the local
+pass inspected reduced-width reflow and source-reviewed these guards without
+changing system settings or manufacturing authenticated state.
