@@ -82,15 +82,31 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
     if (welcome.current.key !== chat.workspaceKey) {
       cancel(); welcome.current.key = chat.workspaceKey;
       if (!motion.matches && intro.current && typeof intro.current.animate === 'function') {
-        welcome.current.animations = [...intro.current.querySelectorAll('h1, .suggestion')].map((element, index) => element.animate([
+        welcome.current.animations = [];
+        const heading = intro.current.querySelector<HTMLElement>('.welcome-heading');
+        const mask = 'linear-gradient(90deg, #000 calc(50% - 6px), transparent calc(50% + 6px))';
+        const size = 'calc(200% + 24px) 100%';
+        if (heading && typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('mask-image', mask)
+          && CSS.supports('mask-size', size) && CSS.supports('mask-position', '100% 0%') && CSS.supports('mask-repeat', 'no-repeat')) {
+          try {
+            // Overscan keeps the 12-pixel soft edge outside both ends at the endpoints.
+            const common = { maskImage: mask, maskSize: size, maskRepeat: 'no-repeat' };
+            welcome.current.animations.push(heading.animate([
+              { ...common, maskPosition: '100% 0%' }, { ...common, maskPosition: '0% 0%' },
+            ], { duration: 800, easing: 'linear', fill: 'backwards' }));
+          } catch {
+            // This optional visual effect falls back to the fully visible, unmasked base text.
+          }
+        }
+        welcome.current.animations.push(...[...intro.current.querySelectorAll('.suggestion')].map((element, index) => element.animate([
           { opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'translateY(0)' },
-        ], { duration: 200, delay: index * 40, easing: 'ease-out', fill: 'backwards' }));
+        ], { duration: 200, delay: (index + 1) * 40, easing: 'ease-out', fill: 'backwards' })));
       }
     }
     const reduce = () => { if (motion.matches) cancel(); };
     motion.addEventListener('change', reduce);
     // Do not cancel on effect cleanup: StrictMode rechecks effects without a new visible workspace.
-    // Hiding/leaving cancels above; otherwise these five finite animations finish without callbacks.
+    // Hiding/leaving cancels above; otherwise the heading and four suggestion effects finish without callbacks.
     return () => motion.removeEventListener('change', reduce);
   }, [chat.workspaceKey, emptyWorkspace, visible]);
 
@@ -178,7 +194,7 @@ export function ChatPage({ session, expired, signOut, preview = false, account, 
           <p>{messages.nextCursor !== null ? 'This page contains no displayed messages. Load older messages to continue; history is not yet known to be empty.' : 'No saved messages in this conversation.'}</p>
         </div>}
       </main> : selection.error ? <main className="selected-conversation"><span className="eyebrow">Selection unavailable</span><h1>Choose a conversation to continue.</h1><p>Choose a valid conversation or start New chat. No message will be sent for this selection.</p></main>
-      : <main className="empty-state" ref={intro} onFocusCapture={event => event.target.getAnimations?.().forEach(animation => animation.cancel())}><h1>What would you like to investigate?</h1>
+      : <main className="empty-state" ref={intro} onFocusCapture={event => event.target.getAnimations?.().forEach(animation => animation.cancel())}><h1><span className="welcome-heading">What would you like to investigate?</span></h1>
         <div className="suggestion-grid">{SUGGESTIONS.map(({ icon: Icon, label, text }) => <button key={label} className="suggestion" onClick={() => { chat.setDraft(text); form.current?.querySelector('textarea')?.focus(); }}>
           <Icon size={18} aria-hidden="true" strokeWidth={1.5} /><span>{label}</span><ArrowUpRight size={15} aria-hidden="true" /></button>)}</div>
       </main>}

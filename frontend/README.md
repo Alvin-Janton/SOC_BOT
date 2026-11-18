@@ -770,10 +770,14 @@ Technical activity events, validation, heartbeat handling and the existing
 from saved messages, and no new event, polling, timer-driven stage, percentage,
 ETA, action or successful outcome is inferred.
 
-The genuine blank-workspace heading and four suggestions use five finite browser
-animations: 200 ms each, delayed 0/40/80/120/160 ms, with opacity and a 5-pixel
-vertical translation only (360 ms total). Existing layout space and all handlers
-are available immediately. Focusing a suggestion reveals it immediately. One
+The genuine blank-workspace heading uses an 800-ms linear left-to-right alpha-mask
+reveal with a 12-pixel soft edge, without a whole-heading fade or vertical motion.
+A text-sized span keeps the complete semantic h1 text present from initial render
+and preserves its natural wrapping and measured layout. The four suggestions keep
+their original 200-ms opacity/5-pixel slide, ease-out easing, backwards fill and
+40/80/120/160-ms delays (finished by 360 ms); they do not wait for the heading.
+Existing layout space and all handlers are available immediately. Focusing a
+suggestion reveals it immediately. One
 remembered blank workspace key is consumed on first visible entry; typing,
 refresh, resizing and returning to the same workspace do not replay the entrance.
 Leaving/hiding cancels it; selected/history/error views never start it. A genuinely
@@ -782,9 +786,15 @@ keys, drafts, Composer or Transcript mounting. React StrictMode effect rechecks 
 not consume a second reveal or cancel the initial one.
 
 Reduced motion skips the entrance, cancels an in-progress reveal when enabled,
-and explicitly keeps content opaque/untransformed; the existing reduced-motion
-spinner rule remains. Base content is visible without animation support, with no
-animation-completion dependency or persisted preference.
+and explicitly keeps content opaque/untransformed and the heading unmasked through
+standard/prefixed reset rules; the existing reduced-motion spinner rule remains.
+The base heading has no mask. Unsupported masking/animation features show it
+immediately, and a heading-animation creation failure falls back locally without
+catching unrelated application errors. Completion or cancellation removes the
+finite effect, without an animation-completion state dependency or persisted
+preference. The native [mask-position](https://developer.mozilla.org/en-US/docs/Web/CSS/mask-position)
+effect uses the existing [Element.animate](https://developer.mozilla.org/en-US/docs/Web/API/Element/animate)
+mechanism, with local feature checks and no per-character updates or timers.
 
 At `http://127.0.0.1:5173/?preview=chat`, Transcript includes clearly labelled
 **static status specimens** for visual review only, alongside the existing inert

@@ -401,7 +401,9 @@ body:has(.chat-page) { min-width: 0; }
 .chat-page .progress-warning { color: var(--warning-emphasis); }
 .chat-page .progress-specimens { border-bottom: 1px solid var(--chat-border); margin-bottom: 1rem; }
 .chat-page .progress-specimens > .fine { margin: 0 0 .75rem; }
+.chat-page .empty-state .welcome-heading { display: inline-block; max-width: 100%; vertical-align: top; -webkit-mask-image: none; mask-image: none; }
 .chat-page .empty-state .suggestion:focus-visible { opacity: 1 !important; transform: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .chat-page .empty-state h1, .chat-page .empty-state .suggestion { animation: none !important; opacity: 1 !important; transform: none !important; transition: none !important; }
+  .chat-page .empty-state .welcome-heading { -webkit-mask-image: none !important; mask-image: none !important; }
 }
