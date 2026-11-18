@@ -700,3 +700,46 @@ publication/invalidation, then operator validation. Valid durable-retry records
 may omit only the new cancellation field; no data cleanup/backfill is needed.
 The Vite Stop presentation is inert and disconnected, not a simulated authenticated
 attempt. Existing checks do not establish live persistence/cancellation/UI races.
+
+
+## Main chat workspace presentation
+
+Chat uses its own neutral charcoal palette, system sans-serif typography, a
+260-pixel desktop history sidebar and an 832-pixel maximum reading/composer
+column. Authentication and account surfaces retain their existing presentation.
+Normal New chat appears in the sidebar above 900 pixels and in the header at
+900 pixels or below; the native mobile drawer retains close and refresh controls
+above its independently scrolling history. Recovery-specific New chat actions
+remain available.
+
+The new-conversation heading and four compact suggestions are draft-only:
+choosing a suggestion fills and focuses the existing textarea without sending.
+The composer has one outer focus indicator, a transparent textarea, a secondary
+character count and wrapping actions. Keyboard instructions remain available to
+screen readers, and the evidence-verification guidance stays visible. Multiline
+drafts retain the existing auto-height calculation and 180-pixel cap; short
+landscape viewports apply a smaller visual maximum to keep actions reachable.
+User messages use neutral bubbles; assistant evidence, statuses, recovery
+controls, Markdown tables and code keep their existing rendering and scroll
+behavior. No transport, state, history, retry, cancellation or auth contract changes.
+
+Use `npm run frontend:dev` and open `http://127.0.0.1:5173/?preview=chat`.
+The existing disconnected DEV-only surface now offers **Empty** and
+**Transcript** presentation choices; they select inert layout only, retain the
+draft, add no route/query contract and do not authenticate or dispatch work.
+Transcript remains the initial preview. Preview send, Stop and recovery controls
+remain inert. These choices and the presentation sample are absent from the
+production UI. The local preview contains only the two existing history examples;
+long live lists, loading/error races and real pagination were not manufactured.
+
+Before accepting a deployed change, the operator should check through CloudFront:
+
+- Existing/new conversation selection, refresh and URL restoration.
+- Follow-up streaming, draft retention and automatic titles.
+- History pagination anchoring, refresh and Jump to latest.
+- Exact local/durable retries and Stop, including unconfirmed outcomes.
+- Account navigation, logout and session restoration.
+- Desktop/mobile drawer keyboard behavior, real long histories and native 200% zoom.
+
+Local visual review does not establish live streaming, ownership, authentication,
+pagination, retry or cancellation correctness. No deployment is performed here.
