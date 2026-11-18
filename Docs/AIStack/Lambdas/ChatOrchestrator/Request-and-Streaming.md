@@ -130,7 +130,7 @@ Activities are not exactly-once evidence. Restoring an interrupted rejection may
 
 ## Error and disconnect semantics
 
-Before NDJSON starts, `httpError()` sends an ordinary HTTP JSON response with a safe `error` and `correlationId`. Once streaming starts, HTTP status is already 200; a terminal `error` line communicates failure. Error messages omit provider diagnostics and record contents. Ownership conflicts are rejected rather than starting concurrent attempts.
+Before NDJSON starts, `httpError()` sends an ordinary HTTP JSON response with a safe `error` and `correlationId`. It writes the serialized JSON through the wrapped stream before calling bodyless `end()`, so Lambda supplies the first-write response framing; application code does not add a delimiter. Completion remains bounded to five seconds with transport errors contained. Once streaming starts, HTTP status is already 200; a terminal `error` line communicates failure. Error messages omit provider diagnostics and record contents. Ownership conflicts are rejected rather than starting concurrent attempts.
 
 `emit()` serializes writes through a promise queue. It waits at most one second for backpressure drain; write errors or a destroyed stream suppress later transport writes. `finish()` queues at most one terminal event, stops heartbeats, ends the stream, and bounds closing at five seconds. It cannot guarantee terminal delivery over a broken connection.
 

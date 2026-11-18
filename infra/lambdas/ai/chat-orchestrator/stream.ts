@@ -105,7 +105,8 @@ export async function httpError(raw: Writable, statusCode: number, code: string,
   } });
   try {
     const closed = finished(stream, { cleanup: true, signal: AbortSignal.timeout(5_000) });
-    stream.end(JSON.stringify({ error: { code, message }, correlationId }));
+    stream.write(JSON.stringify({ error: { code, message }, correlationId }));
+    stream.end();
     await closed;
   } catch { /* A broken transport is not evidence that backend work was cancelled. */ }
 }
