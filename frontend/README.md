@@ -38,8 +38,7 @@ origin for authenticated operation.
 
 Login uses an opt-in compact presentation: a solid charcoal background, a centered
 400-pixel form (with narrow-screen gutters), the short “Sign in to SOC_BOT” heading
-and 48-pixel Google/email/Sign in controls. Supporting text stays sans-serif; the
-modest serif heading retains the existing identity. The official, locally bundled
+and 48-pixel Google/email/Sign in controls. Headings and supporting text use the shared system sans-serif stack. The official, locally bundled
 dark Google artwork keeps its original 40-pixel display size; see [asset provenance](src/assets/README.md).
 Signup, email confirmation and public password recovery now opt into the same
 compact presentation, with route-specific headings and visible password-policy
@@ -68,8 +67,8 @@ checks, not results of the disconnected visual review.
 Account settings uses a settings-only, top-aligned 784-pixel content area with
 Back to investigation near the top and three semantic sections: Change password,
 Google sign-in and Session. Desktop explanations and 400-pixel controls align in
-two tracks; smaller screens stack them and scroll naturally. Login/public account,
-callback and chat presentations are unchanged.
+two tracks; smaller screens stack them and scroll naturally. These layouts retain
+their approved dimensions under the shared application theme.
 
 The linking field explicitly requests the current SOC_BOT password, not the
 Google password. Required proof, the departure/draft warning, reauthentication
@@ -704,9 +703,10 @@ attempt. Existing checks do not establish live persistence/cancellation/UI races
 
 ## Main chat workspace presentation
 
-Chat uses its own neutral charcoal palette, system sans-serif typography, a
+Chat consumes shared neutral charcoal tokens, system sans-serif typography, a
 260-pixel desktop history sidebar and an 832-pixel maximum reading/composer
-column. Authentication and account surfaces retain their existing presentation.
+column. Authentication and account surfaces share those tokens while retaining
+their approved layouts.
 Normal New chat appears in the sidebar above 900 pixels and in the header at
 900 pixels or below; the native mobile drawer retains close and refresh controls
 above its independently scrolling history. Recovery-specific New chat actions
@@ -801,3 +801,47 @@ retry or session behavior. Native 200% zoom, reduced-motion OS/browser settings,
 and the hidden-but-mounted Account return remain operator checks; the local
 pass inspected reduced-width reflow and source-reviewed these guards without
 changing system settings or manufacturing authenticated state.
+
+
+## Shared frontend theme tokens
+
+`src/styles.css` defines the shared application palette near `:root`, beside the
+existing system `--font-sans` stack. Future page colors should consume these CSS
+roles rather than introducing another page palette:
+
+- `--surface-*` and `--border-*`: page, inset/code, raised inputs, interaction/hover
+  surfaces and default/control/focus-invalid boundaries.
+- `--text-*`, `--accent` and `--link`: primary/body/secondary/quiet text, focus and
+  navigation accents, plus readable links.
+- `--action-*` and `--disabled-background`: neutral primary action and disabled
+  surfaces; existing disabled opacity and behavior are unchanged.
+- `--info-*`, `--warning-*` and `--error-*`: distinct informational, warning and
+  error treatments. Some backgrounds intentionally coincide while text/border
+  roles remain separate. Scrollbar, backdrop and shadow colors are also shared.
+
+The existing `--chat-*` aliases reference these root tokens. The accepted final
+chat palette, progress/reveal rules and composer focus remain unchanged. Login,
+public account, settings, callback and session/not-found surfaces now use the same
+flat charcoal background and system sans-serif headings. Sizes, weights, spacing,
+layout rules, breakpoints and scrolling remain as authored; different heading
+fonts may naturally reflow text. Monospace code fonts remain.
+
+Google's approved button/artwork and its hover colors remain an intentional
+provider exception. Stop retains its distinct existing warm action/focus treatment;
+fine neutral transcript/navigation contrast steps also remain unchanged. No theme
+toggle, runtime provider, preference storage, new font, asset or dependency is added.
+
+Disconnected review covered the existing local routes and previews, including
+neutral/cancel/conflict/unknown callback hints and a local-only auth error. Hints
+never establish identity or provider-link success. Session checking/unavailability,
+authenticated callback success and other live-only outcomes were source-reviewed.
+The unchanged `body` 320-pixel minimum still causes a 15-pixel horizontal overflow
+on tall auth-result pages at a 320-pixel viewport when a vertical scrollbar is
+present; this color/font-only pass deliberately does not change minimum widths.
+Native 200% zoom and reduced-motion preference changes remain operator checks;
+local review used 683x384 effective reflow and preserved the motion rules.
+
+After operator deployment, validate through CloudFront: sign-in/session restore,
+signup/confirmation/recovery, Google login/linking, password change/logout, and
+ordinary chat/follow-up/history. No API, route or publishing change is required;
+local visual checks do not establish live authentication or chat correctness.
