@@ -39,9 +39,9 @@ The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 e
 
 Durable completion can remain replayable even when lease release or transport delivery fails. A successful write, a released lease, and a delivered stream are separate facts.
 
-## Temporary AUTH-10 retry validation
+## Retained AUTH-10 retry helper (inactive)
 
-The retained `dev-retry-fault.ts` helper is temporarily connected to the handler for turn `c94f7ad2-e292-4873-abde-17ea1e886195` only. Injection requires trusted dev configuration, a fresh initial request without `conversationId`, lease version one and exactly one matching initial user event. After durable admission and the conversation/attempt stream event, the initial cancellation check and an immediate budget/cancellation checkpoint precede a fixed `dev_retry_fault_injected` marker (request ID only) and the existing retryable `MODEL_SERVICE_ERROR`. This happens before orchestrator construction or model/tool invocation. The unchanged failure-persistence, cancellation-precedence and lease-release paths handle the result; no TURN/HIST records are fabricated. Demo, later leases, existing-conversation requests and completed replay skip injection. Remove the handler import/hook after validation while retaining the helper for separately approved future use; activation/removal takes effect only after operator deployment.
+The handler import and injection block have been removed. `dev-retry-fault.ts` remains unchanged for separately approved future use, including its AUTH-10 target and guards, but has no runtime invocation. Normal cancellation monitoring now proceeds directly to orchestrator construction. No stored records or failure/retry behavior were changed. Removal takes effect in AWS only after operator deployment.
 
 ## Temporary dev response diagnostics
 
