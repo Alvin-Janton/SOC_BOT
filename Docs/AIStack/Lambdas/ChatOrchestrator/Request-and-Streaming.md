@@ -39,9 +39,27 @@ The body must be text no larger than 32,768 UTF-8 bytes and must not be base64 e
 
 Durable completion can remain replayable even when lease release or transport delivery fails. A successful write, a released lease, and a delivered stream are separate facts.
 
-## Retained AUTH-10 retry helper (inactive)
+## Temporary dev saved-retry verification fault (active in source)
 
-The handler import and injection block have been removed. `dev-retry-fault.ts` remains unchanged for separately approved future use, including its AUTH-10 target and guards, but has no runtime invocation. Normal cancellation monitoring now proceeds directly to orchestrator construction. No stored records or failure/retry behavior were changed. Removal takes effect in AWS only after operator deployment.
+The retained `dev-retry-fault.ts` helper is temporarily reconnected for the focused saved-retry/session-verification check. Its new non-secret target is **`7384c5ca-e2c4-4c3a-a287-c4a8c3390e53`**. All existing guards remain: trusted dev configuration, exact turn ID, a fresh initial request without `conversationId`, acquired lease version one, matching lease turn and exactly one matching original user audit event at sequence one with consistent identities and content. Demo and nonmatching requests skip injection. Later leases and completed replay also skip it.
+
+After durable admission and the conversation/attempt stream event, cancellation monitoring starts. The guarded hook performs an immediate budget/cancellation checkpoint, emits the fixed `dev_retry_fault_injected` marker with request ID only, then throws the ordinary retryable `MODEL_SERVICE_ERROR` (503) before orchestrator construction or model/tool work. Normal cancellation precedence, failure persistence and lease cleanup remain authoritative; no TURN/HIST records are fabricated. Because the stream has already started, transport status is 200 with a terminal retryable error, not an HTTP 503 response. Persistence/cleanup uncertainty must still be reported rather than treated as a confirmed failed turn.
+
+### Operator trigger after separate review and deployment approval
+
+Nothing has been deployed or invoked by this change. After the operator separately approves and deploys it to dev, use an existing authenticated private session file for the same account that will inspect saved history. From the repository root, set `$DevBaseUrl` to the dev CloudFront HTTPS origin and `$SessionFile` to the existing private `.soc-bot-chat-session-<label>.json` file, outside synced/repository folders, then run:
+
+```powershell
+python scripts/chat_client.py --action chat --base-url $DevBaseUrl --session-file $SessionFile --turn-id 7384c5ca-e2c4-4c3a-a287-c4a8c3390e53 --message "Describe the waf_events columns."
+```
+
+Omit `--conversation-id`: this must be the initial submission to a fresh conversation. Record the returned conversation ID and expect a terminal retryable `MODEL_SERVICE_ERROR` with no model/tool execution on that injected attempt. If durable failure/lease release is not confirmed, follow the existing refresh/uncertainty guidance instead of assuming retry is ready. Do not submit the seed command again as a way to recreate first admission; use the saved turn for the focused check.
+
+In the dev CloudFront frontend, signed in as that same account, select the resulting saved failed conversation and wait for verified retry availability. Click **Retry failed turn** and arrange a tab/window focus return while preparation is pending so session verification can overlap. If preparation finishes while the same scope is temporarily gated, expect the existing session-verification/no-submission notice, no appended local running turn or chat POST from that preparation, release of its lock and a read-only newest-history recheck. Once verification/history succeed, deliberately click retry again; it must prepare afresh and may execute normal model/tool work under a later lease. If verification completes before preparation, the normal uninterrupted path may run instead; that does not establish coverage of the paused branch. Do not add delays, weaken guards or claim the timing case passed unless the intended overlap was observed. No unrelated QA campaign is resumed.
+
+### Removal after the focused check
+
+Remove only the `shouldInjectDevRetryFault` import and its handler conditional, including the injection-only checkpoint, marker and deliberate error. Keep `dev-retry-fault.ts` and all ordinary cancellation/budget checks; do not restore the handler wholesale or edit/delete stored records. Mark this section inactive, append the actual removal/check results to the log, run existing lint/build/orchestrator checks and obtain separate deployment approval. The fault remains active in deployed code until the removal is deployed; retaining the disconnected helper does not activate it.
 
 ## Temporary dev response diagnostics
 

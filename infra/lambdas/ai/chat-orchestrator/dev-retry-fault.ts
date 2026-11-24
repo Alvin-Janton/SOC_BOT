@@ -3,7 +3,7 @@ import type { ChatRequest } from './contracts';
 import type { BeginResult } from './store';
 
 /** Temporary, non-secret target for operator validation; remove with the handler hook after review. */
-export const DEV_RETRY_FAULT_TURN_ID = 'c94f7ad2-e292-4873-abde-17ea1e886195';
+export const DEV_RETRY_FAULT_TURN_ID = '7384c5ca-e2c4-4c3a-a287-c4a8c3390e53';
 
 /**
  * Selects only the first durable admission of a fresh targeted dev conversation, without I/O or local state.
