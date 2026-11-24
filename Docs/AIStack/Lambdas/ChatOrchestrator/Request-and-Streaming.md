@@ -45,7 +45,7 @@ The temporary handler import and injection block have been removed. `dev-retry-f
 
 Normal cancellation monitoring now proceeds directly to orchestrator construction. Only the injection-specific budget/cancellation checkpoint, marker and deliberate `MODEL_SERVICE_ERROR` were removed; ordinary cancellation/budget checks, outcome persistence, lease cleanup, retries, authentication and streaming remain unchanged. No stored records are altered, and any existing failed turn remains subject to the ordinary retry-eligibility rules.
 
-This is source removal only: a deployed hook remains active until the operator separately approves and deploys this removal. No live validation or deployment is claimed here, and the prior QA campaign remains stopped.
+On 2026-11-24 the operator reported that the removal deployed successfully after the developer ran offline checks. Source inspection confirms no runtime import/caller remains; this documentation update did not independently inspect the deployed Lambda or make live calls. Source removal alone would not disable an older deployed hook. See the [focused operator results](../../../../frontend/README.md#focused-operator-validation-2026-11-24): successful Google return and observed account transitions passed, but the interrupted-retry timing case remained inconclusive. The prior QA campaign remains stopped, and future activation requires separate approval.
 
 ## Temporary dev response diagnostics
 
