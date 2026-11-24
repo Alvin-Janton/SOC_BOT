@@ -1,0 +1,66 @@
+# Operations
+
+Retained operator guidance moved from the root README on 2026-11-24. Commands, confirmations and plain source paths assume the repository root unless noted. This page documents live/destructive procedures; reading or reorganizing it does not authorize executing them.
+
+**Docs-only push warning:** existing `dev`/`main` push workflows deploy AWS application stacks and publish the frontend, without documentation path exclusions. A future Pages workflow alone will not prevent those deployments. This change does not modify triggers, commit/push, run workflows, deploy, publish assets or invalidate caches.
+
+Use [Setup](Setup.md) for local checks, [Security](Security.md) for deployment-trust/permission exceptions, and [Infrastructure](../infra/README.md) for resources/retention.
+
+## Application Stack Deployment and Teardown
+
+- A push to `dev` deploys `devDataStack`, `devAiStack` and `devFrontendStack` (`SOC-BOT-DEV-DATA`, `SOC-BOT-DEV-AI`, `SOC-BOT-DEV-FRONTEND`) through the `dev` GitHub Environment. A push to `main` deploys the corresponding `demoDataStack`, `demoAiStack` and `demoFrontendStack` through the `demo` Environment. Both workflows lint, typecheck/build frontend, build infrastructure and synthesize before assuming the role, then deploy the existing `infra/cdk.out` assembly with explicit IDs and `--exclusively`. Default sequential, dependency-aware deployment keeps Data before AI; Frontend imports AI, so deployment order is Data -> AI -> Frontend.
+- Each Environment must supply an `AWS_ROLE_ARN` variable naming its exact `SOC_BOT_<ENV>_DEPLOY` role and restrict deployment to its matching branch. The workflows assume that role through GitHub OIDC and pass only the matching `SOC_BOT_<ENV>_CFN_EXEC` role to CloudFormation. CDK uses current OIDC credentials for stack operations and publishing Data assets to the dedicated Glue file bucket and AI assets to the existing bootstrap bucket. The account must already be bootstrapped; the workflows never run `cdk bootstrap`.
+- Dev requires only `DEV_FRONTEND_ALLOWED_CLIENT_CIDR`, a public IPv4 `/32`. PR/demo/teardown synthesis retains reserved `203.0.113.1/32` for that independent Frontend context. Demo-only deployment selection and teardown behavior are unchanged. The old `DEV_ALLOWED_CLIENT_CIDR` variable is unused; remove it only after the operator has completed retirement and decided rollback requirements. Foundation permissions/shared logging remain unchanged in this update.
+- Main still automatically deploys the explicit demo application stacks; public-demo release remains deferred pending the remaining authentication abuse, email and security review. Retirement removes the unauthenticated AI API rather than broadening demo access. Local validation neither deploys demo nor changes GitHub Environment protections.
+- Dev deployment and destruction share `soc-bot-dev-data`; demo deployment uses `soc-bot-demo-data`. All retain `cancel-in-progress: false` and the existing 30-minute job timeouts. CloudFront changes can take several minutes. A failed or timed-out workflow does not prove CloudFormation has stopped; inspect live state in a separately authorized operator session before recovery.
+
+`Destroy Dev Infrastructure` is manual-only on `dev`, using the `dev` Environment. Its default remains `ai`; scope and exact confirmation are checked before requesting AWS credentials:
+
+| Scope | Exact confirmation | Explicit deletion targets |
+| --- | --- | --- |
+| `frontend` | `DELETE SOC-BOT-DEV-FRONTEND` | `devFrontendStack` only; AI and Data remain. |
+| `ai` | `DELETE SOC-BOT-DEV-AI` | `devAiStack` only; Frontend and Data remain. |
+| `all` | `DELETE ALL SOC-BOT-DEV-STACKS` | `devFrontendStack`, then `devAiStack`, then `devDataStack`, in separate awaited commands. |
+
+Each command targets only its literal stack ID with `--exclusively`. Frontend failure stops the run before AI/Data deletion; AI failure stops it before Data deletion. AI-only never expands to frontend deletion: if frontend imports block it, review a broader scope or dependency removal first. Data-only, foundation teardown and demo teardown are excluded; arbitrary stack names and `--all` are not accepted.
+
+**Dev frontend teardown deletes its Cognito pool/users and auth/session table, not just hosting.** No automatic S3 emptying or separate user/session cleanup is performed. A nonempty frontend or Data bucket can block stack deletion; deliberately review and empty that bucket with administrator access before retrying. Partial teardown may already have deleted other resources. The dev OIDC and resource-policy smoke workflows remain separate, manual diagnostics. Frontend publication retains old hashed assets, copies the HTML entries last and submits a cache invalidation. Admin recovery and stale-asset cleanup remain deferred; validate the website and authenticated flows after deployment.
+
+## Legacy retirement operator handoff
+
+1. Deploy the reviewed application update through the existing workflows in Data -> AI -> Frontend order. Do not destroy stacks or manually delete the old resources first. Lambda code/configuration updates are not an atomic application release; transient errors must fail closed, never select a default owner.
+2. Verify explicit authenticated login/chat/follow-up/completed replay and logout followed by me 401. Preserve the Frontend API/distribution/WAF, origin/auth/session data, orchestrator/tools/Lake Formation grants and all chat owners' records.
+3. Verify the old AI API/stage, dev Regional association/WebACL/IPSet and old `/chat` invocation permission are actually gone. An old URL's particular HTTP status alone is not proof of cleanup; inspect the deployed resources and function policy using operator access.
+4. Dev's two legacy API log groups follow their existing Delete policies. If demo was deployed, its two Retain-policy log groups may remain unmanaged after removal; do not assume demo existed or purge retained logs. The shared foundation logging role/account configuration and cleanup/rollback permissions stay in place for this update. AWS documents REST API WAF disassociation through [apigateway:SetWebACL](https://docs.aws.amazon.com/waf/latest/developerguide/security_iam_service-with-iam.html), not an added blanket WAF disassociation grant.
+5. The evaluator's authenticated CloudFront migration is now implemented; use [current evaluator prerequisites](../evaluation/README.md) before a paid run, and never disable authentication to restore evaluation. Remove the unused old CIDR variable and consider cleanup-policy pruning only after removal and rollback needs are reviewed.
+
+No AWS cleanup or live verification is claimed by this implementation. Retirement does not change table ownership or reassign historical shared-owner conversations.
+
+The retirement handoff preserves the original sequencing/cleanup safeguards. It is not permission to delete historical conversations, purge retained logs, assume demo exists, or repeat a migration automatically. Verify actual deployed state only in a separately authorized operator session.
+
+## Lake Formation governance and operator rollout
+
+Registration explicitly depends on the Glue database and all four tables. For an initially unregistered prefix, the catalog is therefore created before registration without adding execution-role `DATA_LOCATION_ACCESS`. Data teardown reverses this order, deregistering before deleting the catalog and only after AI is removed. This initial-provisioning ordering does not replace the authority needed for later catalog replacements or location changes under an already registered prefix.
+
+Each Data stack registers only `s3://<data-bucket>/normalized/` through `LakeFormationLocation`, using the existing `AWSServiceRoleForLakeFormationDataAccess` role with hybrid access disabled. No raw, quarantine, evaluation, playbook, or Athena-result prefix is registered. The database sets `CreateTableDefaultPermissions` to an empty list, preventing new tables from inheriting broad default grants; this does not revoke grants on existing resources or change account-wide `DataLakeSettings`.
+
+Each AI stack owns five `PrincipalPermissions` resources for `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL`: database `DESCRIBE`, and combined `SELECT`/`DESCRIBE` on each of `application_events`, `waf_events`, `vpc_flow_events`, and `cloudtrail_events`. There are no grant options, wildcard table grants, or query-role `DATA_LOCATION_ACCESS` grants. Query IAM, its permission boundary, and results-only S3 access are unchanged. Strong Data imports keep deployment ordered Data before AI and teardown AI before Data. AI-only deletion revokes its grants without deregistering the Data location; Data deletion deregisters the location after AI is removed.
+
+The foundation's dev/demo data-and-analytics execution policies allow `iam:GetRole` and `iam:GetRolePolicy` only on the account's exact `AWSServiceRoleForLakeFormationDataAccess` service-linked role ARN, so CloudFormation can inspect the role and its inline policy. These read-only lookups do not authorize creating, changing, passing, or assuming that role. Apply the reviewed foundation policy update as an administrator before retrying application deployment; workflows do not deploy the foundation.
+
+Before allowing an automatic dev/main deployment, use the Lake Formation/IAM consoles with administrator access to verify these prerequisites separately for dev and demo:
+
+1. Confirm the service-linked role exists. The operator confirmed it for this implementation; the application does not create it. If absent later, stop for an administrator prerequisite rather than expanding runtime permissions.
+2. Inspect **Data lake locations** for registrations of either exact normalized prefix or an overlapping parent/child path, including a bucket-root registration. Existing administrator `SELECT`/`DESCRIBE` grants are catalog permissions, not evidence of an S3 registration. Resolve conflicting registration ownership before deployment.
+3. Inspect **Data permissions** on `soc_bot_<environment>_security` and its four tables. Record any `IAMAllowedPrincipals` grants and confirm the dedicated query role has no pre-existing grants on these five principal/resource pairs. Do not mix manual grants with these CloudFormation-owned pairs: [deleting a PrincipalPermissions resource revokes all permissions on its pair, including manual additions](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-lakeformation-principalpermissions.html).
+4. Verify the matching `SOC_BOT_<ENV>_CFN_EXEC` role has Lake Formation authority to manage the project catalog and grant/revoke the specified permissions, including grant options or applicable administrator authority. Catalog creation/update in a registered location also requires the appropriate catalog/data-location authority. The CDK policies contain the approved IAM registration/grant/revoke/list actions, but [IAM permission alone does not establish Lake Formation authority](https://docs.aws.amazon.com/lake-formation/latest/dg/lf-permissions-reference.html). Do not use this application slice to replace account-wide administrators or data-lake settings.
+
+The original implementation record operator-confirmed only the service-linked-role prerequisite, not registration overlap, existing grants or execution-role Lake Formation authority. This documentation migration performed no fresh live checks; do not treat this historical statement as a current complete preflight.
+
+After Data and AI deploy successfully, inspect the query role's database grant and all four table grants. Then, in **Data permissions**, revoke only `IAMAllowedPrincipals` **Super** (API principal `IAM_ALLOWED_PRINCIPALS`, permission `ALL`) on this environment's database and the four named tables, if present. If absent, there is nothing to revoke. Preserve the administrator's existing test grants, unrelated principals/resources, and any other permissions; do not perform a catalog-wide revocation or change default account settings. Finally, verify a bounded query with the dedicated query role succeeds and a principal without Lake Formation grants is denied (with otherwise suitable Athena/results IAM permissions). These live checks and scoped cleanup are operator tasks, not part of local synthesis or deployment automation.
+
+## Coordinated Runtime Changes
+
+Model/profile selection, retry/history writer-reader contracts and Stop permissions have separate coordinated rollout requirements. Preserve drained-traffic discipline, matching foundation/runtime permissions, and exact operator-designated scope; routine documentation changes do not require clearing data or redeploying.
+
+See [AI runtime/retry/Stop](AIStack/Runtime-Reference.md), [model restoration](AIStack/Lambdas/ChatOrchestrator/Adaptive-Thinking.md#sonnet-46-restoration), [history contract](../infra/lambdas/frontend/conversation-history/README.md), and [frontend publication](../frontend/README.md#publishing-and-serving). The manual OIDC and [resource-policy smoke](../.github/smoke-tests/resource-policy/README.md) workflows are live diagnostics, not offline checks; the latter has temporary resources and explicit cleanup/unknown-state cautions.

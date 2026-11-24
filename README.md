@@ -1,549 +1,68 @@
 # SOC Bot
 
-SOC Bot is a serverless, read-only AI security incident response copilot for investigating synthetic AWS security events. Analysts use a multi-turn chat interface to examine evidence across application, WAF, VPC Flow, and CloudTrail data, retrieve incident-response playbooks, and produce grounded findings, timelines, and recommended next steps.
+## What It Is and How It Works
 
-The project is a senior capstone and is currently entering implementation.
+SOC Bot is a serverless, read-only AI security incident response copilot built as a senior capstone project. It helps analysts investigate prepared synthetic AWS security events through multi-turn chat, using application, WAF, VPC Flow, and CloudTrail evidence alongside incident-response playbooks.
 
-## MVP Architecture
+1. An analyst signs in and asks a security question.
+2. An application-owned Amazon Bedrock tool loop requests bounded queries or relevant playbook sections.
+3. Validated tools retrieve evidence; the copilot streams findings, limitations, timelines, and recommended next steps.
+4. Conversations and investigation state are saved for follow-up, history, and explicit replay/retry.
 
-- **Frontend:** Vite, React, TypeScript, and Tailwind CSS
-- **Hosting:** Private S3 origin behind CloudFront with Origin Access Control
-- **API:** API Gateway with Lambda integrations
-- **Authentication:** Amazon Cognito-backed BFF using opaque, HttpOnly session cookies and DynamoDB
-- **AI:** Application-owned Amazon Bedrock `ConverseStream` tool loop
-- **Memory:** Persistent incident conversations and structured investigation state in DynamoDB
-- **RAG:** S3-backed incident-response playbook retrieval behind a replaceable interface
-- **Data lake:** Raw and normalized security data in S3
-- **Transformation:** AWS Glue ETL to OCSF-aligned, source-specific Parquet tables
-- **Query:** Controlled Athena queries over the Glue Data Catalog
-- **Governance:** AWS Lake Formation grants query roles read-only access to approved normalized tables
-- **Infrastructure:** AWS CDK in TypeScript
-- **Environments:** Local development plus separate AWS `dev` and `demo` stages
+The initial scenarios focus on web application attacks and suspicious AWS identity/S3 activity. A broader suspicious-workload network scenario remains deferred. These are prepared-data investigations, not a general-purpose detector or a claim of independently proven attack attribution.
 
-## MVP Scenarios
+SOC Bot investigates but does not remediate. The model has no AWS identity, direct data access, arbitrary SQL, shell, or infrastructure-changing tools. Hidden evaluation keys remain outside runtime access.
 
-1. **Web application attack:** investigate SQL injection, XSS, CRLF injection, and sensitive-file access using correlated application, WAF, and VPC Flow evidence.
-2. **Compromised AWS identity:** investigate suspicious authentication, security scanning, and successful S3 data exfiltration using CloudTrail evidence.
+**Status:** Frontend, authentication, chat/history/retry/Stop, investigation tools, ETL, and local evaluation are implemented in source. This is not a production-readiness or complete-QA claim; public-demo release review remains separate.
 
-Suspicious workload network activity is reserved for a later phase unless the MVP finishes ahead of schedule.
+## Repository Map
 
-## Security Model
-
-SOC Bot investigates but does not remediate. The Bedrock model has no AWS identity and cannot directly access data. It can request narrowly scoped tools, while application code validates tool inputs and constructs bounded queries. The query Lambda role is restricted by Athena workgroup controls, Lake Formation grants, IAM, and S3 prefix policies.
-
-The runtime must never receive access to hidden evaluation ground truth or infrastructure-changing actions.
-
-## Repository Layout
-
-```text
+```graphql
 SOC_BOT/
-|-- frontend/             # Browser UI workspace
-|-- infra/                # CDK, Lambda code and infrastructure checks
-|-- glue/                 # Shared ETL and offline utilities
-|-- playbooks/
-|-- evaluation/           # Evaluator-only, outside runtime assets
-|-- scripts/
-|-- Docs/
-|-- AGENTS.md
-`-- README.md
+|-- frontend/       # React browser UI, account/session state, and chat rendering
+|-- infra/
+|   |-- bin/        # CDK composition and playbook-index validation
+|   |-- lib/        # Infrastructure constructs and shared runtime contracts
+|   |-- lambdas/    # Authentication, history, orchestration, and tool runtimes
+|   `-- test/       # Existing infrastructure and runtime checks
+|-- glue/           # Four-source normalization, schemas, and local/parity tools
+|-- scripts/        # Manual JSON API and streaming-chat Python clients
+|-- evaluation/     # Local evaluator and private grading contracts; not runtime assets
+|-- playbooks/      # Reviewed retrieval corpus and its versioned index
+|-- Docs/           # Architecture, setup, operations, and subsystem documentation
+|-- .github/        # CI, deployment workflows, and manual diagnostic tooling
+|-- AGENTS.md       # Agent workflow and repository change/security rules
+`-- logs.md         # Historical changes, verification, and limitations
 ```
 
-The browser application lives in its own root workspace; Lambda runtime code remains under infra/lambdas/. Generated assets and local data remain ignored.
-
-## Evaluator-only investigation cases
-
-> **Authenticated local evaluation:** `evaluation/` now requires an explicit dev CloudFront `--base-url` and existing private `--session-file`. A bounded `/api/auth/me` check pins public run identity, and an exact META ownership lookup precedes each EVT evidence read. Configure local evaluator GetItem/Query and judge permissions separately; follow the [operator prerequisites](evaluation/README.md) before a fresh paid run. No new live baseline was run during implementation.
-
-[evaluation/cases.json](evaluation/cases.json) defines four standalone questions and evidence-backed reference keys for an initial application, WAF, and CloudTrail baseline. Its versioned JSON contract includes UTC scopes, reference counts and identifiers, outcome distinctions, indexed playbook guidance, unsupported conclusions, and separate criterion-specific 0/1/2 scoring anchors. The [local evaluator](evaluation/README.md) supplies a descriptive, unweighted earned/applicable total: benign guidance is N/A (maximum 6); the other cases have maximum 8. There is no automatic pass threshold or CI score gate.
-
-Only a case's `question` may enter the investigating agent's request, using a fresh conversation for each baseline case. All other fields remain evaluator-only. Never upload this file under `playbooks/` or investigated data, import it into runtime code, or package it in Lambda, Glue, or frontend assets. Runtime permissions are unchanged. Repository visibility does not guarantee secrecy from humans who can read the repository; the boundary is agent runtime/tool access.
-
-Reference facts were checked against local synthetic source records and the existing pure Glue parsers/normalizers, without querying AWS. The operator reported correcting ten trailing-space WAF client IPs, rerunning Glue, and confirming 61 rows in the selected Athena window; offline inspection independently confirms the current local count and references, not the deployed Parquet contents. Before the first evaluation run, the operator should confirm deployed records/identifiers match the keys. The reviewed database is `soc_bot_dev_security`; demo has not been verified. Application scopes use an exclusive next-day end, while WAF/CloudTrail questions include both endpoints; the evaluator reports declared query coverage using the query tool's exclusive-end contract without rewriting requests. These four cases are a fixed baseline, not a general detector assessment.
-
-The evaluator invocation requires `python -m evaluation.run --base-url <dev-cloudfront-origin> --session-file <private-session-file> --chat-table SOC-BOT-DEV-CHAT-HISTORY --profile <evaluator-profile>`; see the [evaluator guide](evaluation/README.md) for explicit login/me commands and single-case examples. It sends one fresh authenticated question-only chat request per case, verifies conversation ownership before reading durable turn evidence with the operator's separate credentials, calls a bounded Bedrock judge, and incrementally saves private `results.json`/`report.html` under ignored `artifacts/evaluation/`. Application errors, evidence gaps and judge errors remain unscored. An application answer with `truncated: true` preserves its partial text, evidence and diagnostics but remains incomplete: judging is skipped, scores/total stay unset, it is excluded from scored aggregates, and the run exits `1`. Implementation verification is offline only; the first paid baseline, human calibration and deployed-data parity remain operator tasks. No runtime permissions, deployment assets or workflows change. Local source hashes do not establish a deployed revision; automated deployment/dataset revision tracking remains deferred.
-
-## Infrastructure Development
-
-The [frontend guide](frontend/README.md) covers the password-login/chat interface,
-dev-only Google login/account-linking controls and bounded browser result page,
-streaming/retry limitations and operator validation. From the root,
-`npm run frontend:dev` starts a disconnected Vite visual preview; `/login` makes
-no API requests and `/?preview=chat` is an inert development-only layout.
-`npm run frontend:build` typechecks and builds static output. Production restores
-the cookie-backed session before chat; no browser tokens or conversation state
-are persisted locally. Refresh starts a fresh local view. The default static
-cache is disabled, `/assets/*` uses optimized caching, and identical HTML is
-published at the eight exact page entries with revalidation headers, including
-`auth/result`; see the frontend guide for account/recovery and Google result routes. No SPA error
-rewrite or localhost authentication exception is introduced.
-
-The repository targets Node.js 22 with a shared root lockfile. `@soc-bot/infra` contains the TypeScript CDK application; `@soc-bot/frontend` contains the Vite/React browser application.
-
-The chat orchestrator selects `us.anthropic.claude-sonnet-4-6` from `us-east-1`, retaining adaptive thinking, medium effort and 8,192 total output tokens per investigation/fresh retry/finalization invocation; no temperature/top-P/top-K is sent. Public text remains capped at 32 KiB. Internal summaries also use Sonnet and remain thinking-disabled, temperature zero, 1,024 tokens/8 KiB. The independent evaluator judge already uses Sonnet 4.6 and is unchanged. This narrow return from Opus replaces only the approved model/profile IAM resources and condition values, runtime guard and its examples; it preserves prompt/tool/thinking/storage work and adds no resources or dual-model access. See [adaptive thinking, private storage and coordinated restoration](Docs/AIStack/Lambdas/ChatOrchestrator/Adaptive-Thinking.md#sonnet-46-restoration). No deployment, live inference or evaluation rerun is performed by this implementation.
-
-Install dependencies and run the infrastructure checks from the repository root:
-
-```console
-npm ci
-npm run lint
-npm run build
-npm test
-npm run synth -- -- -c devFrontendAllowedClientCidr=203.0.113.1/32
-```
-
-`npm run synth` synthesizes the foundation plus dev/demo Data, AI and Frontend stacks (`SOC-BOT-<ENV>-DATA`, `SOC-BOT-<ENV>-AI`, `SOC-BOT-<ENV>-FRONTEND`) for `us-east-1` and runs the `AwsSolutionsChecks` cdk-nag rules. The extra `--` forwards CDK arguments through the root npm wrapper; after building, the simpler equivalent is `npm run synth --workspace @soc-bot/infra -- -c devFrontendAllowedClientCidr=203.0.113.1/32`. The documentation CIDR is for offline/PR synthesis only, never a personal deployment allowlist. Full-app synthesis requires IPv4 /32 `devFrontendAllowedClientCidr` context even when selecting demo or foundation; the retired AI API no longer requires a separate CIDR. Use `--lookups=false` and disable EC2 metadata discovery for explicitly offline checks. Synthesis bundles both environments' query, RAG, chat and frontend origin-authorizer Lambdas but creates no AWS resources. The foundation owns GitHub OIDC, deployment/execution roles, policies/boundaries, and the shared Regional API Gateway logging configuration. Runtime Bedrock access is pinned to the `us.anthropic.claude-sonnet-4-6` inference profile and its routed `anthropic.claude-sonnet-4-6` foundation model; direct foundation-model invocation is not allowed. Drain active investigations, update the foundation APPLICATION boundaries first, then coordinate AI updates for every deployed affected environment before resuming requests; do not test during the mixed-permission interval.
-
-Each Data stack defines one private bucket named `soc-bot-{environment}-data-{account}-{region}`. All public access is blocked, S3-managed encryption and TLS are required, and the bucket is tagged for its environment. Dev uses `DESTROY` and demo uses `RETAIN`; automatic object deletion is disabled, so a populated dev bucket must be emptied before stack teardown. An enabled lifecycle rule expires only `athena-results/` objects after seven days, permanently deleting results without storage-class transitions. Versioning, retention for other prefixes, and server access-log storage remain deferred. The data bucket has a resource-specific cdk-nag S1 acknowledgment for this initial increment.
-
-Each Data stack also defines an enabled `SOC-BOT-<ENV>-QUERY` Athena workgroup through a construct separate from Glue. It enforces results at `s3://<data-bucket>/athena-results/` with SSE-S3 encryption, publishes CloudWatch query metrics, and cancels queries that exceed 134217728 scanned bytes (128 MiB). The AI stack defines the private `SOC-BOT-<ENV>-QUERY-TOOL` Lambda and QUERY-boundary role, restricted to that exact workgroup and results prefix. Validated event/aggregate queries use a configurable 30-day window cap, daily partition predicates, default 25/max 100 rows and a 64 KiB evidence-response cap; `describe_table` retrieves catalog metadata only. Internal start/status/cancel operations support the environment's orchestrator, which enforces the 180-second query deadline. Authenticated Stop/user integration remains deferred; the query tool has no public route. Data owns Lake Formation registration of `normalized/`; AI owns the query role's database/table grants. Complete the operator preflight and scoped default-access cleanup below before live query validation. Dev teardown deletes its workgroup and contents, including named queries; demo retains its workgroup. See `Docs/AIStack_Spec-Temp.md` for the implemented contract.
-
-Each AI stack also defines an independent `ChatHistory` construct with a `SOC-BOT-<ENV>-CHAT-HISTORY` DynamoDB table, exposed as `AiStack.chatHistoryTable`. It uses string `PK`/`SK` keys, on-demand billing, and default DynamoDB-owned encryption. Conversation metadata, events, and summaries follow the `CONV#...` contract in section 10 of `Docs/AIStack_Spec-Temp.md`. The sparse `GSI1` user-listing index uses string `GSI1PK`/`GSI1SK` keys and projects only `conversation_id`, `title`, `created_at`, and `updated_at` beyond the automatically projected keys; only metadata records carry its keys. Dev deletes the table on teardown; demo retains it. Each orchestrator receives only its environment's exact-table item access and implements transactional sequences; no GSI/scan access, stream, or TTL is introduced. Point-in-time recovery remains intentionally disabled with an approved, table-specific `AwsSolutions-DDB3` cdk-nag acknowledgment in both environments. Retention on stack deletion is not a backup strategy; backup configuration requires a separate reviewed change.
-
-Each Data stack defines an on-demand `SOC-BOT-<ENV>-NORMALIZE-APP` Glue 5.0 job, a boundary-limited shared Glue role, a `soc_bot_<environment>_security` catalog database, and projected `application_events`, `waf_events`, `vpc_flow_events`, and `cloudtrail_events` Parquet tables. The job reads unchanged JSONL from `raw/app/`, `raw/waf/`, and `raw/cloudtrail/`, and version-2 space-delimited `.log` files from `raw/vpc/`. It writes source-specific Snappy Parquet under `normalized/<source>/year=YYYY/month=MM/day=DD/` and rejected records to matching `quarantine/<source>/` date partitions. Full runs replace only source/date partitions found in input; incremental runs require an explicit comma-separated `--dates` list. Raw files are never changed. Runs are manual, limited to one concurrent run, two G.1X workers, and 30 minutes; no crawler or trigger is created. Lake Formation registration and query grants are separate constructs described below. The unchanged `app_rules_v2` severity mapping inspects request fields, headers, and all query/body parameter keys and values independently, including up to three URL-decoding rounds. Suspicious requests returning exactly `200` are High; every other suspicious response, including `302`, is Medium. Without a match, 401/403 and server errors are Low, and other requests are Informational. Application `severity_source` remains compact JSON text with version, rule, and deduplicated category/signature/location matches, without matched payloads. WAF severity uses its own native rule evidence; VPC severity is fixed Informational; CloudTrail uses the versioned prepared-dataset indicator mapping described below. Severity is an analytical aid, not proof of exploitation; see section 14.2 of `Docs/Final_Spec.md` for the contracts.
-
-The foundation stack creates a retained, private `soc-bot-{environment}-glue-files-{account}-{region}` bucket for each environment. CDK publishes Data-stack templates and Glue script/library assets under its `glue/` prefix using caller credentials; Glue receives read-only access to its environment's published code. The shared bootstrap asset bucket is not used for these Data-stack assets. **Update the administrator-managed foundation stack manually before merging this increment to `dev` or `main`**; those branches automatically deploy their Data stacks and will fail if their Glue file bucket and IAM policies do not exist first. The foundation stack update itself still requires administrator review and is not performed by the workflows.
-
-The application transformer preserves request and response evidence, request-ID and raw-object provenance, and a safe allowlisted `raw_event` subset. It excludes synthetic `is_malicious`, attack labels, `confidence`, `scenario_id`, and matched-indicator fields from the normalized table. It also excludes `source_file` because source filenames can reveal normal or anomalous traffic classifications, along with `source_line_start` and `source_line_end`; other provenance fields remain unchanged. The inspected source dataset stays outside this repository; this change does not upload it or run a backfill. The Glue job uses default CloudWatch Logs at-rest encryption rather than a new customer-managed KMS key, and bookmarks are disabled because explicit dates control reruns. Both are documented, resource-specific cdk-nag acknowledgments.
-
-The foundation stack is administrator-managed and must be deployed manually after review. The automated workflows below target only the matching Data, AI and Frontend stacks; they do not bootstrap or deploy the foundation stack. Apply its approved IAM and shared logging changes before application deployment. AI query bundles use caller credentials and the existing bootstrap file bucket; Data's Glue assets keep their dedicated file bucket. After those stacks deploy successfully, the same workflows publish the frontend build using validated stack outputs and submit one cache invalidation.
-
-### Streaming chat APIs and ownership
-
-Each AI stack provisions `SOC-BOT-<ENV>-CHAT-ORCHESTRATOR`, a Node.js 22 response-streaming Lambda with 512 MB memory, a 15-minute timeout, and a one-week log group (dev destroyed, demo retained). Its `SOC_BOT_<ENV>_RUNTIME_APPLICATION_CHAT_ORCHESTRATOR` role uses the matching APPLICATION boundary, exact chat-table item permissions, invocation of only its query-tool Lambda, and the approved Bedrock resources. It receives no direct Athena, Glue, Lake Formation, or security-data S3 permission. Frontend owns the authenticated CloudFront `/api/chat` route to this same Lambda using `AWS_PROXY`/`STREAM` and a 15-minute integration timeout. AI owns no REST API or WAF and exports the existing orchestrator ARN to Frontend. There is no public Function URL or authenticated Stop endpoint.
-
-Before deploying AI, apply the administrator-reviewed foundation update. Both APPLICATION boundaries and orchestrator roles permit `bedrock:GetInferenceProfile` on only the exact approved profile; query and Glue boundaries remain unchanged. The runtime calls `ConverseStream` directly, not a discovery API. The foundation also owns the single `us-east-1` `AWS::ApiGateway::Account` setting and `SOC_BOT_CICD_API_GATEWAY_LOGGING` role, trusted only by API Gateway. Neither application stack creates an account setting or grants its execution role access to `/account` or this shared role. Confirm no other stack owns the same Regional account setting before deploying the foundation; do not overwrite a separately managed owner.
-
-Chat identity comes exclusively from the validated Frontend session-authorizer context: expected account/Region/stage, exact POST `/api/chat`, valid API ID, bff-session type and matching principal/sub/API/stage. Both normal and cleanup stores receive that same Cognito sub. Body/header/query IDs, bare console bodies and missing context cannot select an owner or fall back. Existing shared-owner conversations remain stored, with no reassignment, deletion or migration; unrelated authenticated users cannot access them. See [authenticated chat](Docs/FrontendStack/Authenticated-Chat.md).
-
-The AI-owned legacy APIs and dev Regional WAF/IPSet/association are removed by the reviewed stack update. The separate dev CLOUDFRONT WAF remains: set `DEV_FRONTEND_ALLOWED_CLIENT_CIDR` to the chosen public IPv4 `/32`; address changes require a reviewed variable/context update and redeployment. API throttling remains best effort, not a concurrency or hard spending ceiling. Foundation cleanup/logging authority stays intact until resource deletion and rollback needs are settled.
-
-The dev WAF creation/tagging permissions require `Project=SOC_BOT`, `Environment=dev`, and `ManagedBy=CDK`. Only their WAF-specific tag-key allowlists additionally accept CloudFormation's `aws:cloudformation:stack-id`, `aws:cloudformation:stack-name`, and `aws:cloudformation:logical-id` system tags. Other services' shared tag conditions remain unchanged; incorrect ownership values and unapproved tag keys remain denied.
-
-WebACL creation also authorizes referencing the existing project IP set through its strict resource-tag conditions. IPSet/WebACL inspection and tag reads use the project's exact name patterns without requiring resource tags, allowing CloudFormation to check absence after deletion. Dev additionally permits only `wafv2:GetWebACLForResource` and its dependent `wafv2:GetWebACL` on the account/Region-scoped `regional/webacl/*/*` ARN because API Gateway association lookup uses that authorization scope. This documented, resource-specific cdk-nag exception permits reading other Regional WebACLs in the same account/Region, but grants no mutation of them and adds no demo permission. WAF mutations retain their project names and strict ownership checks. Only the dev `apigateway:SetWebACL` statement uses the explicitly approved `StringEqualsIfExists` ownership conditions on the Region-scoped `/restapis/*/stages/dev` ARN. A deployment denial occurred despite CloudTrail confirming the expected stage tags; tag-optional authorization permits the WAF association when those tags are absent from the authorization context, while rejecting incorrect present values. This exception can also set or remove WAF associations on other untagged `/dev` stages in the Region; it does not permit other stage names or add demo access. Other API management conditions remain strict. See [AWS WAF association lookup permissions](https://docs.aws.amazon.com/waf/latest/developerguide/security_iam_service-with-iam.html). Execution-log creation/tagging in both environments also accepts the three CloudFormation system-tag keys while requiring the standard ownership values. Dev alone has a separate `DeleteLogGroup` statement for `API-Gateway-Execution-Logs_*/dev`: `StringEqualsIfExists` permits cleanup when tags are absent, but rejects any present ownership tag with an incorrect value. Demo deletion and other execution-log management retain strict resource-tag conditions. This dev cleanup exception does not grant access to other stage suffixes or arbitrary log-group names.
-
-API access logs contain request IDs, method/route, status, response length, and integration latency, not bodies, cookies, or source IP. Execution logging is ERROR with `dataTraceEnabled=false`; WAF request sampling is disabled and no WAF payload log destination is added. AI owns `/aws/apigateway/SOC-BOT-<ENV>-CHAT-ACCESS` and AWS-fixed `API-Gateway-Execution-Logs_<api-id>/<environment>` groups, both with seven-day retention and dev DESTROY/demo RETAIN. The foundation logging role uses custom inline policies scoped to these namespaces; only `DescribeLogGroups` needs `Resource: "*"`. The execution-group API-ID wildcard is an unavoidable shared-setting exception without reverse cross-stack references. The role/account setting are retained on foundation deletion because deleting the account resource does not reset API Gateway's logging role. [AWS logging guidance](https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-logging.html), [account ownership](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-apigateway-account.html).
-
-The shared logging role's separate initialization policy permits `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:DescribeLogStreams`, `logs:PutLogEvents`, `logs:GetLogEvents`, and `logs:FilterLogEvents` only within the exact `/aws/apigateway/welcome` group and its streams. It does not grant group deletion, retention changes, or access to other group names. Application-log scopes remain unchanged. Apply this permission through the administrator-managed foundation stack, not either environment's application stack.
-
-The handler requires a validated gateway envelope before parsing JSON text from its body. This body-only excerpt is not a standalone Lambda invocation; use CloudFront for authenticated validation:
-
-```json
-{"body":"{\"turnId\":\"296a0470-b7b7-4a21-a9d7-72fb7be90ac9\",\"message\":\"Describe the waf_events columns.\"}"}
-```
-
-`conversationId` is optional on the first message; reuse the returned ID for follow-up turns. Reuse the exact `turnId` and message only for a retry. Unknown body fields, client identity/history, base64 bodies, blank messages, and messages over 8,192 characters are rejected. The initial conversation UUID is deterministically derived from trusted owner/table/turn IDs so a lost initial response can be retried safely.
-
-The versioned prompt offers `describe_table`, `query_events`, `aggregate_events`, `describe_documents`, `describe_document`, and `retrieve_sections`. Strict Zod-derived schemas are revalidated; only Athena data requests enter the controlled query compiler. All six tools share an eight-call dispatch ceiling across the logical turn's attempts, counting discovery, invalid and excess blocks. Calls execute sequentially and persist results before model reuse. Query IDs/original specifications are checkpointed before polling; unknown Athena submissions are never blindly restarted. Completed results replay unchanged, while a read-only RAG call missing its result may be revalidated/reissued under the original identity/count and can observe updated corpus content. Internal query cancellation is not a model tool or Stop endpoint.
-
-The private `SOC-BOT-<ENV>-RAG-TOOL` reads only its environment's `playbooks/*`, with a 4-KiB request and 32-KiB full-response cap. The orchestrator invokes only that exact ARN alongside its existing query-tool ARN and receives no S3 permissions. RAG preserves full selected Markdown and source/license/version/context; known retrieval/availability errors permit model correction or continued investigation, while malformed protocols, turn termination, and persistence failures remain fatal. Guidance citations use document/version/section IDs separately from observed event evidence; recommendations stay human-controlled. Corpus publication, deployment and live verification remain operator tasks. See the [RAG integration guide](Docs/AIStack/Lambdas/ChatOrchestrator/RAG-Tools.md).
-
-A confirmed terminal Athena `FAILED` or `CANCELLED` result enters tools-disabled finalization only after its bounded `TOOL_RESULT` is durably persisted. Every later queued call receives a persisted `NOT_EXECUTED` result. The model explains the limitation using available evidence; successful final synthesis and persistence complete the turn as an `ASSISTANT_MESSAGE`, including when a retry reuses the saved terminal failure. `NOT_FOUND` or unavailable status, unknown dispatch, unconfirmed stop, and storage, fencing, model, or other backend errors remain fatal attempt errors on the `TURN_OUTCOME` path, not fabricated assistant answers.
-
-The application deadline is ten minutes from acceptance. Dispatch checks reserve 90 seconds for finalization; normal work stops with 45 seconds remaining for bounded cancellation, outcome persistence, lease release, and stream closure. Known queries have a 180-second submission-to-completion budget. Failed backend or timed-out attempts produce `TURN_OUTCOME`, not fabricated assistant messages. Conditional leases expire slightly beyond the Lambda hard timeout; every append uses the attempt/version fence and a transactional metadata counter. One original `USER_MESSAGE` is retained per turn. Completed retries replay the stored answer. An uncertain final write reports an unconfirmed outcome and retains the lease for expiry recovery rather than writing a contradictory failure.
-
-Fresh context is capped at 256 KiB/128 messages, and the complete model request including system/tools/control/native reasoning is separately capped at 256 KiB. At attempt entry only, a 96-KiB full-request soft threshold can summarize eligible older completed prefixes in chunks of up to twelve turns while retaining six recent completed turns. Summaries remain 1,024 tokens/8 KiB and exclude private blocks. Audit records remain; unresolved retryable turns block compaction. Full audit retrieval fails closed at 8 MiB/10,000 events/128 pages, including private records. Active signed exchanges are append-only with immutable memory-only budget snapshots. Worst-case result/response headroom can force fresh tools-disabled finalization; no evidence or reasoning is clipped to fit.
-
-NDJSON events are `conversation`, safe `activity` (including one content-free `thinking` stage per model invocation), generic 15-second `heartbeat`, public `text_delta`, and one attempted terminal `complete` or `error`. Reasoning/signatures/redacted bytes, tool inputs/results and SQL are not streamed. The final private response group, public answer, HIST, TURN and META are committed atomically before `complete`. Eight thousand one hundred ninety-two output tokens are shared by thinking and public text; 32 KiB still bounds public text, and `truncated` does not promise completeness. Temporary dev preview diagnostics remain public-answer-only and unredacted; use only synthetic data and remove after validation. Disconnect does not itself cancel backend work. See [streaming](Docs/AIStack/Lambdas/ChatOrchestrator/Request-and-Streaming.md) and [thinking support](Docs/AIStack/Lambdas/ChatOrchestrator/Adaptive-Thinking.md).
-
-The [v4 investigation guidance](Docs/AIStack/Lambdas/ChatOrchestrator/Agent-Loop-and-Tools.md#prompt-schemas-and-model-adaptation) separates supported attack attempts/outcomes, material hypotheses and hygiene concerns, with concise non-evidence illustrations and authored source/result semantics. Incoming application fields are not response bodies; query truncation/completeness is local to that query, not the whole investigation. This is prompting/reference metadata only: no change to schemas, SQL, result handling, permissions, model limits or the temporary dev diagnostics, and no guaranteed redaction or semantic validation.
-
-Build and synthesize without deployment from `infra/`:
-
-```console
-npm run build
-npx cdk synth devAiStack --exclusively --lookups=false -c devFrontendAllowedClientCidr=203.0.113.1/32
-```
-
-The Lambda console buffers streaming responses. After the operator deploys dev, validate NDJSON with a non-buffering client against the returned API URL, then verify another source IP is blocked by WAF. Lambda's existing `HttpResponseStream.from` supplies the metadata/delimiter required by [API Gateway streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-streaming-lambda-configure.html); API Gateway supports a five-minute Regional idle timeout and up to fifteen minutes of streaming. The generic fifteen-second heartbeat and ten-minute application budget are unchanged. API transport/WAF, live failure races, and authentication remain operator validation, not claims from synthesis. The [Cognito BFF](infra/lambdas/frontend/auth/README.md) now defines frontend login/me/logout routes, but remains disconnected from chat identity; its resources belong to the independent frontend stack below.
-
-
-### Explicit durable retry
-
-The latest admitted logical user turn can offer explicit retry after reload or
-in another authenticated browser only for confirmed retryable failed/timed_out
-state with no live conversation lease. Messages expose lightweight availability;
-a separate protected read-only preparation GET returns the exact original request
-only when still eligible. One Retry click holds one frontend lock into the existing
-POST /api/chat; submission atomically revalidates latest admission. No automatic
-resubmission, duplicate user turn, unknown/cancelled retry or truncated continuation
-is added. Existing local immutable requests, saved replay, failed-context filtering
-and reusable tool evidence remain. See the [retry contract and coordinated fresh-data rollout](infra/lambdas/frontend/conversation-history/README.md#read-only-retry-preparation).
-Required new TURN/META/status fields need stopped traffic, drained writers and
-operator-designated conversation cleanup plus coordinated existing deployment/
-publication/invalidation; old records and mixed writers/readers/strict clients are
-not transparently compatible. The agent performs no cleanup/deployment. Python
-clients remain unchanged; preparation is outside their current allowlist.
-
-### Frontend and authentication foundation
-
-The frontend now restores saved user/assistant messages and current turn statuses
-when a signed-in user opens or refreshes `/?conversationId=<id>`. A bounded newest
-read gates sending; cached history revalidates in account-scoped memory. The refresh
-icon resets the page chain, and **Load older messages** fetches one snapshot-bound
-page per click while preserving scroll. Individual messages may split a turn
-across pages. Saved history never reconstructs retries or reconnects a stream;
-local drafts/request snapshots disappear on reload. Existing live streaming,
-automatic titles and exact retained local retries remain. See the [frontend guide](frontend/README.md#saved-messages-statuses-and-explicit-pagination)
-for readiness, unknown/running statuses, safe errors and later CloudFront checks.
-The operator confirmed the messages API's owned response and missing/foreign 404
-gate; pagination, byte limits, status/retry cases and UI races remain unverified live.
-This slice changes no backend, IAM, dependency, static publishing path or workflow.
-
-The CDK app defines `devFrontendStack` and `demoFrontendStack` (`SOC-BOT-<ENV>-FRONTEND`) alongside the existing foundation/Data/AI stacks. Each contains private SSE-S3 hosting behind CloudFront OAC, a separate Regional health/auth/chat API, an email/password Cognito pool/client, and a dedicated AWS-managed-encrypted `SOC-BOT-<ENV>-AUTH-SESSIONS` table. The API defines `GET /api/health` (fixed MOCK health) plus `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/signup`, `POST /api/auth/confirm-signup` and `POST /api/auth/resend-confirmation`, `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` and `POST /api/auth/change-password`, all protected by exact-route origin verification. `/api/*` is uncached and forwards cookies/headers/query strings excluding viewer Host; other paths use S3 GET/HEAD without cookies. Frontend now adds a dev-only global IPv4 WAF and an origin-secret REQUEST authorizer in both environments. Authenticated POST `/api/chat` now reuses that API and authorizer; the email/password account/chat UI is published by the application workflows; arbitrary SPA fallback remains excluded. Google activation is described below.
-
-The frontend auth Lambda uses independent fixed twelve-hour opaque sessions, `__Host-soc_bot_session` Secure/HttpOnly/SameSite=Lax cookies and strongly consistent user-version/disablement checks. Permanent `USER#sub` metadata and TTL-expiring `SESSION#sha256` records share the dedicated PK-only table. Trusted pre-authentication context and conditional session creation prevent adopting a newer version after stale authentication; AdminGetUser resolves canonical identity and conditionally initializes only genuinely absent metadata before verification. Recovery from lost metadata remains operator work. The new auth role has exact-pool AdminGetUser, exact-table Get/Put/Delete/ConditionCheckItem and its own log writes, without Secrets Manager or investigation access.
-
-Frontend imports the AI orchestrator for authenticated chat, establishing Data -> AI -> Frontend order, and retains its foundation dependency for shared Regional logging. AI has no reverse Frontend reference. The foundation adds exact frontend access-log grants and scoped Cognito lifecycle/tag permissions; its five execution-policy attachments are unchanged. Cognito statements move into the existing AI/application execution policy to remain below managed-policy size limits. Cognito alone accepts the three exact CloudFormation system-tag keys; protected ownership-tag removal (including mixed requests) is explicitly denied. Other services' conditions remain unchanged. The APPLICATION boundary now adds exact-auth-table ConditionCheckItem and ownership-tagged pool AdminGetUser; QUERY/GLUE and other runtime identity grants are unchanged.
-
-Deployment workflows now explicitly include the matching Frontend stack alongside Data and AI. Manual dev teardown supports frontend-only, AI-only, or all three in Frontend -> AI -> Data order, with exact confirmations described below. Deploy approved administrator-owned foundation changes first; `--exclusively` intentionally excludes that dependency. The frontend build is published only after successful stack deployment. The frontend authorizer binds the sole supported `/api/chat` entry point to the verified session sub; the AI-owned `/chat` is retired without migrating data. After a later authorized dev deployment, check `/api/health`; refresh `/` and `/login` after asset publication. Dev state is disposable without automatic bucket emptying, demo state is retained, and auth PITR/MFA/paid Cognito protection and public-demo email/abuse review remain deferred. Authenticated chat validation uses CloudFront `/api/chat`; the Frontend IPv4 WAF remains in dev. See the [frontend guide](Docs/FrontendStack/README.md) for names, item contracts, security acknowledgments, outputs and activation prerequisites.
-
-Frontend entry-point hardening uses dev-only CLOUDFRONT WAF resources with one IPv4 `/32` allow rule and dev viewer IPv6 disabled. Demo retains IPv6 and has no frontend WAF. Both environments generate a 64-character Secrets Manager origin token; only the API origin injects `X-Soc-Bot-Origin` through a CloudFormation dynamic reference. A zero-cache REQUEST authorizer verifies health and enabled auth routes, and additionally resolves a durable session for protected `/api/chat`, returning permission for the single incoming method using AWSCURRENT, a maximum five-minute in-memory token cache and fixed-length timing-safe comparison. Missing/wrong headers and expired-cache refresh failures deny access. Among runtime identities, only the authorizer receives exact-secret read access; the model and existing investigation roles receive none.
-
-The Frontend API uses `SecurityPolicy_TLS13_1_2_2021_06` with `BASIC` endpoint mode; its deployment hash covers those settings. CloudFront uses TLS 1.2 to the API origin, while its generated viewer hostname still has the fixed TLSv1 policy; this is not end-to-end minimum TLS 1.2 enforcement. Enhanced API-policy changes can take about fifteen minutes to propagate. Runtime admission accepts only authenticated Frontend gateway envelopes; model/tool/streaming behavior is unchanged. The independent frontend CIDR and existing foundation remain prerequisites; this implementation does not deploy. Origin verification alone does not authenticate users; the protected chat authorizer also validates the opaque session. Administrators with distribution-configuration access can read the resolved origin header, and rotation must coordinate a CloudFront configuration update with Secrets Manager and the bounded cache. See the [frontend security and rotation guide](Docs/FrontendStack/README.md#origin-verification-and-dev-viewer-access).
-
-The frontend now defines one `SOC-BOT-<ENV>-FRONTEND-AUTH` Lambda (Node.js 22, 256 MiB, 25 seconds) for email/password login, cookie-only me, current-session logout, signup, code confirmation/resend and password recovery/change. POSTs require JSON plus the exact configured CloudFront browser Origin; GET me permits an absent Origin but rejects an explicit mismatch or cross-site Fetch Metadata. Requests are limited to 8 KiB decoded bodies and reject unknown fields/query parameters. Login/me responses expose only userId/UTC expiry; registration returns fixed messages or safe errors without Set-Cookie. All responses use no-store, with login/logout cookies isolated from JSON. The handler's SDK/JWKS work shares a twenty-second budget. CloudFront API caching stays disabled and supported error-cache minimum TTLs are zero.
-
-Apply the administrator-reviewed boundary update first: the auth identity has exact-table GetItem/PutItem/DeleteItem/ConditionCheckItem/UpdateItem and exact-pool AdminGetUser, without Secrets Manager or investigation permissions. Password workflows need no Google configuration. Later login validation can use an operator-created enabled/confirmed local account with a permanent password; temporary-password, reset and MFA challenges are unsupported. Use the [private in-memory cookie jar example](Docs/FrontendStack/README.md#later-manual-auth-validation), which prompts for credentials rather than placing them in command-line literals. The developer does not create live accounts or seed metadata. Local checks do not prove live login/browser behavior, and these routes do not change the AI chat's temporary owner.
-
-Dev now stages an empty `SOC-BOT-DEV-GOOGLE-OAUTH` secret and account/Region-qualified
-Cognito domain. Optional `devGoogleLoginEnabled` (default false), forwarded from
-the dev Environment variable `DEV_GOOGLE_LOGIN_ENABLED`, enables separate Google
-code/PKCE login without changing the password client. Foundation permissions,
-operator-provisioned credentials and Google redirect setup must precede activation.
-The exact-pool pre-signup guard fails closed on local email collisions and lookup
-errors; callback validates browser-bound one-time proof before reusing fixed
-twelve-hour opaque sessions. Explicit dev [Google linking](Docs/FrontendStack/Google-Linking.md)
-now requires the original session, fresh password proof and direct Google
-authorization; confirmed new links revoke application sessions. Demo Google,
-unlinking/replacement remain deferred; authenticated chat is now wired through the frontend authorizer. Follow the [staged setup and limitations](Docs/FrontendStack/Google-Login.md);
-no credentials are resolved during synthesis and no deployment is implied.
-
-Signup and resend return the same fixed 202 guidance, including duplicate or known ineligible accounts; this does not prove account creation or email delivery. Confirmation returns 200 only after Cognito success and requires a subsequent login. Registration does not touch DynamoDB, create/clear cookies or change existing sessions. The existing pool/client, exact-pool AdminGetUser grant and runtime boundaries remain unchanged; signup/confirmation/resend themselves are public Cognito APIs that do not evaluate IAM.
-
-For later [manual registration validation](Docs/FrontendStack/README.md#later-manual-registration-validation), use a fresh self-service account with a real deliverable email and prompted password/code through CloudFront. The permanent-password administrator test account does not exercise confirmation. Delivery/quota failures may leave an unconfirmed account: wait and use resend rather than deleting/recreating it. Generic responses are not complete enumeration resistance, and limited default Cognito email delivery plus best-effort API throttling do not establish public-demo abuse readiness. No live account or email is created during implementation.
-
-Password recovery/change reuse the same Lambda and origin protections. Forgot-password returns fixed generic 202 guidance without session effects; reset uses canonical recovery-code proof, and change requires the original cookie plus fresh password/verified access-token proof and session revalidation. New passwords follow the signup policy. Single-attempt Cognito mutations reserve time for a fresh post-success USER read and conditional, retry-idempotent version increment. Only both confirmed steps return 200 and clear the browser cookie; no replacement session or provider token is returned. The only new grant is UpdateItem on the exact auth table; the existing APPLICATION boundary already permits it.
-
-Cognito and DynamoDB are not atomic. Confirmed password success with unconfirmed revocation returns a distinct safe 503 and clears only the current browser cookie; other application sessions may remain valid. An uncertain dispatched mutation returns a different safe 503, preserves the cookie and makes no password/revocation claim. Do not blindly retry a consumed code/old-password mutation. Follow the [administrator recovery runbook](infra/lambdas/frontend/auth/README.md#administrator-recovery-runbook) and [later operator validation](Docs/FrontendStack/README.md#later-manual-password-validation), including replay of two private old cookie jars, rather than treating a cleared cookie as revocation proof. Durable automatic repair and global Cognito token sign-out remain deferred.
-
-### Manual API and Chat Clients
-
-Use [scripts/api_client.py](scripts/api_client.py) for one JSON API operation and [scripts/chat_client.py](scripts/chat_client.py) for one streaming chat turn or explicit convenience login. They share [scripts/client_common.py](scripts/client_common.py), including the existing version-1 origin-bound session format. Python 3.11+ and its standard library are sufficient; no package installation or AWS credentials are needed. These are developer-operated manual utilities, not browsers, evaluators or automated tests, and are not registered in CI or `npm test`.
-
-The API client requires an explicit `--action login|me|logout|request`; chat defaults to `--action chat` and also accepts `--action login`. Chat no longer accepts `me` or `logout`. Every action requires a CloudFront `--base-url`; there is no fallback endpoint. From the repository root, `python -m scripts.api_client` and `python -m scripts.chat_client` also work. Direct script invocation by absolute path works from another working directory; no package installation is needed. Importing either client/shared module performs no argument parsing, credential reads or requests.
-
-#### Private session-file setup on Windows
-
-The session file contains a **plaintext bearer credential**. Never share, sync, commit, print or upload it. Use a new private directory under `LOCALAPPDATA`, outside this OneDrive-synchronized checkout. Verify the chosen directory is not synchronized. These PowerShell commands create a new directory and remove inherited ACL entries while granting your current Windows identity access; inspect the resulting ACL before logging in. An existing directory needs deliberate ACL review rather than assuming it is private. Python's POSIX file modes do not guarantee Windows ACL protection.
-
-```powershell
-$base = 'https://dxxxxxxxxxxxxx.cloudfront.net' # Replace with your deployed CloudFrontHostname.
-$private = Join-Path $env:LOCALAPPDATA 'SOC_BOT\ManualChat'
-if (Test-Path -LiteralPath $private) { throw 'Inspect the existing directory ACL, or choose a new private directory.' }
-New-Item -ItemType Directory -Path $private -Force | Out-Null
-$principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-icacls $private /inheritance:r /grant:r "$($principal):(OI)(CI)F"
-if ($LASTEXITCODE -ne 0) { throw 'Private-directory permissions could not be configured.' }
-icacls $private
-$session = Join-Path $private '.soc-bot-chat-session-user-a.json'
-```
-
-`--base-url` permits only HTTPS at a generated CloudFront hostname, with at most one trailing slash. Ports, user information, non-root paths, query strings and fragments are rejected. The shared transport normalizes the origin and validates the exact method, allowlisted path and optional cursor before attaching the cookie. The API client admits only the routes listed below; the chat client admits only login/chat. It sends that exact Origin and never discovers AWS resources or falls back to legacy mode. Custom domains are deferred. Dev's CloudFront IPv4 WAF must allow your current IPv4 address; the separate legacy Regional gate is retired.
-
-Session filenames must be `.soc-bot-chat-session.json` or `.soc-bot-chat-session-<label>.json`, with letters/digits/underscores/hyphens in the label. Only these credential-file patterns and their atomic temporary files are ignored in Git; external private storage remains preferred. There is no implicit session filename. Login can create its explicitly named file inside an existing directory; otherwise a supplied missing/unreadable/malformed/wrong-origin file fails locally. The bounded versioned JSON stores only the exact origin and cookie data needed for scope/expiry, with `cookie: null` after clearing. Saves use a same-directory private temporary file and atomic replacement. Save failures distinguish remote acceptance from local persistence failure; inspect private files before reuse. Do not paste their contents into bug reports.
-
-#### Authenticated manual flow
-
-Use a confirmed, enabled account with a permanent native password. Login requires `--email` and `--session-file`, prompts with hidden `getpass` input, and refuses an echoing fallback. Login has no password flag, environment-variable password, MFA/challenge flow, Google login/linking or automatic login. Google routes remain browser-only and are excluded from both clients. Run from the repository root after the operator has deployed the backend:
-
-```powershell
-$email = Read-Host 'Confirmed password-account email'
-python scripts/api_client.py --base-url $base --session-file $session --action login --email $email
-python scripts/api_client.py --base-url $base --session-file $session --action me
-
-# New conversation: retain the original UUID/question before dispatch.
-$turn = [guid]::NewGuid().ToString()
-$question = 'Which playbook IDs are available?'
-python scripts/chat_client.py --base-url $base --session-file $session --turn-id $turn --message $question
-
-# Deliberate completed-turn replay: identical initial request, still without a conversation ID.
-python scripts/chat_client.py --base-url $base --session-file $session --turn-id $turn --message $question
-
-# Follow-up: enter the actual returned conversation ID and use a fresh turn UUID.
-$conversation = Read-Host 'Returned conversation ID'
-$followTurn = [guid]::NewGuid().ToString()
-$followQuestion = 'Describe the credential-compromise playbook.'
-python scripts/chat_client.py --base-url $base --session-file $session --conversation-id $conversation --turn-id $followTurn --message $followQuestion
-
-# Follow-up replay retains its original conversation ID too.
-python scripts/chat_client.py --base-url $base --session-file $session --conversation-id $conversation --turn-id $followTurn --message $followQuestion
-
-# Each history request fetches just one page; no automatic pagination or merging.
-python scripts/api_client.py --action request --base-url $base --session-file $session --method GET --path /api/conversations
-python scripts/api_client.py --action request --base-url $base --session-file $session --method GET --path "/api/conversations/$conversation/messages"
-$cursor = Read-Host 'Opaque nextCursor from the messages response'
-python scripts/api_client.py --action request --base-url $base --session-file $session --method GET --path "/api/conversations/$conversation/messages" --cursor $cursor
-# For the list's next page, explicitly use /api/conversations with its own nextCursor.
-
-python scripts/api_client.py --base-url $base --session-file $session --action logout
-python scripts/api_client.py --base-url $base --session-file $session --action me
-# The final me is expected to report HTTP 401 and exit 1; the cleared file remains usable but sends no cookie.
-```
-
-Login and me print only validated public `userId`/`expiresAt` JSON. Logout requires empty HTTP 204, prints no stdout body and reports the status on stderr. Auth errors/progress use stderr, without cookie headers, passwords, provider responses or tracebacks. Login requires a matching unexpired cookie and public expiry before saving; me never renews. Logout sends `{}` and requires an empty 204 with the deletion cookie before clearing local state. A recognized me `AUTHENTICATION_REQUIRED` response can also clear local state when it supplies a valid deletion cookie. Opaque chat 401/403, redirects, network failures, 5xx and malformed responses never clear or replace the saved credential. An otherwise valid expired file is accepted with guidance, but its expired cookie is not sent; reauthentication is a separate operator action. Server expiry/version/disablement checks remain authoritative.
-
-Without `--session-file`, either client deliberately uses an empty in-memory cookie jar, except login requires an explicit file. Public registration/recovery need no session file. A supplied file is validated even for a public operation; only login can create a missing file, and no empty file is created implicitly. Use the same file sequentially across the clients: there is no cross-process locking or concurrent credential-write support. For example, this should report HTTP 401 after deployment, with client exit 1:
-
-```powershell
-python scripts/chat_client.py --base-url $base --message 'Describe waf_events.'
-```
-
-For a two-account ownership check, preserve the conversation ID from account A above, then explicitly sign in a different confirmed password account using a separate file:
-
-```powershell
-$sessionB = Join-Path $private '.soc-bot-chat-session-user-b.json'
-$emailB = Read-Host 'Different confirmed password-account email'
-python scripts/chat_client.py --base-url $base --session-file $sessionB --action login --email $emailB
-python scripts/chat_client.py --base-url $base --session-file $sessionB --conversation-id $conversation --message 'Describe waf_events.'
-# Expected generic HTTP 404/NOT_FOUND, without account A metadata/history; client exit 1.
-# Also try the original account-A turn/message/context under B to verify replay remains isolated.
-python scripts/chat_client.py --base-url $base --session-file $sessionB --conversation-id $conversation --turn-id $followTurn --message $followQuestion
-```
-
-These are later operator checks, not results established by implementation. The Python client supplies Origin and uses a strict host-only Secure cookie jar, but is **not a browser**: it cannot prove browser SameSite, HttpOnly, CSRF or Fetch Metadata behavior. It fabricates no Fetch Metadata or origin secret. A later browser check remains required. See [authenticated chat and admission-only authorization](Docs/FrontendStack/Authenticated-Chat.md). Legacy shared-owner conversations are not migrated or automatically accessible to signed-in users.
-
-#### Streaming, errors and import compatibility
-
-Chat accepts only `turnId`, `message` and optional `conversationId`; no identity/session data enters the body. Messages must fit 8,192 UTF-16 units and the 32-KiB serialized-body cap. UUIDs are generated when omitted, and supplied original IDs are preserved. Exactly one chat POST is made, without `/me` preflight, automatic retries, new-conversation fallback, login/renewal or logout. `--action` defaults to `chat`; login rejects chat-only message/IDs, `--email` is login-only, and every action requires `--base-url`. The removed `--api-url` option and missing base fail argument validation before session-file access, password prompts or network dispatch.
-
-Only assistant Markdown goes to stdout as readable plain text; headings, progress, IDs and errors go to stderr. Login emits public JSON rather than assistant text. Silent heartbeats, UTF-8/control-character protection, incremental NDJSON validation, matching response IDs, the 256-KiB line cap and 8-KiB error-body cap remain. HTML/WAF bodies, unexpected JSON and headers are not dumped. HTTP 401 on chat is session-related; HTTP 403 can involve Origin or WAF and is not attributed to WAF alone. An HTTP/transport error does not establish that no turn was accepted.
-
-Exit codes remain `0` for normal completion/replay or successful API/auth, `1` for failed/incomplete operations (including expected manual 401/404 checks), `2` for invalid arguments, `3` for truncated chat completion and `130` for local interruption. The 60-second timeout measures socket inactivity, not total turn duration; server heartbeats are normally every fifteen seconds. Ctrl+C/disconnect does not cancel backend work. Retry only deliberately with the **same authenticated account, original turn ID, exact message and original conversation context**. Omit `--conversation-id` again when retrying an initial request. Replayed answers are labeled; no continuation follows truncation. Local cookie deletion alone is not proof of server revocation; an old-credential logout check needs a separately retained private copy, never a committed fixture or automatic backup.
-
-For local cleanup, remove only the selected session file after confirmed logout when no longer needed (`Remove-Item -LiteralPath $session`). Deleting it without logout does not revoke the server credential. Keep any leftover atomic temporary file private and review it deliberately; there are no automatic backups.
-
-The manual clients and evaluator require explicit CloudFront configuration; neither accepts `--api-url` or selects a default endpoint. The evaluator's migration removes the retired `DEFAULT_API_URL` compatibility constant. Shared pure validation/rendering helpers remain, and importing either client does not read credentials or send requests. The evaluator adds its own bounded session inspection and ownership checks without changing manual-client behavior.
-
-#### JSON operations and private request bodies
-
-Generic `--action request` admits exactly these method/path pairs. Login/me/logout require their dedicated actions; chat, Google/link/callback, arbitrary hosts/paths/headers, raw query strings, fragments, traversal and encoded separators are rejected. A messages conversation ID is 1-128 ASCII letters, digits, underscores or hyphens, not necessarily a UUID.
-
-| Method | Path | Required JSON fields |
-| --- | --- | --- |
-| GET | `/api/health` | No body |
-| GET | `/api/conversations` | No body; optional `--cursor` |
-| GET | `/api/conversations/{conversationId}/messages` | No body; optional `--cursor` |
-| POST | `/api/auth/signup` | `email`, `password` |
-| POST | `/api/auth/confirm-signup` | `email`, `code` |
-| POST | `/api/auth/resend-confirmation` | `email` |
-| POST | `/api/auth/forgot-password` | `email` |
-| POST | `/api/auth/reset-password` | `email`, `code`, `newPassword` |
-| POST | `/api/auth/change-password` | `currentPassword`, `newPassword` |
-
-For each POST supply `--body-file` pointing to a private UTF-8 JSON object outside this checkout/synced directories, or `--body-file -` to explicitly read stdin. GET never reads a body. Input and serialized auth JSON are each capped at 8 KiB; duplicate/unknown fields, non-string auth values, invalid Unicode, NaN/Infinity and non-object input are rejected. Existing email normalization/bounds apply; codes remain non-whitespace strings of 1-2048 UTF-16 units, including leading zeroes. Current passwords allow 1-256 units; new/signup passwords require 15-256 units without whitespace. Secrets are never printed.
-
-Prepare private files locally using these **object shapes**, replacing placeholders without putting actual passwords/codes in shell history or tracked files. These examples are not ready-to-send account credentials:
-
-```json
-{"email":"<your deliverable email>"}
-```
-
-This shape supports signup (prompts once for omitted `password`), resend-confirmation and forgot-password. Confirmation requires `{"email":"<your email>","code":"<code from email>"}`; reset-password uses that same shape and prompts for omitted `newPassword`. Change-password accepts `{}` and privately prompts for omitted `currentPassword` and `newPassword`. Present secret fields are accepted from private file/stdin unchanged; only missing secret fields are prompted, with no visible-input fallback. All nonsecret fields and supplied secrets must validate before prompts occur.
-
-```powershell
-$signupBody = Read-Host 'Private signup JSON file path (email only; password will be hidden)'
-python scripts/api_client.py --action request --base-url $base --method POST --path /api/auth/signup --body-file $signupBody
-$confirmationBody = Read-Host 'Private confirmation JSON file path (email and code)'
-python scripts/api_client.py --action request --base-url $base --method POST --path /api/auth/confirm-signup --body-file $confirmationBody
-$recoveryBody = Read-Host 'Private recovery JSON file path (email only)'
-python scripts/api_client.py --action request --base-url $base --method POST --path /api/auth/forgot-password --body-file $recoveryBody
-$resetBody = Read-Host 'Private reset JSON file path (email and code; newPassword will be hidden)'
-python scripts/api_client.py --action request --base-url $base --method POST --path /api/auth/reset-password --body-file $resetBody
-$changeBody = Read-Host 'Private change-password JSON file path (empty object; passwords will be hidden)'
-python scripts/api_client.py --action request --base-url $base --session-file $session --method POST --path /api/auth/change-password --body-file $changeBody
-```
-
-Registration, confirmation and recovery do not establish a session; a generic 202 does not prove an account exists or a message was delivered. Reset/change success requires the fixed 200 JSON and valid deletion cookie before clearing only the supplied local file. Without a file, public reset still validates that cookie but saves nothing. `PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED` remains a failed 503: password success is confirmed, the deletion cookie clears the supplied local credential, and server-wide revocation remains unconfirmed. Seek authorized review; do not repeat automatically. `PASSWORD_UPDATE_UNCONFIRMED` preserves local state and makes no password-success claim. Other files/devices are never edited or claimed revoked by this utility. Invalid credentials, recognized me rejection, authorization/Origin/WAF denial, throttling and service failure remain distinct; generic 401/403 never means automatic local logout.
-
-#### JSON output, history pages and offline limits
-
-API stdout is only the complete parsed object, indented with JSON escapes for control/non-ASCII characters; decoding it restores the original text. It never prints raw HTML, headers, redirects, cookies, request bodies or raw exceptions. Bounded application/json error objects and request IDs are preserved on stdout even when exit 1. HTTP status/progress/warnings use stderr. A 204 produces **no stdout**, not `null` or fabricated JSON. For an existing private directory, PowerShell can separate streams as follows; outputs may contain sensitive conversations, so keep them private and untracked:
-
-```powershell
-python scripts/api_client.py --action me --base-url $base --session-file $session 1> (Join-Path $private 'me-response.json') 2> (Join-Path $private 'me-status.txt')
-$LASTEXITCODE # Check before attempting to parse stdout; failures may have no JSON body.
-python scripts/api_client.py --help
-python scripts/chat_client.py --help
-```
-
-API exit codes are 0 only for an acceptable complete 2xx and any required save, 1 for HTTP/protocol/local/network failure, 2 for usage and 130 for local interruption. A validated remote outcome followed by local-save failure still fails and is reported distinctly. The API's 75-second socket-inactivity timeout accommodates messages processing; it is not an end-to-end deadline. Chat retains its 60-second inactivity timeout, 256-KiB NDJSON line limit and exit 3 for truncation. JSON response caps are 1 KiB health, 8 KiB auth/errors, 32 KiB list and 262,144 bytes messages, detected with cap+1 reads. No response clipping or automatic request follows a timeout, failure or successful mutation; an interrupted/dispatched request can have an unknown remote outcome.
-
-History cursors are opaque 1-2048-character base64url strings encoded once, never decoded/repaired locally. Messages print the full `conversationId`, `snapshotSequence`, `messages`, `turnStatuses` and `nextCursor` object. Each page has at most 20 displayed messages, ascending within a newest-first page chain, and can split a turn. The snapshot fixes the message boundary; statuses are current and equal revisions may recur with different effective running/incomplete states as a lease expires. An empty `messages` with non-null `nextCursor` is not globally empty history. Fetch the next page explicitly; the client does no merging, polling, grading, tool reconstruction or caching.
-
-Messages commands depend on the separate endpoint deployment and its Regional integration allowance of at least 50 seconds plus CloudFront 60-second response allowance. Reconcile the deployed endpoint before operator validation; this client change does not deploy it or validate those live prerequisites. Local syntax/import/help and existing checks cannot prove login, cookie transitions, pagination or remote side effects. After review, the operator should validate API login -> me -> list/messages/explicit cursor, chat/follow-up sharing the same file, logout -> rejected me/chat, then any authorized disposable-account password checks. Browser SameSite/HttpOnly/CSRF and Google flows remain separate. The evaluator's authentication migration stays deferred; the compatibility exports above do not make paid evaluations operational.
-
-
-### Shared application, WAF, VPC, and CloudTrail normalization
-
-The existing `SOC-BOT-<ENV>-NORMALIZE-APP` job and `SOC_BOT_<ENV>_RUNTIME_GLUE_APP` role now serve application/WAF/CloudTrail JSONL and VPC `.log` files; their names are retained to avoid resource replacement. Default arguments use `--input_prefix s3://<data-bucket>/raw/`, `--output_prefix s3://<data-bucket>/normalized/`, and `--quarantine_prefix s3://<data-bucket>/quarantine/`. A root run reads only `raw/app/`, `raw/waf/`, `raw/vpc/`, and `raw/cloudtrail/`, never lists `raw/` or the bucket root, and reports absent supported prefixes. Override only `--input_prefix` with a source prefix such as `s3://<data-bucket>/raw/cloudtrail/` (with or without a trailing slash) for a source-specific run. Other explicit prefixes and inconsistent buckets are rejected. Existing per-source output/quarantine argument overrides must be changed to the shared roots.
-
-Each source has its own schema, rejection threshold, summary counts, and normalized/quarantine date partitions. All selected sources are validated before writing. Full mode replaces source/date partitions found in input; incremental mode requires `--dates` and touches only the intersection with each source's input dates. A source-only run never rewrites unselected sources, and a missing explicitly selected source fails. Writes are not transactional across partitions; rerun affected dates after a failed write. Runtime IAM grants raw reads and output writes/listing only for the supported app/WAF/VPC/CloudTrail prefixes; raw writes, unrestricted listing, and evaluation access remain excluded. The CloudTrail increment requires a matching Data-stack deployment to publish assets, update the role/job, and create `cloudtrail_events`, but no foundation update, crawler, schedule, or backfill. Lake Formation governance is managed separately by Data and AI.
-
-The projected `waf_events` catalog table preserves native WAF action, rule IDs/types, response code, labels, match details, request metadata, and raw-object provenance. Epoch-millisecond `timestamp` is canonical; an optional ISO `event_time` must agree exactly. Duplicate request IDs remain separate rows. IDs copied into different raw objects have distinct `event_uid` values; repeats within one object can share an ID, so request ID or event UID alone is not a unique occurrence or correlation key. The supplied WAF records do not contain application ground-truth annotations; the transformer selects native evidence fields without a recursive synthetic-field filter. Native rule details, labels, and matched data are preserved. Initial `waf_rules_v1` severity is Informational for unmatched ALLOW, Medium for matched BLOCK, High for matched ALLOW, and Unknown otherwise; compact JSON-text `severity_source` preserves native rule/label evidence. Application severity and schema are unchanged. The local JSONL runner uses the shared routing module for all four sources.
-
-The application job configures EMRFS with `spark.hadoop.fs.s3.useDirectoryHeaderAsFolderObject=true` and `spark.hadoop.fs.s3.folderObject.autoAction.disabled=true` at startup. This avoids legacy `_$folder$` marker handling during Parquet commits, which can request listings outside the role's approved application prefixes. The scoped S3 permissions and evaluation-data protections remain unchanged. Redeploy the matching Data stack to apply these job arguments; no foundation-stack change is required for this configuration fix. A failed commit can leave Parquet files already uploaded, so rerun the affected date partitions after the update rather than treating a failed run as complete. See the [AWS Glue EMRFS configuration reference](https://docs.aws.amazon.com/glue/latest/dg/security-access-control-fta.html) for the folder settings; this job does not enable Lake Formation full table access.
-
-### VPC Flow normalization
-
-Select `--input_prefix s3://<data-bucket>/raw/vpc/` to process VPC only; retain the shared output and quarantine roots. Version-2 input must have 14 space-delimited fields. `-` means null for unavailable evidence, while version and start/end epoch seconds are required. Source account IDs stay strings, including AWS's `unknown` value. UTC start is `event_time`; `ACCEPT`/`REJECT` map to allowed/blocked status. All flows remain Informational under `vpc_rules_v1`: action, IP addresses, and counters alone do not establish maliciousness.
-
-The `vpc_flow_events` table preserves the common envelope and native flow fields at `normalized/vpc/year=YYYY/month=MM/day=DD/`. `source_type` remains `vpc_flow`, `source_s3_key` is the raw object key, and `source_record_ref` is its one-based physical line number. `raw_event` preserves the exact line, including its terminator. Event IDs include the key, line number, and original line, so repeated lines at different positions remain distinct. Each VPC object is read whole for stable numbering; prepared daily `.log` files must fit executor memory. Malformed rows, blank lines, headers, and unsupported versions use `quarantine/vpc/`; their date falls back to a `YYYY-M-D.log` filename, and an unavailable fallback fails the run. Existing rejection thresholds and bounded date replacement still apply. Application/WAF readers and schemas are unchanged.
-
-### CloudTrail normalization
-
-Select `--input_prefix s3://<data-bucket>/raw/cloudtrail/` for CloudTrail JSONL. Valid events require a timezone-aware `eventTime`, `eventSource`, `eventName`, `eventID`, and a `userIdentity` object. ARN, username, request ID, errors, and nested details may be absent or null. `cloudtrail_events` retains the common envelope plus event version/service/name/Region, user agent, identity type/account/username, error code/message, S3 bucket/key/prefix, and transferred-out bytes. Event version stays a string; transferred-out bytes use `bigint`. S3 bucket/key/prefix columns are extracted only when `eventSource` is `s3.amazonaws.com`; other services' variable request keys remain in `raw_event`. Sparse details and the complete original event remain serialized JSON in `raw_event`.
-
-`eventTime` determines UTC partitions; `eventID` becomes `source_record_ref` and, with the source type and raw object key, determines `event_uid`. `actor` uses the ARN, then username; identity account falls back to `recipientAccountId`. A non-empty `errorCode`, a non-empty `errorMessage`, or `responseElements.ConsoleLogin == "Failure"` means failure; otherwise status is success. Missing, null, and empty-string error fields do not independently indicate failure, and absent/null `responseElements` is supported. Production Glue reads CloudTrail objects whole to retain one-based physical line references for quarantine, so prepared JSONL objects must fit executor memory. Its object reader and the streaming local runner preserve CRLF, CR, and LF line endings and count blank lines while skipping their transformation. Malformed events use `quarantine/cloudtrail/` and the existing date-fallback behavior.
-
-The initial `cloudtrail_rules_v1` mapping exact-matches the approved synthetic source IPs and identity/issuer ARNs listed in section 14.2 of `Docs/Final_Spec.md`. Unmatched events are Informational. Matched failed ConsoleLogin and other scanner/context activity are Medium; matched successful S3 `ListObjects`/`ListBuckets` are High; matched successful S3 `GetObject` with positive transferred-out bytes is Critical. The compact JSON-text `severity_source` records the version, rule, matching field/value pairs, and minimal event evidence. These are prepared-dataset heuristics, not general threat intelligence or proof of compromise. Presence of an ARN or a ConsoleLogin result alone does not identify an attacker.
-
-### Local application, WAF, VPC, and CloudTrail normalization
-
-Place local JSONL fixtures in `glue/test/sample_logs_app/`, `glue/test/sample_logs_waf/`, and `glue/test/sample_logs_cloudtrail/`, and VPC `.log` fixtures in `glue/test/sample_logs_vpc/`, then run:
-
-```console
-python glue/test/run_local.py
-python glue/test/run_local.py --input-prefix raw/app/
-python glue/test/run_local.py --input-prefix raw/waf/
-python glue/test/run_local.py --input-prefix raw/vpc/
-python glue/test/run_local.py --input-prefix raw/cloudtrail/
-```
-
-The runner reuses production `routing.classify` for App/WAF/CloudTrail and `classify_vpc_object` for VPC, including source-specific parsers, normalizers, severity, and quarantine handling, without Spark, Docker, AWS, or S3. CloudTrail JSONL is streamed locally: each nonblank line and its physical line number pass to the same classifier used by Glue's whole-object reader. Both CloudTrail paths preserve CRLF, CR, and LF line endings and count blank lines. `--input-dir` specifies the fixture root containing those source folders. Default `--input-prefix raw/` selects all present supported folders; explicitly selecting a missing source fails. App/WAF/CloudTrail `.jsonl` and VPC `.log` files are discovered recursively in sorted relative-path order. App/WAF/CloudTrail blank lines are skipped; VPC blank lines are quarantined, matching Glue. VPC files are read whole, preserving original line endings and physical line numbers. Valid records go to `output_<source>/`; rejected records go to `quarantine_<source>/`, including `output_cloudtrail/` and `quarantine_cloudtrail/`, retaining relative directories and using `.jsonl` filenames for all sources. Counts are reported per source. UTC timestamps are serialized as ISO 8601 strings. Use `--output-dir <directory>` to change the output root; combined output is no longer supported. Selected files are replaced on rerun, including empty quarantine files, while unselected-source outputs remain untouched. Outputs cannot overwrite fixtures or reside inside fixture folders. Unexpected errors stop with filename and line number and can leave partial output. Invalid records require a dated `YYYY-M-D.jsonl` (App/WAF/CloudTrail) or `YYYY-M-D.log` (VPC) filename for production quarantine date fallback.
-
-The `soc-bot-local-fixtures` bucket is a local placeholder; no S3 connection is made. Provenance keys use `raw/<source>/<relative-filename>`, matching Glue when fixture-relative paths mirror raw object-key suffixes (including nested folders); VPC source keys retain their `.log` extension. With the same source key and request ID (App/WAF), event ID (CloudTrail), or physical line number and exact line content (VPC), `event_uid` values match the production transformation. User-local fixtures and default normalized/quarantine outputs are ignored by Git; approved synthetic fixtures under `glue/test/fixtures/` are trackable. The entire `glue/test/` subtree is excluded from CDK Glue library assets. Custom outputs must also remain untracked. This runner does not verify Spark execution, partition commits, Parquet writing, S3 permissions, rejection thresholds, or Glue job arguments.
-
-### Automated local checks and offline Parquet parity
-
-Install the pinned local comparison dependencies and run the Python suite:
-
-```console
-python -m pip install -r glue/test/requirements-test.txt
-python -m unittest discover -s glue/test -p "test_*.py"
-```
-
-PR checks run the same suite with Python 3.11, without AWS credentials, Spark, or downloaded results. Tracked fixtures under `glue/test/fixtures/sample_logs_app/`, `sample_logs_waf/`, and `sample_logs_vpc/` are small, synthetic inputs independent of user-local datasets. The three WAF files contain 10 records each: 10 Informational; 6 Informational and 4 Medium; then 5 Informational, 3 Medium, and 2 High. The VPC `.log` fixture contains 10 distinct ordinary ACCEPT records on September 1, 2026 UTC, all with source account ID `123456789123`. Focused VPC runner checks cover typed fields, partitions, line/object provenance, fixed Informational severity, malformed/blank quarantine, and selection/isolation without adding severity-engine tests. Expected outcomes live in the tests, not in input labels. All local test utilities, fixtures, and comparison dependencies remain excluded from Glue deployment assets.
-
-To inspect tracked fixture output locally, use an ignored output root:
-
-```console
-python glue/test/run_local.py --input-dir glue/test/fixtures --input-prefix raw/ --output-dir glue/test/output
-```
-
-After a real Glue run, download only the matching normalized Parquet files. Generate expected JSONL from the **same raw records and relative object paths**, then compare one source at a time:
-
-```console
-python glue/test/compare_parquet.py --parquet "path/part-00000.parquet" "path/part-00001.parquet" --expected "glue/test/output/output_waf/2026-9-01.jsonl"
-```
-
-Supply every expected JSONL file and downloaded Parquet file covering the same selected data. The offline utility uses Pandas/PyArrow to compare every persisted source column, including `source_s3_key` and `event_uid`, as a multiset: row order does not matter, but duplicate occurrences do. It normalizes UTC timestamps, nullable integers, and null representations; serialized evidence strings are still compared exactly. A mismatch or invalid schema exits unsuccessfully with counts and concise identifiers, not raw request payloads. Local `year`/`month`/`day` helpers are checked against each event's UTC date but are not expected as Parquet columns. Preserve `year=YYYY/month=MM/day=DD/` directories when downloading to additionally verify partition placement; flattened downloads cannot prove the original S3 partition path. Keep actual AWS downloads and expected/generated outputs in ignored folders.
-
-The comparison is manual and offline; it does not download from S3, invoke Glue, or verify Spark commits, IAM permissions, or job orchestration. Actual AWS-output parity remains an operator check after a matching Glue run. The normalization suite and Parquet comparison utility cover App/WAF/VPC. The manual runner also supports CloudTrail; automated CloudTrail fixtures, test cases, and Parquet comparison are deferred.
-
-### Application stack deployment and teardown
-
-### Legacy retirement operator handoff
-
-1. Deploy the reviewed application update through the existing workflows in Data -> AI -> Frontend order. Do not destroy stacks or manually delete the old resources first. Lambda code/configuration updates are not an atomic application release; transient errors must fail closed, never select a default owner.
-2. Verify explicit authenticated login/chat/follow-up/completed replay and logout followed by me 401. Preserve the Frontend API/distribution/WAF, origin/auth/session data, orchestrator/tools/Lake Formation grants and all chat owners' records.
-3. Verify the old AI API/stage, dev Regional association/WebACL/IPSet and old `/chat` invocation permission are actually gone. An old URL's particular HTTP status alone is not proof of cleanup; inspect the deployed resources and function policy using operator access.
-4. Dev's two legacy API log groups follow their existing Delete policies. If demo was deployed, its two Retain-policy log groups may remain unmanaged after removal; do not assume demo existed or purge retained logs. The shared foundation logging role/account configuration and cleanup/rollback permissions stay in place for this update. AWS documents REST API WAF disassociation through [apigateway:SetWebACL](https://docs.aws.amazon.com/waf/latest/developerguide/security_iam_service-with-iam.html), not an added blanket WAF disassociation grant.
-5. Treat evaluator runs as unavailable until the separate migration; never disable authentication to restore them. Remove the unused old CIDR variable and consider cleanup-policy pruning only after removal and rollback needs are reviewed.
-
-No AWS cleanup or live verification is claimed by this implementation. Retirement does not change table ownership or reassign historical shared-owner conversations.
-
-
-- A push to `dev` deploys `devDataStack`, `devAiStack` and `devFrontendStack` (`SOC-BOT-DEV-DATA`, `SOC-BOT-DEV-AI`, `SOC-BOT-DEV-FRONTEND`) through the `dev` GitHub Environment. A push to `main` deploys the corresponding `demoDataStack`, `demoAiStack` and `demoFrontendStack` through the `demo` Environment. Both workflows lint, typecheck/build frontend, build infrastructure and synthesize before assuming the role, then deploy the existing `infra/cdk.out` assembly with explicit IDs and `--exclusively`. Default sequential, dependency-aware deployment keeps Data before AI; Frontend imports AI, so deployment order is Data -> AI -> Frontend.
-- Each Environment must supply an `AWS_ROLE_ARN` variable naming its exact `SOC_BOT_<ENV>_DEPLOY` role and restrict deployment to its matching branch. The workflows assume that role through GitHub OIDC and pass only the matching `SOC_BOT_<ENV>_CFN_EXEC` role to CloudFormation. CDK uses current OIDC credentials for stack operations and publishing Data assets to the dedicated Glue file bucket and AI assets to the existing bootstrap bucket. The account must already be bootstrapped; the workflows never run `cdk bootstrap`.
-- Dev requires only `DEV_FRONTEND_ALLOWED_CLIENT_CIDR`, a public IPv4 `/32`. PR/demo/teardown synthesis retains reserved `203.0.113.1/32` for that independent Frontend context. Demo-only deployment selection and teardown behavior are unchanged. The old `DEV_ALLOWED_CLIENT_CIDR` variable is unused; remove it only after the operator has completed retirement and decided rollback requirements. Foundation permissions/shared logging remain unchanged in this update.
-- Main still automatically deploys the explicit demo application stacks; public-demo release remains deferred pending the remaining authentication abuse, email and security review. Retirement removes the unauthenticated AI API rather than broadening demo access. Local validation neither deploys demo nor changes GitHub Environment protections.
-- Dev deployment and destruction share `soc-bot-dev-data`; demo deployment uses `soc-bot-demo-data`. All retain `cancel-in-progress: false` and the existing 30-minute job timeouts. CloudFront changes can take several minutes. A failed or timed-out workflow does not prove CloudFormation has stopped; inspect live state in a separately authorized operator session before recovery.
-
-`Destroy Dev Infrastructure` is manual-only on `dev`, using the `dev` Environment. Its default remains `ai`; scope and exact confirmation are checked before requesting AWS credentials:
-
-| Scope | Exact confirmation | Explicit deletion targets |
-| --- | --- | --- |
-| `frontend` | `DELETE SOC-BOT-DEV-FRONTEND` | `devFrontendStack` only; AI and Data remain. |
-| `ai` | `DELETE SOC-BOT-DEV-AI` | `devAiStack` only; Frontend and Data remain. |
-| `all` | `DELETE ALL SOC-BOT-DEV-STACKS` | `devFrontendStack`, then `devAiStack`, then `devDataStack`, in separate awaited commands. |
-
-Each command targets only its literal stack ID with `--exclusively`. Frontend failure stops the run before AI/Data deletion; AI failure stops it before Data deletion. AI-only never expands to frontend deletion: if frontend imports block it, review a broader scope or dependency removal first. Data-only, foundation teardown and demo teardown are excluded; arbitrary stack names and `--all` are not accepted.
-
-**Dev frontend teardown deletes its Cognito pool/users and auth/session table, not just hosting.** No automatic S3 emptying or separate user/session cleanup is performed. A nonempty frontend or Data bucket can block stack deletion; deliberately review and empty that bucket with administrator access before retrying. Partial teardown may already have deleted other resources. The dev OIDC and resource-policy smoke workflows remain separate, manual diagnostics. Frontend publication retains old hashed assets, copies the HTML entries last and submits a cache invalidation. Admin recovery and stale-asset cleanup remain deferred; validate the website and authenticated flows after deployment.
-
-### Lake Formation governance and operator rollout
-
-Registration explicitly depends on the Glue database and all four tables. For an initially unregistered prefix, the catalog is therefore created before registration without adding execution-role `DATA_LOCATION_ACCESS`. Data teardown reverses this order, deregistering before deleting the catalog and only after AI is removed. This initial-provisioning ordering does not replace the authority needed for later catalog replacements or location changes under an already registered prefix.
-
-Each Data stack registers only `s3://<data-bucket>/normalized/` through `LakeFormationLocation`, using the existing `AWSServiceRoleForLakeFormationDataAccess` role with hybrid access disabled. No raw, quarantine, evaluation, playbook, or Athena-result prefix is registered. The database sets `CreateTableDefaultPermissions` to an empty list, preventing new tables from inheriting broad default grants; this does not revoke grants on existing resources or change account-wide `DataLakeSettings`.
-
-Each AI stack owns five `PrincipalPermissions` resources for `SOC_BOT_<ENV>_RUNTIME_QUERY_TOOL`: database `DESCRIBE`, and combined `SELECT`/`DESCRIBE` on each of `application_events`, `waf_events`, `vpc_flow_events`, and `cloudtrail_events`. There are no grant options, wildcard table grants, or query-role `DATA_LOCATION_ACCESS` grants. Query IAM, its permission boundary, and results-only S3 access are unchanged. Strong Data imports keep deployment ordered Data before AI and teardown AI before Data. AI-only deletion revokes its grants without deregistering the Data location; Data deletion deregisters the location after AI is removed.
-
-The foundation's dev/demo data-and-analytics execution policies allow `iam:GetRole` and `iam:GetRolePolicy` only on the account's exact `AWSServiceRoleForLakeFormationDataAccess` service-linked role ARN, so CloudFormation can inspect the role and its inline policy. These read-only lookups do not authorize creating, changing, passing, or assuming that role. Apply the reviewed foundation policy update as an administrator before retrying application deployment; workflows do not deploy the foundation.
-
-Before allowing an automatic dev/main deployment, use the Lake Formation/IAM consoles with administrator access to verify these prerequisites separately for dev and demo:
-
-1. Confirm the service-linked role exists. The operator confirmed it for this implementation; the application does not create it. If absent later, stop for an administrator prerequisite rather than expanding runtime permissions.
-2. Inspect **Data lake locations** for registrations of either exact normalized prefix or an overlapping parent/child path, including a bucket-root registration. Existing administrator `SELECT`/`DESCRIBE` grants are catalog permissions, not evidence of an S3 registration. Resolve conflicting registration ownership before deployment.
-3. Inspect **Data permissions** on `soc_bot_<environment>_security` and its four tables. Record any `IAMAllowedPrincipals` grants and confirm the dedicated query role has no pre-existing grants on these five principal/resource pairs. Do not mix manual grants with these CloudFormation-owned pairs: [deleting a PrincipalPermissions resource revokes all permissions on its pair, including manual additions](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-lakeformation-principalpermissions.html).
-4. Verify the matching `SOC_BOT_<ENV>_CFN_EXEC` role has Lake Formation authority to manage the project catalog and grant/revoke the specified permissions, including grant options or applicable administrator authority. Catalog creation/update in a registered location also requires the appropriate catalog/data-location authority. The CDK policies contain the approved IAM registration/grant/revoke/list actions, but [IAM permission alone does not establish Lake Formation authority](https://docs.aws.amazon.com/lake-formation/latest/dg/lf-permissions-reference.html). Do not use this application slice to replace account-wide administrators or data-lake settings.
-
-Only the service-linked-role prerequisite has been operator-confirmed; registration overlap, existing grants, and execution-role Lake Formation authority have not been live-verified by this implementation.
-
-After Data and AI deploy successfully, inspect the query role's database grant and all four table grants. Then, in **Data permissions**, revoke only `IAMAllowedPrincipals` **Super** (API principal `IAM_ALLOWED_PRINCIPALS`, permission `ALL`) on this environment's database and the four named tables, if present. If absent, there is nothing to revoke. Preserve the administrator's existing test grants, unrelated principals/resources, and any other permissions; do not perform a catalog-wide revocation or change default account settings. Finally, verify a bounded query with the dedicated query role succeeds and a principal without Lake Formation grants is denied (with otherwise suitable Athena/results IAM permissions). These live checks and scoped cleanup are operator tasks, not part of local synthesis or deployment automation.
-
-### Foundation tagging exceptions
-
-- The shared GitHub OIDC provider has `Project=SOC_BOT` and `ManagedBy=CDK` tags but no environment tag because it is shared by both environments.
-- The shared API Gateway logging role has the same no-environment-tag exception. `AWS::ApiGateway::Account` is Regional/account-level and not taggable; it exists only in the foundation. API Gateway's execution log-group name is fixed by AWS, so its project ownership is carried by explicit tags and its environment stage suffix rather than a SOC_BOT physical-name prefix.
-- CloudFormation's `AWS::IAM::ManagedPolicy` resource does not support tags. The customer-managed execution policies and runtime permission boundaries therefore cannot carry the standard foundation tags. Their exact environment-qualified physical names, role attachments, and policy conditions preserve ownership and environment isolation. Adding tags would require an out-of-scope custom resource and an additional privileged runtime role.
-
-### Runtime IAM and deployment trust
-
-Each environment has three administrator-managed maximum-permission policies named `SOC_BOT_<ENV>_BOUNDARY_APPLICATION`, `SOC_BOT_<ENV>_BOUNDARY_QUERY`, and `SOC_BOT_<ENV>_BOUNDARY_GLUE`. Runtime roles use matching `SOC_BOT_<ENV>_RUNTIME_<CLASS>_*` namespaces. Application roles can access application state, the approved Bedrock profile, tool Lambdas, playbooks, and Cognito pools bearing the matching ownership tags. Query roles use Athena, read-only catalog metadata, Lake Formation data access, and the results prefix. Glue roles use the approved catalog operations and raw/normalized/quarantine prefixes. Each boundary denies evaluation-object access; only query and Glue boundaries permit bucket listing, restricted to their operational prefixes.
-
-`SOCBOTAccessClass` is required inventory metadata, not an authorization selector. Creation requires all four ownership/class request tags and the matching boundary. Subsequent boundary assignment checks the existing role tags. Protected tags cannot be removed or changed; updates to an existing role's tags must resend the complete protected set unchanged. Explicit tag denials cover environment project roles, while runtime IAM Allow statements target only the three class namespaces. Runtime managed policies use `SOC_BOT_<ENV>_RUNTIME_POLICY_*`; boundary-policy edits are explicitly denied and attachments require that runtime-policy namespace through `iam:PolicyARN`.
-
-The reviewed GitHub deployment path is trusted. Its execution role may remove runtime boundaries for automatic CloudFormation rollback and deletion, with no IAM restriction limiting removal to those events. After removal, inline or attached runtime policies are no longer capped by the boundary. These controls prevent accidental class assignment and boundary-policy modification; they do not contain a malicious or compromised deployment path. Review application templates and protect GitHub environments accordingly.
-
-### Accepted Lake Formation authority
-
-Both environment execution roles' IAM policies permit account-wide calls to exactly `RegisterResource`, `DeregisterResource`, `GrantPermissions`, `RevokePermissions`, and `ListPermissions`. These Lake Formation administration operations use `Resource: "*"`; live Lake Formation grant authority is a separate operator prerequisite. The account must not contain unrelated Lake Formation workloads. Application CDK uses environment-qualified buckets, databases, tables, and principals; IAM resource scoping does not enforce that separation. A validated provider is the future hardening path if unrelated Lake Formation workloads are introduced. Data-lake settings, LF-tag administration, and data-cell filter administration remain excluded.
-
-After synthesis, `node infra/scripts/validate-policies.cjs` checks resolved policy sizes, namespaces, and attachment quotas. Add `--analyzer` to perform read-only AWS IAM Access Analyzer validation of all synthesized identity policies (AWS credentials and network access required). Temporary resolved copies use a synthetic account ID and are written to the operating-system temporary directory.
-
-## Development Workflow
-
-Changes are designed in a planning task before implementation. Each approved implementation plan is handed to a separate development task, which makes the scoped changes, runs the relevant checks, and reports results. Architectural decisions discovered during implementation should be returned to planning instead of being silently introduced.
-
-The deployment and dev teardown procedures are documented above; live operation remains with the operator.
-
-## Cost Constraint
-
-The project has a hard target of no more than **$100 per month** and should remain substantially below that amount. Recurring services must have bounded configurations, monitoring, and an off switch where practical.
-
-### Explicit attempt cancellation
-
-A single composer Stop can target the current acquired attempt or restored
-running history. Its authenticated POST records durable intent; 202 means
-Stopping, not confirmed cancellation. The orchestrator observes intent boundedly,
-aborts normal SDK waits and guards final-answer persistence atomically. Confirmed
-cancelled outcomes are nonretryable and retain original user/tool/history records;
-partial text is not saved as an assistant answer. Disconnect alone never calls Stop.
-See [cancellation contracts, limits and rollout](Docs/AIStack/Lambdas/ChatOrchestrator/Cancellation.md).
-
-Operator rollout requires the exact-table foundation ConditionCheckItem boundary
-permission first, stopped submissions/drained old workers and coordinated AI/
-Frontend/static publication. The optional marker requires no cleanup of otherwise
-valid durable-retry records. No deployment, live cancellation or provider-termination
-claim is made by offline verification.
+Generated assets, credentials, local datasets, and evaluator reports must remain untracked. Source-repository visibility and permission to publish documentation do not authorize publishing private artifacts.
+
+## High-Level Architecture
+
+| Layer | Implementation and responsibility |
+| --- | --- |
+| Browser | Vite, React, TypeScript, and Tailwind; private S3 hosting behind CloudFront Origin Access Control |
+| API and identity | API Gateway/Lambda, Cognito-backed BFF, opaque HttpOnly cookies, and DynamoDB sessions |
+| Investigation | Application-owned Bedrock `ConverseStream` loop; validated query and playbook tools |
+| Memory | DynamoDB conversations, structured investigation state, summaries, and bounded model context |
+| Data | Glue normalizes raw S3 logs into source-specific, OCSF-aligned Parquet tables |
+| Query and retrieval | Controlled Athena queries through the Glue catalog/Lake Formation; private S3-backed playbook retrieval |
+| Infrastructure | TypeScript CDK; separate AWS `dev` and `demo` environments plus a disconnected local frontend preview |
+
+Frontend owns authenticated API admission; AI owns orchestration and tools; Data owns the lake/catalog/workgroup. The administrator-managed foundation supplies deployment identities and permission boundaries. See the [current architecture overview](Docs/Architecture.md) and [security boundaries and accepted decisions](Docs/Security.md).
+
+## Getting Started
+
+Use Node.js 22 and install the shared workspace dependencies with `npm ci` from the repository root. Then `npm run frontend:dev` starts a disconnected local UI preview, not an authenticated AWS environment. Full prerequisites and existing check commands are in [Setup](Docs/Setup.md).
+
+**Before pushing:** pushes to `dev` and `main` currently trigger AWS deployment and frontend publication, including docs-only pushes. Deployment, teardown, live clients, and paid evaluation are deliberate operator actions; read [Operations](Docs/Operations.md) before using them. The project budget target is below $100/month; throttling is not a hard spending ceiling.
+
+| Continue With | Guide |
+| --- | --- |
+| Find documentation and historical specifications | [Documentation hub](Docs/README.md) |
+| Frontend development and behavior | [Frontend](frontend/README.md) |
+| CDK resources and deployment boundaries | [Infrastructure](infra/README.md) |
+| Normalization and offline data checks | [Glue](glue/README.md) |
+| Manual API/chat commands and private session handling | [Python clients](scripts/README.md) |
+| Evaluator prerequisites, private artifacts, and grading | [Evaluation](evaluation/README.md) |
+| Documentation coverage and remaining work | [Documentation inventory](Docs/Documentation-Inventory.md) |

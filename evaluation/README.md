@@ -4,6 +4,8 @@ This operator-run package evaluates the four reviewed cases through the explicit
 
 The first paid baseline and human calibration have **not** been run during implementation. Confirm deployed normalized records/identifiers match [cases.json](cases.json) before using the scores. Source facts, old verification notes and reviewed scopes in that file remain historical snapshots; only its obsolete no-total policy wording changed. A successful query or local Git SHA does not prove dataset/deployment parity.
 
+The [case reference](Case-Reference.md) retains the former root README's baseline scope, runtime-isolation rules and historical dataset/parity observations. It does not establish a fresh paid baseline or deployed-data verification.
+
 ## Setup and operator gates
 
 Use Python 3.11+ in your existing/chosen virtual environment. This package does not create an environment or install dependencies automatically. Only the AWS SDK is added; no npm, Pandas, HTML library or server is needed.

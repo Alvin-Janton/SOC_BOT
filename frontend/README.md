@@ -503,7 +503,7 @@ Publishing makes the frontend bucket nonempty. Dev teardown still requires the
 operator to deliberately review/empty it before retrying deletion, and also
 deletes the dev pool/users and auth table. No automatic emptying is introduced;
 demo state retains its existing protection. See [hosting and auth](../Docs/FrontendStack/README.md)
-and [workflow/teardown procedures](../README.md#application-stack-deployment-and-teardown).
+and [workflow/teardown procedures](../Docs/Operations.md#application-stack-deployment-and-teardown).
 
 ## Operator validation after deployment
 

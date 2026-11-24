@@ -410,7 +410,7 @@ Set-Cookie: __Host-soc_bot_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; 
             <tr><td>DynamoDB TTL</td><td>Asynchronous cleanup of expired SESSION items. Code checks absolute expiry itself, even when TTL has not removed the item. USER has no TTL.</td></tr>
           </tbody></table>
         </div>
-        <p>The auth table is <code>SOC-BOT-DEV-AUTH-SESSIONS</code>, PK-only, on-demand and encrypted with the AWS-managed DynamoDB key. Dev destroys and demo retains it on stack teardown; PITR is intentionally deferred. Browser storage, the manual client's private session file and this server table are distinct. The manual client sends the configured Origin but fabricates no browser Fetch Metadata; it cannot demonstrate browser HttpOnly/SameSite behavior. See the <a href="../../README.md#manual-chat-client">private local-file instructions</a>.</p>
+        <p>The auth table is <code>SOC-BOT-DEV-AUTH-SESSIONS</code>, PK-only, on-demand and encrypted with the AWS-managed DynamoDB key. Dev destroys and demo retains it on stack teardown; PITR is intentionally deferred. Browser storage, the manual client's private session file and this server table are distinct. The manual client sends the configured Origin but fabricates no browser Fetch Metadata; it cannot demonstrate browser HttpOnly/SameSite behavior. See the <a href="../../scripts/README.md">private local-file instructions</a>.</p>
       </article>
     </section>
 

@@ -11,8 +11,8 @@ CDK now wires `POST https://<CloudFrontHostname>/api/chat` to the existing AI
 orchestrator in dev and demo. This describes source/CDK implementation, not live
 validation. The [frontend workspace](../../frontend/README.md) implements password
 login, session restoration and streaming chat through same-origin browser requests.
-Google UI and history recovery remain deferred; the separately enabled dev Google
-backend flow is unchanged.
+The frontend also implements saved history and explicitly enabled dev Google
+login/linking controls; these are separate from chat's unchanged request body.
 
 The AI-owned unauthenticated `POST /chat` and its dev Regional WAF/IPSet/association
 are retired by an application stack update. The separate Frontend API/CloudFront
@@ -21,9 +21,10 @@ owner or default identity is configured. Existing conversations preserve their
 original owners; no data is reassigned, deleted or migrated. Unrelated signed-in
 users cannot adopt or replay historical shared-owner conversations.
 
-The unchanged evaluator still targets the retired API and is unavailable until
-its separate authentication migration; see the [retirement handoff](../../README.md#legacy-retirement-operator-handoff).
-Import-only CLI compatibility exports do not provide an auth bypass or fallback.
+The local evaluator now uses an explicit dev CloudFront origin, a pinned BFF
+session and owner-checked evidence reads. Follow the [current evaluator guide](../../evaluation/README.md)
+and [retirement handoff](../Operations.md#legacy-retirement-operator-handoff);
+neither import compatibility nor documentation provides an auth bypass or fallback.
 
 ## Request and response
 
@@ -171,7 +172,7 @@ caching and dev viewer WAF remain unchanged. `ChatUrl` outputs the CloudFront UR
 
 ### Manual Python client
 
-The [manual client guide](../../README.md#manual-api-and-chat-clients) covers private
+The [manual client guide](../../scripts/README.md) covers private
 Windows session storage, explicit API-client login/me/logout, list/messages
 pagination, follow-up and completed-turn replay, no-session 401 and two-account
 generic-404 checks. Example after setting
