@@ -162,3 +162,14 @@ See [control, persistence and rollout](Cancellation.md).
 ## Private thinking and transport
 
 Only public text reaches text_delta and the existing public-only dev preview. Thinking, signature/redacted bytes, original rejected input and private ASSISTANT_TEXT never enter messages/HIST, routine logs, frontend or judge reports. The activity stage contains no reasoning content. Existing heartbeat, backpressure and cancellation signals remain active while reasoning streams. An incomplete/malformed/private-only response cannot publish completion; unknown final persistence remains unconfirmed. See [encoding, limits and rollout](Adaptive-Thinking.md).
+
+
+## Expected-account binding before admission
+
+Updated frontend chat requests carry optional `X-Soc-Bot-Expected-User` from their captured in-memory account scope. After `resolveOwner()` validates the existing gateway envelope and authenticated authorizer principal, it validates/reconciles this hint and compares it with the trusted subject. The hint never establishes identity. Missing headers retain the legacy contract; malformed, repeated or conflicting headers return 400 `INVALID_INPUT`. A valid mismatch returns the ordinary framed pre-stream HTTP 409 JSON response:
+
+```json
+{"error":{"code":"ACCOUNT_CONTEXT_CHANGED","message":"The browser account context changed. Check your session before continuing.","retryable":false},"correlationId":"illustrative-invocation-id"}
+```
+
+This happens before body admission, conversation access, lease acquisition, conversation events or model/tool work. No actual principal or Set-Cookie is returned; existing status/header framing and bounded closure are used. Normal NDJSON, heartbeats, retries, cancellation and ownership checks remain unchanged. The [frontend isolation guide](../../../../frontend/README.md#cross-tab-account-isolation) documents current-scope reconciliation and ignored stale results. Local abort only closes a consumer; accepted backend work is not cancelled or reversed. No runtime authentication, IAM or integration setting changes are introduced.

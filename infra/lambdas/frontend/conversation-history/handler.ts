@@ -1,3 +1,5 @@
+import { expectedUser, requireExpectedUser } from '../shared/expected-user';
+import { BffAuthError } from '../auth/errors';
 import { randomUUID } from 'node:crypto';
 import { configuration, HistoryError, request } from './contracts';
 import { listConversations } from './index-read';
@@ -31,6 +33,7 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     const input = cancel ? { route: 'cancel' as const, ...cancelRequest(raw, config) } : retry ? { route: 'retry' as const, ...retryRequest(raw, config) }
       : messages ? { route: 'messages' as const, ...messageRequest(raw, config) }
       : { route: 'list' as const, ...request(raw, config) };
+    requireExpectedUser(expectedUser(raw), input.owner);
     const remaining = context.getRemainingTimeInMillis();
     if (!Number.isFinite(remaining) || remaining <= 1_000) throw new HistoryError('SERVICE_UNAVAILABLE');
     const deadline = startedAt + Math.min(messages || retry ? 45_000 : 8_000, Math.floor(remaining - 1_000));
@@ -48,7 +51,9 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     continuation = 'nextCursor' in result && result.nextCursor !== null; outcome = 'SUCCESS';
     return { statusCode: 'state' in result && result.state === 'stopping' ? 202 : 200, headers, body, isBase64Encoded: false };
   } catch (error) {
-    const safe = error instanceof HistoryError ? error : new HistoryError('SERVICE_UNAVAILABLE');
+    const safe = error instanceof HistoryError ? error : error instanceof BffAuthError
+      && ['invalid_input', 'account_context_changed'].includes(error.code)
+      ? new HistoryError(error.code === 'invalid_input' ? 'INVALID_INPUT' : 'ACCOUNT_CONTEXT_CHANGED') : new HistoryError('SERVICE_UNAVAILABLE');
     outcome = safe.code;
     return { statusCode: safe.status, headers, body: JSON.stringify({ error: { code: safe.code,
       message: cancel && safe.code === 'INVALID_INPUT' ? 'Invalid cancellation request.'

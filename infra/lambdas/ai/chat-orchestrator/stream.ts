@@ -99,13 +99,13 @@ export class NdjsonStream {
  * {"error":{"code":"INVALID_INPUT","message":"Invalid chat request fields."},"correlationId":"<invocation-id>"}
  * Unlike emit(), this sends one ordinary JSON error and closes the response.
  */
-export async function httpError(raw: Writable, statusCode: number, code: string, message: string, correlationId: string): Promise<void> {
+export async function httpError(raw: Writable, statusCode: number, code: string, message: string, correlationId: string, retryable?: false): Promise<void> {
   const stream = awslambda.HttpResponseStream.from(raw, { statusCode, headers: {
     'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
   } });
   try {
     const closed = finished(stream, { cleanup: true, signal: AbortSignal.timeout(5_000) });
-    stream.write(JSON.stringify({ error: { code, message }, correlationId }));
+    stream.write(JSON.stringify({ error: { code, message, ...(retryable === undefined ? {} : { retryable }) }, correlationId }));
     stream.end();
     await closed;
   } catch { /* A broken transport is not evidence that backend work was cancelled. */ }

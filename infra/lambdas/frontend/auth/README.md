@@ -452,3 +452,18 @@ only after separate deployment authorization. Local build/synthesis and existing
 tests do not establish live Cognito, browser, CSRF or cookie behavior.
 See the [manual registration procedure](../../../../Docs/FrontendStack/README.md#later-manual-registration-validation)
 for prompted passwords/codes; no live user or email is created during implementation.
+
+
+## Optional expected-account context
+
+`POST /api/auth/change-password`, `POST /api/auth/link/google/start` and `POST /api/auth/logout` accept optional `X-Soc-Bot-Expected-User`. The shared `expected-user.ts` helper reconciles single/multivalue headers using the existing strict header reader and validates one exact subject with `authSubSchema`, without trimming, normalization or comma/list values. Absence retains legacy behavior. Malformed, repeated or conflicting values return 400 `INVALID_INPUT`.
+
+After the existing session/proof resolution, a different validated subject returns 409 with no cookie or business mutation:
+
+```json
+{"error":{"code":"ACCOUNT_CONTEXT_CHANGED","message":"The browser account context changed. Check your session before continuing."},"requestId":"illustrative-request-id"}
+```
+
+Change-password and linking-start compare before fresh password/provider proof and transaction work, retaining their later original-session revalidation. Bound logout first resolves a usable current session within the existing budget; mismatch cannot delete that session. Missing, expired or malformed cookies still retain logout's existing idempotent clearing behavior when no usable session exists, but an invalid hint remains a 400. Unbound logout retains its original path. The error never discloses the actual subject. Existing no-store/correlation, origin, session-version/disablement and OAuth checks remain unchanged; `/me`, public credential/code routes and Google GET navigation/callback contracts are unchanged.
+
+The [browser guide](../../../../frontend/README.md#cross-tab-account-isolation) explains captured scopes and identity-free invalidation. Hints cannot supply or override authentication. A request already accepted before another tab changes the shared cookie can still finish; browser cookie delivery is not transactional with local generation checks. No session lifetime, storage, IAM, provider client or endpoint change is introduced.

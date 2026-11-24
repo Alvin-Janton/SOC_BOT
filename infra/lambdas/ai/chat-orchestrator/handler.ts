@@ -193,7 +193,7 @@ async function respond(event: unknown, raw: Writable, context: LambdaContext): P
     if (stream) await stream.finish({ type: 'error', ...(safe.code === 'TURN_CANCELLED' && conversationId ? { conversationId } : {}), code: safe.code, message: safe.message,
       retryable: safe.retryable, correlationId: context.awsRequestId });
 
-    else await httpError(raw, safe.status, safe.code, safe.message, context.awsRequestId);
+    else await httpError(raw, safe.status, safe.code, safe.message, context.awsRequestId, safe.code === 'ACCOUNT_CONTEXT_CHANGED' ? false : undefined);
   }
 
   finally {

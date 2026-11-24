@@ -1,3 +1,4 @@
+import { canDispatch, captureScope, currentScope, subscribeAccountReady } from '../auth/accountScope';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Conversation, listConversations } from '../api/conversations';
 import { ApiError, failure } from '../api/http';
@@ -17,6 +18,7 @@ function merge(previous: readonly Conversation[], incoming: readonly Conversatio
 
 /** Keeps a single account's metadata/page chain in memory, aborting superseded reads and never polling. */
 export function useConversations(accountId: string | undefined, expired: (message: string) => void) {
+  const [account] = useState(() => accountId && !import.meta.env.DEV ? captureScope(accountId) : undefined);
   const [rows, setRows] = useState<readonly Conversation[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'initial' | 'refresh' | 'page'>('idle');
@@ -28,9 +30,12 @@ export function useConversations(accountId: string | undefined, expired: (messag
   const controller = useRef<AbortController | undefined>(undefined);
   const pending = useRef(false);
   const loadedRef = useRef(false);
+  const deferred = useRef(false);
 
   const read = useCallback(async (refresh: boolean) => {
-    if (!accountId || import.meta.env.DEV || (!refresh && (pending.current || !next.current))) return;
+    if (!accountId || !currentScope(account) || import.meta.env.DEV || (!refresh && (pending.current || !next.current))) return;
+    if (!canDispatch(account)) { if (refresh) deferred.current = true; return; }
+    deferred.current = false;
     const cursor = refresh ? undefined : next.current!;
     if (cursor && consumed.current.has(cursor)) return;
     const id = ++generation.current;
@@ -38,8 +43,8 @@ export function useConversations(accountId: string | undefined, expired: (messag
     setPhase(refresh ? loadedRef.current ? 'refresh' : 'initial' : 'page');
     if (refresh) setError(''); else setPageError('');
     try {
-      const page = await listConversations(cursor, controller.current.signal);
-      if (generation.current !== id) return;
+      const page = await listConversations(account, cursor, controller.current.signal);
+      if (!currentScope(account) || generation.current !== id) return;
       const used = refresh ? new Set<string>() : new Set(consumed.current);
       if (cursor) used.add(cursor);
       if (page.nextCursor && used.has(page.nextCursor)) throw new ApiError('Pagination could not advance. Refresh the list before loading more.', 'INVALID_RESPONSE');
@@ -51,15 +56,18 @@ export function useConversations(accountId: string | undefined, expired: (messag
       next.current = page.nextCursor; consumed.current = used;
       loadedRef.current = true; setLoaded(true); setPageError('');
     } catch (reason) {
-      if (generation.current !== id) return;
+      if (!currentScope(account) || generation.current !== id) return;
       const safe = failure(reason);
       if (safe.authenticationRequired) { expired(safe.message); return; }
       const message = safe.status === 0 ? 'The conversation list could not be reached. Your current chat was retained.' : safe.message;
       if (refresh) setError(message); else setPageError(message);
     } finally {
-      if (generation.current === id) { pending.current = false; setPhase('idle'); }
+      if (currentScope(account) && generation.current === id) { pending.current = false; setPhase('idle'); }
     }
-  }, [accountId, expired]);
+  }, [accountId, account, expired]);
+  useEffect(() => subscribeAccountReady(() => {
+    if (deferred.current && currentScope(account)) void read(true);
+  }), [account, read]);
   const refresh = useCallback(() => { void read(true); }, [read]);
   const more = useCallback(() => { void read(false); }, [read]);
   useEffect(() => {

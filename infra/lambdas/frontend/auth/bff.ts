@@ -1,3 +1,4 @@
+import { requireExpectedUser } from '../shared/expected-user';
 import { CognitoAuthClient, createCognitoAuthenticator } from './cognito';
 import { AuthRequestBudget, currentAuthTime, parseBffAuthConfig } from './config';
 import { clearSessionCookie, createSessionCookie, readSessionCookie } from './cookies';
@@ -28,7 +29,7 @@ export interface BffAuthService {
   loginWithEmail(credentials: unknown): Promise<LoginResult>;
   resolveSession(cookieHeader?: string): Promise<AuthSession | undefined>;
   requireSession(cookieHeader?: string): Promise<AuthSession>;
-  logout(cookieHeader?: string): Promise<LogoutResult>;
+  logout(cookieHeader?: string, expectedUser?: string): Promise<LogoutResult>;
 }
 
 /** Builds session operations and the trusted first-login workflow without exposing provider tokens. */
@@ -76,12 +77,16 @@ export function createBffAuth(configuration: unknown, dependencies: BffAuthDepen
     },
 
     /** Revokes a valid current session before clearing its cookie; malformed cookies are cleared only. */
-    async logout(cookieHeader?: string): Promise<LogoutResult> {
+    async logout(cookieHeader?: string, expectedUser?: string): Promise<LogoutResult> {
       let token: string | undefined;
       try {
         token = readSessionCookie(cookieHeader);
       } catch (error) {
         if (!(error instanceof BffAuthError) || error.code !== 'authentication_required') throw error;
+      }
+      if (token !== undefined && expectedUser !== undefined) {
+        const current = await sessions.resolve(token);
+        if (current) requireExpectedUser(expectedUser, current.sub);
       }
       if (token !== undefined) await sessions.revoke(token);
       return { setCookie: clearSessionCookie(config.sameSite) };

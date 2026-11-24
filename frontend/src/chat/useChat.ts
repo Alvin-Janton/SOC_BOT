@@ -1,3 +1,4 @@
+import { canDispatch, captureScope, currentScope } from '../auth/accountScope';
 import { useEffect, useRef, useState } from 'react';
 import { Activity, ChatEvent, ChatRequest, streamChat } from '../api/chat';
 import { Conversation } from '../api/conversations';
@@ -32,6 +33,7 @@ interface Navigation {
 
 /** Owns isolated in-memory workspaces and immutable exact-retry snapshots for one mounted account. */
 export function useChat(accountId: string | undefined, expired: (message: string) => void, preview: boolean, navigation: Navigation) {
+  const [account] = useState(() => accountId && !import.meta.env.DEV ? captureScope(accountId) : undefined);
   const [, render] = useState(0);
   const [busy, setBusy] = useState(false);
   const [preparingTurnId, setPreparingTurnId] = useState<string>();
@@ -65,14 +67,14 @@ export function useChat(accountId: string | undefined, expired: (message: string
 
   /** Updates only the captured workspace and turn; selection never redirects an arriving event. */
   function update(target: Workspace, id: string, transform: (turn: Turn) => Turn) {
-    if (!alive.current) return;
+    if (!alive.current || !currentScope(account)) return;
     target.turns = target.turns.map(turn => turn.request.turnId === id ? transform(turn) : turn);
     render(value => value + 1);
   }
 
   /** Holds the global send/navigation lock across one stream or exact replay without changing its request. */
   async function run(target: Workspace, original: Turn, retrying = false, preparedLock = false) {
-    if (preview || !accountId || original.accountId !== identity.current || (preparedLock ? !active.current : active.current
+    if (preview || !accountId || !canDispatch(account) || original.accountId !== identity.current || (preparedLock ? !active.current : active.current
       || !(retrying ? callbacks.current.canRetry(target.conversationId) : callbacks.current.canSend(target.conversationId)))) return;
     if (!preparedLock) {
       active.current = true; setBusy(true); callbacks.current.busy?.(true); callbacks.current.started();
@@ -84,8 +86,8 @@ export function useChat(accountId: string | undefined, expired: (message: string
     controller.current = new AbortController();
     update(target, original.request.turnId, turn => ({ ...turn, answer: '', activity: [], state: 'running', attemptId: undefined, stopping: false, error: undefined, replayed: false }));
     try {
-      await streamChat(original.request, controller.current.signal, (event: ChatEvent) => {
-        if (!alive.current || requestGeneration.current !== generation || identity.current !== original.accountId) return;
+      await streamChat(account, original.request, controller.current.signal, (event: ChatEvent) => {
+        if (!alive.current || !currentScope(account) || requestGeneration.current !== generation || identity.current !== original.accountId) return;
         if (event.type === 'conversation' || event.type === 'complete') {
           if (target.conversationId && target.conversationId !== event.conversationId) throw new ApiError('The stream returned a contradictory conversation identifier.', 'INVALID_STREAM');
           target.conversationId = event.conversationId;
@@ -104,7 +106,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
         }
       });
     } catch (error) {
-      if (!alive.current || requestGeneration.current !== generation || identity.current !== original.accountId) return;
+      if (!alive.current || !currentScope(account) || requestGeneration.current !== generation || identity.current !== original.accountId) return;
       const safe = failure(error);
       if (safe.authenticationRequired) { expired(safe.message); return; }
       const cancelled = safe.code === 'TURN_CANCELLED' && !safe.retryable;
@@ -113,7 +115,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
       if (retrying && safe.status === 409) recheck = true;
       if (target.conversationId && safe.status === 404) callbacks.current.unavailable(target.conversationId);
     } finally {
-      if (requestGeneration.current === generation) {
+      if (currentScope(account) && requestGeneration.current === generation) {
         active.current = false;
         if (alive.current) {
           setBusy(false); callbacks.current.busy?.(false);
@@ -151,7 +153,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
 
   /** Snapshots one explicit send; an existing selection always supplies its ID, even without local messages. */
   function send() {
-    if (active.current || controlBlocked(workspace) || unresolved || preview || !accountId || navigation.selection.error || !callbacks.current.canSend(workspace.conversationId)) return;
+    if (active.current || controlBlocked(workspace) || unresolved || preview || !accountId || !canDispatch(account) || navigation.selection.error || !callbacks.current.canSend(workspace.conversationId)) return;
     if (!workspace.draft.trim() || workspace.draft.length > 8192) { workspace.inputError = 'Enter a message of 1–8,192 characters.'; render(value => value + 1); return; }
     const request: ChatRequest = Object.freeze({ turnId: crypto.randomUUID(), message: workspace.draft,
       ...(workspace.conversationId ? { conversationId: workspace.conversationId } : {}) });
@@ -176,7 +178,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
     const target = workspace;
     const id = target.conversationId;
     if (!id || !accountId || preview || active.current || controlBlocked(workspace) || unresolved || navigation.selection.error
-      || !observed.retry.available || callbacks.current.observation(observed.turnId) !== observed
+      || !canDispatch(account) || !observed.retry.available || callbacks.current.observation(observed.turnId) !== observed
       || !callbacks.current.canRetry(id) || target.turns.some(turn => turn.request.turnId === observed.turnId)) return;
     const owner = accountId;
     const generation = ++requestGeneration.current;
@@ -187,14 +189,19 @@ export function useChat(accountId: string | undefined, expired: (message: string
     let transferred = false;
     let recheck = false;
     /** Checks the captured account, exact selection, observation and request token before any side effect or POST. */
-    const current = () => alive.current && identity.current === owner && !preparation.signal.aborted
+    const current = () => alive.current && currentScope(account) && identity.current === owner && !preparation.signal.aborted
       && requestGeneration.current === generation && active.current && callbacks.current.selection.id === id
       && window.location.pathname === '/' && new URLSearchParams(window.location.search).getAll('conversationId').length === 1
       && [...new URLSearchParams(window.location.search).keys()].every(key => key === 'conversationId')
       && new URLSearchParams(window.location.search).get('conversationId') === id && callbacks.current.observation(observed.turnId) === observed;
     try {
-      const result = await prepareRetry(id, observed.turnId, preparation.signal);
+      const result = await prepareRetry(account, id, observed.turnId, preparation.signal);
       if (!current()) return;
+      if (!canDispatch(account)) {
+        target.retryNotice = 'Session verification interrupted retry preparation. No retry was submitted. Retry again after your session and messages have been verified.';
+        recheck = true;
+        return;
+      }
       if (result.revision < observed.revision) throw new ApiError('Retry state changed unexpectedly. No chat request was submitted.', 'INVALID_RESPONSE', 200, false);
       if (!result.retry.available || !result.request) {
         target.retryNotice = retryExplanation(result.retry); recheck = true; return;
@@ -212,7 +219,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
       if (safe.status === 404 && safe.code === 'CONVERSATION_UNAVAILABLE') callbacks.current.unavailable(id);
       else recheck = true;
     } finally {
-      if (!transferred && requestGeneration.current === generation) {
+      if (!transferred && currentScope(account) && requestGeneration.current === generation) {
         active.current = false;
         if (alive.current) {
           setBusy(false); setPreparingTurnId(undefined); callbacks.current.busy?.(false);
@@ -232,7 +239,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
     const target = workspace;
     const id = target.conversationId;
     const chosen = stopTarget;
-    if (!id || !accountId || preview || !chosen || preparingTurnId || stopPhase === 'sending' || stopPhase === 'stopping' || target.stop?.phase === 'sending' || target.stop?.phase === 'stopping') return;
+    if (!id || !accountId || !canDispatch(account) || preview || !chosen || preparingTurnId || stopPhase === 'sending' || stopPhase === 'stopping' || target.stop?.phase === 'sending' || target.stop?.phase === 'stopping') return;
     const owner = accountId;
     const streamGeneration = requestGeneration.current;
     const generation = ++stopGeneration.current;
@@ -240,7 +247,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
     const abort = new AbortController(); stopController.current = abort;
     target.stop = { ...chosen, phase: 'sending', revision: captured?.revision };
     target.retryNotice = ''; render(value => value + 1);
-    const current = () => alive.current && identity.current === owner && !abort.signal.aborted && stopGeneration.current === generation
+    const current = () => alive.current && currentScope(account) && identity.current === owner && !abort.signal.aborted && stopGeneration.current === generation
       && requestGeneration.current === streamGeneration && callbacks.current.selection.id === id
       && window.location.pathname === '/' && new URLSearchParams(window.location.search).getAll('conversationId').length === 1
       && [...new URLSearchParams(window.location.search).keys()].every(key => key === 'conversationId')
@@ -248,7 +255,7 @@ export function useChat(accountId: string | undefined, expired: (message: string
       && (live ? target.turns.find(turn => turn.request.turnId === chosen.turnId)?.attemptId === chosen.attemptId
         : callbacks.current.observation(chosen.turnId) === captured);
     try {
-      const receipt = await cancelTurn(id, chosen.turnId, chosen.attemptId, abort.signal);
+      const receipt = await cancelTurn(account, id, chosen.turnId, chosen.attemptId, abort.signal);
       if (!current()) return;
       const local = target.turns.find(turn => turn.request.turnId === chosen.turnId);
       const saved = callbacks.current.observation(chosen.turnId);

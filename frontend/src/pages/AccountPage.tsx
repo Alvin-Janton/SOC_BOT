@@ -1,3 +1,4 @@
+import { AccountScope, captureScope } from '../auth/accountScope';
 import { FormEvent, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { changePassword, PASSWORD_PARTIAL, PASSWORD_UNKNOWN, passwordOutcome, Session } from '../api/auth';
@@ -11,7 +12,7 @@ import { OpenAccount } from './PublicAccountPage';
 
 interface Props {
   session?: Session; notice?: Notice; open: OpenAccount; lock(busy: boolean): void;
-  finished(notice: Notice): void; expired(message: string): void; signOut(): Promise<void>; preview?: boolean;
+  finished(notice: Notice): void; expired(message: string): void; signOut(notice?: Notice): Promise<void>; preview?: boolean;
 }
 
 /** Presents explicit password/linking actions without inferring provider status from the public session. */
@@ -39,9 +40,10 @@ export function AccountPage({ session, notice, open, lock, finished, expired, si
     if (!linkPassword || linkPassword.length > 256) { clearSecrets(); setLinkError('Enter your existing current password.'); return; }
     setLinkError(''); setError('');
     let destination: string;
-    void action.run(async () => { destination = await startGoogleLink(linkPassword); }, () => {
+    let scope: AccountScope;
+    void action.run(async () => { scope = captureScope(session.userId); destination = await startGoogleLink(scope, linkPassword); }, () => {
       clearSecrets();
-      try { google.depart(destination); }
+      try { google.depart(destination, scope); }
       catch (reason) { setLinkError(failure(reason).message); setLinkStopped(true); }
     }, reason => {
       clearSecrets();
@@ -60,7 +62,7 @@ export function AccountPage({ session, notice, open, lock, finished, expired, si
     const problem = passwordProblem(newPassword, confirmation);
     if (!currentPassword || currentPassword.length > 256 || problem) { clearSecrets(); setError(problem ?? 'Enter your current password.'); return; }
     setError('');
-    void action.run(() => changePassword({ currentPassword, newPassword }), () => {
+    void action.run(() => changePassword(captureScope(session.userId), { currentPassword, newPassword }), () => {
       clearSecrets(); finished({ message: 'Password updated; sign in again.' });
     }, reason => {
       clearSecrets();
@@ -77,7 +79,7 @@ export function AccountPage({ session, notice, open, lock, finished, expired, si
     if (working || preview) return;
     clearSecrets(); setError('');
     if (unknown) open('/account', undefined, { message: PASSWORD_UNKNOWN, warning: true });
-    void action.run(signOut, () => open('/login', undefined, unknown ? { message: PASSWORD_UNKNOWN, warning: true } : undefined),
+    void action.run(() => signOut(unknown ? { message: PASSWORD_UNKNOWN, warning: true } : undefined), () => open('/login', undefined, unknown ? { message: PASSWORD_UNKNOWN, warning: true } : undefined),
       reason => setError(`${reason.message} Logout was not confirmed; the local view was retained.`));
   }
 

@@ -1,3 +1,4 @@
+import { accountGeneration } from './auth/accountScope';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { validConversationId } from './api/conversations';
 
@@ -25,11 +26,12 @@ function currentPath(): string {
 /** Tracks root query selection and exact page routes under the existing active-work navigation locks. */
 export function useRoute() {
   const [location, setLocation] = useState({ path: window.location.pathname, search: window.location.search });
-  const locks = useRef(new Set<'chat' | 'auth'>());
+  const locks = useRef(new Map<'chat' | 'auth', number>());
   const current = useRef(currentPath());
   const root = useRef(window.location.pathname === '/' ? window.location.search : '');
-  const lockNavigation = useCallback((owner: 'chat' | 'auth', busy: boolean) => {
-    if (busy) locks.current.add(owner); else locks.current.delete(owner);
+  const lockNavigation = useCallback((owner: 'chat' | 'auth', busy: boolean, generation: number) => {
+    if (generation !== accountGeneration()) return;
+    if (busy) locks.current.set(owner, generation); else if (locks.current.get(owner) === generation) locks.current.delete(owner);
   }, []);
   const capture = useCallback(() => {
     if (window.location.pathname === '/') root.current = window.location.search;
@@ -68,7 +70,15 @@ export function useRoute() {
     const params = new URLSearchParams({ conversationId: id });
     window.history.replaceState(null, '', `/?${params}`); capture(); return true;
   }, [capture]);
-  const clearSelection = useCallback(() => { root.current = ''; }, []);
+  const clearSelection = useCallback((boundary = false) => {
+    root.current = '';
+    if (boundary) locks.current.clear();
+    const url = new URL(window.location.href);
+    if (url.pathname === '/' && !import.meta.env.DEV) { url.search = ''; url.hash = ''; }
+    else url.searchParams.delete('conversationId');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    capture();
+  }, [capture]);
   return { path: location.path, selection: selection(location.path === '/' ? location.search : root.current),
     navigate, lockNavigation, selectConversation, assignConversation, clearSelection };
 }

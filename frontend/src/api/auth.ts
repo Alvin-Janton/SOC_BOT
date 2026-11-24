@@ -1,3 +1,5 @@
+import { AccountScope, accountGeneration, publishAccountChange, requestAccountCheck } from '../auth/accountScope';
+import { scoped } from './http';
 import { ApiError, jsonResponse, record, request, responseError } from './http';
 
 export interface Session { readonly userId: string; readonly expiresAt: string }
@@ -21,20 +23,31 @@ export async function checkSession(signal: AbortSignal): Promise<Session> {
   return session(await jsonResponse(response));
 }
 
+/** Notifies peers only on confirmed cookie transitions; late Set-Cookie delivery requires fresh discovery. */
+function cookieChanged(generation: number): void {
+  publishAccountChange();
+  if (accountGeneration() !== generation) requestAccountCheck();
+}
+
 /** Sends only password credentials; the browser independently manages the opaque HttpOnly cookie. */
 export async function login(email: string, password: string): Promise<Session> {
+  const generation = accountGeneration();
   const response = await request('/api/auth/login', { method: 'POST', signal: AbortSignal.timeout(30_000),
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
   if (response.status !== 200) throw await responseError(response, 'login');
-  return session(await jsonResponse(response));
+  const result = session(await jsonResponse(response)); cookieChanged(generation); return result;
 }
 
 /** Claims logout only after an empty 204; ambiguous errors leave account-scoped UI state intact. */
-export async function logout(): Promise<void> {
-  const response = await request('/api/auth/logout', { method: 'POST', signal: AbortSignal.timeout(30_000),
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: '{}' });
-  if (response.status !== 204) throw await responseError(response, 'logout');
-  if ((await response.arrayBuffer()).byteLength !== 0) throw new ApiError('Logout could not be confirmed. Your local view was retained.', 'INVALID_RESPONSE');
+export async function logout(scope: AccountScope): Promise<void> {
+  return scoped(scope, async () => {
+    const generation = accountGeneration();
+    const response = await request('/api/auth/logout', { method: 'POST', signal: AbortSignal.timeout(30_000),
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: '{}' }, undefined, scope);
+    if (response.status !== 204) throw await responseError(response, 'logout');
+    if ((await response.arrayBuffer()).byteLength !== 0) throw new ApiError('Logout could not be confirmed. Your local view was retained.', 'INVALID_RESPONSE');
+    cookieChanged(generation);
+  });
 }
 
 const REGISTRATION_MESSAGE = 'If account confirmation is needed, check your email for a confirmation code. You can request another code if needed.';
@@ -48,15 +61,21 @@ export const PASSWORD_PARTIAL = 'Your password was changed, but signing out all 
 async function accountRequest(path: '/api/auth/signup' | '/api/auth/confirm-signup' | '/api/auth/resend-confirmation'
   | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password',
   input: Readonly<Record<string, string>>, expectedStatus: number, expectedMessage: string,
-  context: 'registration' | 'recovery' | 'password-reset' | 'password-change'): Promise<void> {
+  context: 'registration' | 'recovery' | 'password-reset' | 'password-change', scope?: AccountScope): Promise<void> {
+  const generation = accountGeneration();
 
   const response = await request(path, { method: 'POST', signal: AbortSignal.timeout(30_000),
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-  if (response.status !== expectedStatus) throw await responseError(response, context);
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(input) }, undefined, scope);
+  if (response.status !== expectedStatus) {
+    const error = await responseError(response, context);
+    if (error.code === 'PASSWORD_CHANGED_SESSION_REVOCATION_UNCONFIRMED' && error.status === 503) cookieChanged(generation);
+    throw error;
+  }
   const value = await jsonResponse(response);
   if (!record(value) || Object.keys(value).length !== 1 || value.message !== expectedMessage) {
     throw new ApiError('The operation response could not be verified.', 'INVALID_RESPONSE', response.status);
   }
+  if (context === 'password-reset' || context === 'password-change') cookieChanged(generation);
 }
 
 /** Requests generic signup acceptance without claiming account creation, delivery or a session. */
@@ -85,8 +104,8 @@ export function resetPassword(input: Readonly<{ email: string; code: string; new
 }
 
 /** Applies one session/current-password-proven change; only an explicit authentication-required code denotes expiry. */
-export function changePassword(input: Readonly<{ currentPassword: string; newPassword: string }>): Promise<void> {
-  return accountRequest('/api/auth/change-password', { currentPassword: input.currentPassword, newPassword: input.newPassword }, 200, PASSWORD_MESSAGE, 'password-change');
+export function changePassword(scope: AccountScope, input: Readonly<{ currentPassword: string; newPassword: string }>): Promise<void> {
+  return scoped(scope, () => accountRequest('/api/auth/change-password', { currentPassword: input.currentPassword, newPassword: input.newPassword }, 200, PASSWORD_MESSAGE, 'password-change', scope));
 }
 
 /** Separates confirmed partial success and uncertain transport/protocol outcomes from definite authored rejection. */

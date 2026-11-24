@@ -41,7 +41,7 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
     switch (request.route) {
       case 'google-link-start': {
         if (request.invalidCookie) throw new BffAuthError('authentication_required');
-        const response = await createGoogleLinking(config, budget, requestId).start(request.input, request.cookieHeader);
+        const response = await createGoogleLinking(config, budget, requestId).start(request.input, request.cookieHeader, request.expectedUser);
         outcome = 'GOOGLE_LINK_STARTED';
         return response;
       }
@@ -72,7 +72,7 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
       }
       case 'change-password': {
         if (request.invalidCookie) throw new BffAuthError('authentication_required');
-        await createPasswordService(config.auth, budget).change(request.input, request.cookieHeader);
+        await createPasswordService(config.auth, budget).change(request.input, request.cookieHeader, request.expectedUser);
         outcome = 'PASSWORD_CHANGE_SUCCEEDED';
         return authHttpResponse(200, PASSWORD_UPDATED_RESPONSE, clearSessionCookie(config.auth.sameSite));
       }
@@ -103,7 +103,7 @@ export async function handler(raw: unknown, context: { awsRequestId: string; get
         return authHttpResponse(200, publicSession(session));
       }
       case 'logout': {
-        const result = await createBffAuth(config.auth, { budget }).logout(request.invalidCookie ? undefined : request.cookieHeader);
+        const result = await createBffAuth(config.auth, { budget }).logout(request.invalidCookie ? undefined : request.cookieHeader, request.expectedUser);
         outcome = 'LOGOUT_SUCCEEDED';
         return authHttpResponse(204, undefined, result.setCookie);
       }

@@ -1,4 +1,4 @@
-export type BffAuthErrorCode = 'invalid_configuration' | 'authentication_failed' | 'authentication_required' | 'session_unavailable'
+export type BffAuthErrorCode = 'account_context_changed' | 'invalid_configuration' | 'authentication_failed' | 'authentication_required' | 'session_unavailable'
   | 'invalid_input' | 'body_too_large' | 'unsupported_media_type' | 'invalid_origin' | 'account_not_confirmed'
   | 'authentication_challenge' | 'throttled' | 'invalid_signup_password' | 'confirmation_failed'
   | 'registration_unavailable' | 'registration_throttled' | 'invalid_new_password' | 'password_reset_failed'
@@ -8,6 +8,7 @@ export type BffAuthErrorCode = 'invalid_configuration' | 'authentication_failed'
   | 'google_link_outcome_unconfirmed' | 'google_linked_session_revocation_unconfirmed';
 
 const SAFE_ERRORS: Record<BffAuthErrorCode, { message: string; statusCode: number }> = {
+  account_context_changed: { message: 'The browser account context changed. Check your session before continuing.', statusCode: 409 },
   google_link_failed: { message: 'Google sign-in could not be linked. Use your existing sign-in method or contact the administrator.', statusCode: 401 },
   google_link_conflict: { message: 'Google linking conflicts with an existing account or operation. Contact the administrator before retrying.', statusCode: 409 },
   google_link_unavailable: { message: 'Google linking is temporarily unavailable. Start a new attempt after the issue is resolved.', statusCode: 503 },

@@ -1,3 +1,4 @@
+import { canDispatch, captureScope, currentScope, subscribeAccountReady } from '../auth/accountScope';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, failure } from '../api/http';
 import { HistoryMessage, listMessages, MessagePage, TurnStatus } from '../api/messages';
@@ -85,6 +86,7 @@ function confirm(entry: Entry): void {
 /** Owns one mounted account's transcripts, explicit page reads and per-visit send readiness, never polling. */
 export function useMessages(accountId: string | undefined, conversationId: string | undefined, visible: boolean,
   expired: (message: string) => void, beforeRead: (kind: 'newest' | 'older') => void) {
+  const [account] = useState(() => accountId && !import.meta.env.DEV ? captureScope(accountId) : undefined);
   const [, render] = useState(0);
   const [completion, setCompletion] = useState(0);
   const cache = useRef(new Map<string, Entry>());
@@ -95,6 +97,7 @@ export function useMessages(accountId: string | undefined, conversationId: strin
   const pending = useRef<Pending | undefined>(undefined);
   const suspended = useRef(false);
   const alive = useRef(false);
+  const deferred = useRef(false);
   if (scope.current.account !== accountId || scope.current.id !== conversationId || scope.current.visible !== visible) {
     scope.current = { account: accountId, id: conversationId, visible, visit: scope.current.visit + 1 };
   }
@@ -111,7 +114,9 @@ export function useMessages(accountId: string | undefined, conversationId: strin
   /** Captures account, visit, request generation and cursor-chain identity for every response side effect. */
   const read = useCallback(async (newest: boolean) => {
     const captured = scope.current;
-    if (!alive.current || !captured.account || !captured.id || !captured.visible || suspended.current || import.meta.env.DEV || !selectedView(captured.id)) return;
+    if (!alive.current || !currentScope(account) || !captured.account || !captured.id || !captured.visible || suspended.current || import.meta.env.DEV || !selectedView(captured.id)) return;
+    if (!canDispatch(account)) { if (newest) deferred.current = true; return; }
+    deferred.current = false;
     let target = cache.current.get(captured.id);
     if (!target) { target = empty(); cache.current.set(captured.id, target); }
     if (pending.current) {
@@ -132,12 +137,12 @@ export function useMessages(accountId: string | undefined, conversationId: strin
     render(value => value + 1);
 
     /** Requires the same live view and chain before accepting either data or an authentication error. */
-    const current = () => alive.current && !controller.signal.aborted && !suspended.current && generation.current === id
+    const current = () => alive.current && currentScope(account) && !controller.signal.aborted && !suspended.current && generation.current === id
       && scope.current.account === captured.account && scope.current.id === captured.id && scope.current.visible
       && scope.current.visit === captured.visit && selectedView(captured.id) && target.chain === chain && target.snapshot === boundary
       && (newest || target.nextCursor === cursor);
     try {
-      const page = await listMessages(captured.id, cursor, controller.signal);
+      const page = await listMessages(account, captured.id, cursor, controller.signal);
       if (!current()) return;
       const used = newest ? new Set<string>() : new Set(target.consumed);
       if (cursor) used.add(cursor);
@@ -164,12 +169,15 @@ export function useMessages(accountId: string | undefined, conversationId: strin
       else target.pageError = error;
     } finally {
       // Success intentionally changes the chain, so cleanup uses the request token rather than current().
-      if (alive.current && pending.current?.generation === id) {
+      if (alive.current && currentScope(account) && pending.current?.generation === id) {
         pending.current = undefined; target.phase = 'idle'; render(value => value + 1);
       }
     }
-  }, [cancel]);
+  }, [account, cancel]);
 
+  useEffect(() => subscribeAccountReady(() => {
+    if (deferred.current && currentScope(account)) void read(true);
+  }), [account, read]);
   const refresh = useCallback(() => { void read(true); }, [read]);
   const more = useCallback(() => { void read(false); }, [read]);
   useEffect(() => {
@@ -199,12 +207,12 @@ export function useMessages(accountId: string | undefined, conversationId: strin
 
   /** Requires a valid newest observation for this visit, never list membership or stale cached data. */
   const canRetry = useCallback((id: string | undefined) => {
-    if (!alive.current || !scope.current.visible || !scope.current.account || suspended.current || import.meta.env.DEV || !selectedView(id)) return false;
+    if (!alive.current || !canDispatch(account) || !scope.current.visible || !scope.current.account || suspended.current || import.meta.env.DEV || !selectedView(id)) return false;
     if (!id) return scope.current.id === undefined;
     const saved = cache.current.get(id);
     return scope.current.id === id && Boolean(saved?.verified && saved.validVisit === scope.current.visit && !saved.unavailable
       && saved.phase !== 'initial' && saved.phase !== 'refresh' && (saved.messages.length || saved.nextCursor === null));
-  }, []);
+  }, [account]);
 
   /** Blocks only the latest observed running/unknown turn in addition to newest-page readiness. */
   const canSend = useCallback((id: string | undefined) => {

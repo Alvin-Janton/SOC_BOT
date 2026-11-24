@@ -1,3 +1,4 @@
+import { expectedUser } from '../shared/expected-user';
 import { browserRequest, header } from '../shared/browser-request';
 import { frontendOriginRoutes } from '../shared/origin-routes';
 import { GoogleLoginConfiguration, googleLoginConfiguration } from './google/config';
@@ -19,7 +20,7 @@ export interface AuthHttpConfiguration {
 
 export interface GoogleCallbackQuery { readonly state: string; readonly code?: string; readonly error?: string }
 
-export type AuthHttpRequest =
+export type AuthHttpRequest = (
   | { readonly route: 'google-start'; readonly cookieHeader?: string }
   | { readonly route: 'google-callback'; readonly cookieHeader?: string; readonly query: GoogleCallbackQuery }
   | { readonly route: 'google-link-start'; readonly cookieHeader?: string; readonly invalidCookie: boolean; readonly input: { readonly currentPassword: string } }
@@ -31,7 +32,7 @@ export type AuthHttpRequest =
   | { readonly route: 'forgot-password'; readonly input: ConfirmationResend }
   | { readonly route: 'reset-password'; readonly input: PasswordReset }
   | { readonly route: 'change-password'; readonly input: PasswordChange; readonly cookieHeader?: string; readonly invalidCookie: boolean }
-  | { readonly route: 'me' | 'logout'; readonly cookieHeader?: string; readonly invalidCookie: boolean };
+  | { readonly route: 'me' | 'logout'; readonly cookieHeader?: string; readonly invalidCookie: boolean }) & { readonly expectedUser?: string };
 
 export interface AuthHttpResponse {
   readonly statusCode: number;
@@ -201,15 +202,16 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
     catch { throw new BffAuthError('invalid_input'); }
   }
 
+  const expected = ['change-password', 'google-link-start', 'logout'].includes(selected.route) ? expectedUser(event) : undefined;
   switch (selected.route) {
-    case 'google-link-start': return { route: selected.route, input: parseGoogleLinkStart(value), ...sessionCookie(event) };
+    case 'google-link-start': return { route: selected.route, input: parseGoogleLinkStart(value), expectedUser: expected, ...sessionCookie(event) };
     case 'login': return { route: 'login', credentials: parseEmailCredentials(value) };
     case 'signup': return { route: 'signup', input: parseSignupCredentials(value) };
     case 'confirm-signup': return { route: 'confirm-signup', input: parseSignupConfirmation(value) };
     case 'resend-confirmation': return { route: 'resend-confirmation', input: parseConfirmationResend(value) };
     case 'forgot-password': return { route: 'forgot-password', input: parseConfirmationResend(value) };
     case 'reset-password': return { route: 'reset-password', input: parsePasswordReset(value) };
-    case 'change-password': return { route: 'change-password', input: parsePasswordChange(value), ...sessionCookie(event) };
+    case 'change-password': return { route: 'change-password', input: parsePasswordChange(value), expectedUser: expected, ...sessionCookie(event) };
     case 'logout': {
       const body = object(value);
       if (!body || Object.keys(body).length) throw new BffAuthError('invalid_input');
@@ -218,7 +220,7 @@ export function parseAuthHttpRequest(raw: unknown, config: AuthHttpConfiguration
     case 'me': break;
     default: throw new BffAuthError('invalid_input');
   }
-  return { route: selected.route, ...sessionCookie(event) };
+  return { route: selected.route, expectedUser: expected, ...sessionCookie(event) };
 }
 
 /** Serializes only authored result/error bodies, with cookie output isolated in Set-Cookie. */

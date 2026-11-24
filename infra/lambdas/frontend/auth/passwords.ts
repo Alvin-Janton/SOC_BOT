@@ -1,3 +1,4 @@
+import { requireExpectedUser } from '../shared/expected-user';
 import { ChangePasswordCommand, ConfirmForgotPasswordCommand, ForgotPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { createBffAuth } from './bff';
 import { createCognitoAuthenticator, createCognitoClient, createCognitoPasswordMutationClient, PasswordChangeProof } from './cognito';
@@ -14,7 +15,7 @@ export const PASSWORD_UPDATED_RESPONSE = Object.freeze({ message: 'Password upda
 export interface PasswordService {
   forgot(value: unknown): Promise<void>;
   reset(value: unknown): Promise<void>;
-  change(value: unknown, cookieHeader?: string): Promise<void>;
+  change(value: unknown, cookieHeader?: string, expectedUser?: string): Promise<void>;
 }
 
 /** Classifies only provider exception names, never diagnostic messages or credential values. */
@@ -76,9 +77,10 @@ export function createPasswordService(config: BffAuthConfig, budget: AuthRequest
   }
 
   /** Keeps the transient access-token capability scoped to the freshly authenticated mutation only. */
-  async function changeWithProof(currentPassword: string, newPassword: string, cookieHeader?: string): Promise<string> {
+  async function changeWithProof(currentPassword: string, newPassword: string, cookieHeader?: string, expectedUser?: string): Promise<string> {
     const auth = createBffAuth(config, { budget });
     const session = await auth.requireSession(cookieHeader);
+    requireExpectedUser(expectedUser, session.sub);
     let proof: PasswordChangeProof;
 
     try {
@@ -135,9 +137,9 @@ export function createPasswordService(config: BffAuthConfig, budget: AuthRequest
     },
 
     /** Revalidates the original cookie after fresh password/access-token proof, then updates and revokes. */
-    async change(value: unknown, cookieHeader?: string): Promise<void> {
+    async change(value: unknown, cookieHeader?: string, expectedUser?: string): Promise<void> {
       const { currentPassword, newPassword } = parsePasswordChange(value);
-      const sub = await changeWithProof(currentPassword, newPassword, cookieHeader);
+      const sub = await changeWithProof(currentPassword, newPassword, cookieHeader, expectedUser);
       await users.revokeAfterPasswordChange(sub);
     },
   };

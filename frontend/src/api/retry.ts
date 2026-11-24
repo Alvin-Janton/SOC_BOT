@@ -1,3 +1,5 @@
+import { AccountScope } from '../auth/accountScope';
+import { scoped } from './http';
 import { ChatRequest } from './chat';
 import { validConversationId } from './conversations';
 import { ApiError, jsonResponse, record, request, responseError } from './http';
@@ -25,30 +27,32 @@ export function retryExplanation(retry: RetryAvailability): string {
 }
 
 /** Reads one exact, bounded preparation; this function never posts chat or changes authentication state. */
-export async function prepareRetry(conversationId: string, turnId: string, signal: AbortSignal): Promise<RetryPreparation> {
-  if (!validConversationId(conversationId) || !historyIdentifier(turnId)) throw new ApiError('Invalid retry target.', 'INVALID_INPUT', 400, false);
-  const response = await request(`/api/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/retry`, {
-    method: 'GET', signal: AbortSignal.any([signal, AbortSignal.timeout(75_000)]), headers: { Accept: 'application/json' },
+export async function prepareRetry(scope: AccountScope, conversationId: string, turnId: string, signal: AbortSignal): Promise<RetryPreparation> {
+  return scoped(scope, async () => {
+    if (!validConversationId(conversationId) || !historyIdentifier(turnId)) throw new ApiError('Invalid retry target.', 'INVALID_INPUT', 400, false);
+    const response = await request(`/api/conversations/${encodeURIComponent(conversationId)}/turns/${encodeURIComponent(turnId)}/retry`, {
+      method: 'GET', signal: AbortSignal.any([signal, AbortSignal.timeout(75_000)]), headers: { Accept: 'application/json' },
+    }, undefined, scope);
+    try {
+      if (response.status !== 200) throw await responseError(response, 'retry-preparation');
+      const value = await jsonResponse(response, 40_960);
+      const invalid = () => new ApiError('Retry preparation could not be verified. No chat request was submitted.', 'INVALID_RESPONSE', 200, false);
+      if (!record(value) || Object.keys(value).length !== 6 || !['conversationId', 'turnId', 'revision', 'status', 'retry', 'request'].every(key => Object.hasOwn(value, key))
+        || value.conversationId !== conversationId || value.turnId !== turnId || typeof value.revision !== 'number'
+        || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.status !== 'string' || !HISTORY_STATUSES.includes(value.status)) throw invalid();
+      const status = value.status as HistoryStatus;
+      const retry = parseRetry(value.retry, status);
+      if (!retry) throw invalid();
+      let prepared: ChatRequest | null = null;
+      if (retry.available) {
+        const body = value.request;
+        if (!record(body) || Object.keys(body).length !== 3 || !['conversationId', 'turnId', 'message'].every(key => Object.hasOwn(body, key))
+          || body.conversationId !== conversationId || body.turnId !== turnId || typeof body.message !== 'string'
+          || !/\S/.test(body.message) || body.message.length > 8192) throw invalid();
+        prepared = { turnId, conversationId, message: body.message };
+        if (new TextEncoder().encode(JSON.stringify(prepared)).byteLength > 32_768) throw invalid();
+      } else if (value.request !== null) throw invalid();
+      return { conversationId, turnId, revision: value.revision, status, retry, request: prepared };
+    } finally { await response.body?.cancel().catch(() => undefined); }
   });
-  try {
-    if (response.status !== 200) throw await responseError(response, 'retry-preparation');
-    const value = await jsonResponse(response, 40_960);
-    const invalid = () => new ApiError('Retry preparation could not be verified. No chat request was submitted.', 'INVALID_RESPONSE', 200, false);
-    if (!record(value) || Object.keys(value).length !== 6 || !['conversationId', 'turnId', 'revision', 'status', 'retry', 'request'].every(key => Object.hasOwn(value, key))
-      || value.conversationId !== conversationId || value.turnId !== turnId || typeof value.revision !== 'number'
-      || !Number.isSafeInteger(value.revision) || value.revision < 1 || typeof value.status !== 'string' || !HISTORY_STATUSES.includes(value.status)) throw invalid();
-    const status = value.status as HistoryStatus;
-    const retry = parseRetry(value.retry, status);
-    if (!retry) throw invalid();
-    let prepared: ChatRequest | null = null;
-    if (retry.available) {
-      const body = value.request;
-      if (!record(body) || Object.keys(body).length !== 3 || !['conversationId', 'turnId', 'message'].every(key => Object.hasOwn(body, key))
-        || body.conversationId !== conversationId || body.turnId !== turnId || typeof body.message !== 'string'
-        || !/\S/.test(body.message) || body.message.length > 8192) throw invalid();
-      prepared = { turnId, conversationId, message: body.message };
-      if (new TextEncoder().encode(JSON.stringify(prepared)).byteLength > 32_768) throw invalid();
-    } else if (value.request !== null) throw invalid();
-    return { conversationId, turnId, revision: value.revision, status, retry, request: prepared };
-  } finally { await response.body?.cancel().catch(() => undefined); }
 }

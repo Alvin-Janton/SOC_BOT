@@ -1,3 +1,4 @@
+import { requireExpectedUser } from '../../shared/expected-user';
 import { z } from 'zod';
 import { createCognitoAuthenticator } from '../cognito';
 import { AuthRequestBudget } from '../config';
@@ -52,9 +53,10 @@ export function createGoogleLinking(config: AuthHttpConfiguration, budget: AuthR
 
   return {
     /** Requires the same original session before/after fresh password proof and atomically starts one attempt. */
-    async start(input: { currentPassword: string }, cookieHeader?: string): Promise<AuthHttpResponse> {
+    async start(input: { currentPassword: string }, cookieHeader?: string, expectedUser?: string): Promise<AuthHttpResponse> {
       try {
         const original = await sessionProof(cookieHeader);
+        requireExpectedUser(expectedUser, original.sub);
         const local = await provider.local(original.sub, original.sub);
         const proofStartedAt = linkTime();
         const identity = await createCognitoAuthenticator(config.auth, undefined, budget)
@@ -72,7 +74,7 @@ export function createGoogleLinking(config: AuthHttpConfiguration, budget: AuthR
       } catch (error) {
         if (error instanceof GoogleLinkError) throw error;
         const safe = serviceAuthError(error);
-        throw safe.code === 'authentication_required' || safe.code === 'throttled' ? safe
+        throw safe.code === 'authentication_required' || safe.code === 'account_context_changed' || safe.code === 'throttled' ? safe
           : new GoogleLinkError(safe.statusCode < 500 ? 'google_link_failed' : 'google_link_unavailable');
       }
     },

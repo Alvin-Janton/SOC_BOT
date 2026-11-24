@@ -1,9 +1,11 @@
+import { accountGeneration, AccountScope, assertScope } from './accountScope';
 import { useEffect, useRef, useState } from 'react';
 import { GOOGLE_LOGIN_START, googleAuthorization } from '../api/google';
 import { ApiError } from '../api/http';
 
 /** Locks one explicit full-page departure, keeping provider URLs out of React state and all development navigation inert. */
 export function useGoogleDeparture(lock: (busy: boolean) => void) {
+  const mountedGeneration = useRef(accountGeneration()).current;
   const [leaving, setLeaving] = useState(false);
   const moving = useRef(false);
   useEffect(() => {
@@ -14,8 +16,9 @@ export function useGoogleDeparture(lock: (busy: boolean) => void) {
     return () => { window.removeEventListener('pageshow', resume); lock(false); };
   }, [lock]);
 
-  function depart(destination: string) {
-    if (moving.current) return;
+  function depart(destination: string, scope?: AccountScope) {
+    if (moving.current || mountedGeneration !== accountGeneration()) return;
+    if (scope) assertScope(scope, true);
     if (import.meta.env.DEV) throw new ApiError('Local preview is disconnected. Google authorization is available through the deployed dev CloudFront site.', 'LOCAL_PREVIEW', 0, false);
     if (destination !== GOOGLE_LOGIN_START && !googleAuthorization(destination)) throw new ApiError('The authorization destination could not be verified.', 'INVALID_RESPONSE');
     moving.current = true; setLeaving(true); lock(true);

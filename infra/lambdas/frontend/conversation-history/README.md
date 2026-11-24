@@ -466,3 +466,14 @@ Deploy the foundation boundary first and drain old workers before publishing the
 coordinated writer/reader/frontend update. Existing valid durable-retry records
 need no cleanup/backfill for optional cancel_requested_at. Python clients remain
 unchanged and do not add a Stop command. All live validation remains operator work.
+
+
+## Optional expected-account binding
+
+List, messages, retry-preparation and cancellation requests accept optional `X-Soc-Bot-Expected-User`. After their existing REST envelope and authorizer-owner validation, the handler compares one exact, strictly reconciled subject with that trusted owner, before invoking any storage operation. Malformed/repeated/conflicting hints return 400 `INVALID_INPUT`. Valid mismatches return 409 with the ordinary no-store JSON envelope:
+
+```json
+{"error":{"code":"ACCOUNT_CONTEXT_CHANGED","message":"The browser account context changed. Check your session before continuing."},"requestId":"illustrative-request-id"}
+```
+
+Mismatch reads/writes no conversation data, accepts no cancellation intent, emits no cookie and reveals no actual principal. Necessary authentication/session checks remain in the existing authorizer. All owner checks, cursors, snapshots, revisions, size/deadline controls and successful bodies remain unchanged. Header omission retains terminal/older-client compatibility. The updated frontend binds these requests and suppresses delayed results/errors from invalidated scopes; it never automatically resubmits a rejected operation. See [cross-tab isolation](../../../../frontend/README.md#cross-tab-account-isolation). Deployed two-account denial/race checks remain operator work, not a local verification claim.

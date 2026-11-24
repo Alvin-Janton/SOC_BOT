@@ -1,3 +1,5 @@
+import { expectedUser, requireExpectedUser } from '../../frontend/shared/expected-user';
+import { BffAuthError } from '../../frontend/auth/errors';
 import { authSubSchema } from '../../frontend/auth/user-state';
 import { ChatError, Configuration } from './config';
 
@@ -35,5 +37,10 @@ export function resolveOwner(raw: unknown, config: Configuration): string {
   if (event.resource !== '/api/chat' || authorization?.authenticationType !== 'bff-session'
     || !subject.success || authorization.principalId !== subject.data
     || authorization.apiId !== context.apiId || authorization.stage !== context.stage) throw denied();
+  try { requireExpectedUser(expectedUser(raw), subject.data); }
+  catch (error) {
+    if (error instanceof BffAuthError) throw new ChatError(error.code.toUpperCase(), error.message, error.statusCode, false);
+    throw error;
+  }
   return subject.data;
 }

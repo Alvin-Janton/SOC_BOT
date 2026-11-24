@@ -3,6 +3,7 @@ import { authSubSchema } from '../auth/user-state';
 import { record } from '../shared/origin-guard';
 
 const ERRORS = {
+  ACCOUNT_CONTEXT_CHANGED: { status: 409, message: 'The browser account context changed. Check your session before continuing.' },
   TURN_ALREADY_COMPLETED: { status: 409, message: 'This turn already completed.' },
   ATTEMPT_CHANGED: { status: 409, message: 'This attempt is no longer current.' },
   TURN_NOT_CANCELLABLE: { status: 409, message: 'This turn cannot be cancelled in its current state.' },

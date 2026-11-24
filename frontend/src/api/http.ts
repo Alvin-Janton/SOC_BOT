@@ -1,3 +1,5 @@
+import { AccountScope, AccountScopeError, assertScope, invalidateAccount } from '../auth/accountScope';
+
 type ApiPath = '/api/auth/me' | '/api/auth/login' | '/api/auth/logout' | '/api/chat'
   | '/api/auth/signup' | '/api/auth/confirm-signup' | '/api/auth/resend-confirmation'
   | '/api/auth/forgot-password' | '/api/auth/reset-password' | '/api/auth/change-password' | '/api/auth/link/google/start' | '/api/conversations'
@@ -49,15 +51,34 @@ export async function jsonResponse(response: Response, maximumBytes = 8192): Pro
 }
 
 /** Issues only fixed same-origin routes; Vite development never dispatches application requests. */
-export function request(path: ApiPath, options: RequestInit = {}, cursor?: string): Promise<Response> {
+export function request(path: ApiPath, options: RequestInit = {}, cursor?: string, scope?: AccountScope): Promise<Response> {
   if (import.meta.env.DEV) throw new ApiError('Local preview is disconnected. Sign-in and chat are available after CloudFront deployment.', 'LOCAL_PREVIEW', 0, false);
   const messages = /^\/api\/conversations\/[A-Za-z0-9_-]{1,128}\/messages$/.test(path) && !/[^A-Za-z0-9_/-]/.test(path);
   const retry = /^\/api\/conversations\/[A-Za-z0-9_-]{1,128}\/turns\/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\/retry$/.test(path) && !/[^A-Za-z0-9_/-]/.test(path);
   const cancel = /^\/api\/conversations\/[A-Za-z0-9_-]{1,128}\/turns\/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\/cancel$/.test(path) && !/[^A-Za-z0-9_/-]/.test(path);
   if ((!FIXED_PATHS.has(path) && !messages && !retry && !cancel) || ((messages || retry) && options.method !== 'GET') || (cancel && options.method !== 'POST')) throw new ApiError('Invalid API route.', 'INVALID_INPUT', 400, false);
   if (cursor !== undefined && ((path !== '/api/conversations' && !messages) || !cursor.length || cursor.length > 2048 || /[^A-Za-z0-9_-]/.test(cursor))) throw new ApiError('Invalid history continuation.', 'INVALID_INPUT', 400, false);
+  const bound = path === '/api/chat' || path.startsWith('/api/conversations')
+    || ['/api/auth/logout', '/api/auth/change-password', '/api/auth/link/google/start'].includes(path);
+  if (bound && !scope) throw new AccountScopeError();
+  const headers = new Headers(options.headers);
+  if (scope) { assertScope(scope, true); headers.set('X-Soc-Bot-Expected-User', scope.userId); }
+  const signal = scope ? AbortSignal.any([scope.signal, ...(options.signal ? [options.signal] : [])]) : options.signal;
   const url = cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`;
-  return fetch(url, { ...options, credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+  return fetch(url, { ...options, headers, signal, credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+}
+
+/** Fences both successful body parsing and errors to the lifetime that dispatched the request. */
+export async function scoped<T>(scope: AccountScope, work: () => Promise<T>): Promise<T> {
+  assertScope(scope, true);
+  try { const result = await work(); assertScope(scope); return result; }
+  catch (error) {
+    assertScope(scope);
+    if (error instanceof ApiError && error.code === 'ACCOUNT_CONTEXT_CHANGED' && error.status === 409) {
+      invalidateAccount(scope); throw new AccountScopeError();
+    }
+    throw error;
+  }
 }
 
 const AUTH_MESSAGES: Record<string, string> = {
@@ -107,6 +128,16 @@ export async function responseError(response: Response, context: Context): Promi
     && (code === 'AUTHENTICATION_REQUIRED' || ((context === 'chat' || context === 'history' || context === 'messages' || context === 'retry-preparation' || context === 'cancel') && (code === 'UNAUTHORIZED' || gateway)));
   const id = record(body) ? body.correlationId ?? body.requestId : undefined;
   const correlation = typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
+  if (['logout', 'chat', 'password-change', 'google-link', 'history', 'messages', 'retry-preparation', 'cancel'].includes(context)
+    && response.status === 409 && code === 'ACCOUNT_CONTEXT_CHANGED' && record(body) && error
+    && Object.keys(body).length === 2 && Object.keys(error).length === (context === 'chat' ? 3 : 2)
+    && error.message === 'The browser account context changed. Check your session before continuing.'
+    && (context !== 'chat' || error.retryable === false)
+    && Object.hasOwn(body, context === 'chat' ? 'correlationId' : 'requestId') && correlation
+    && correlation.length <= 128 && !/[^A-Za-z0-9_-]/.test(correlation)
+    && (context === 'chat' || !Object.hasOwn(body, 'correlationId'))) {
+    return new ApiError('The browser account context changed. Check your session before continuing.', code, 409, false, false, correlation);
+  }
   if (authRequired) return new ApiError('Your session could not be authorized. Sign in again; no request will be resent.', 'AUTHENTICATION_REQUIRED', 401, false, true, correlation);
   const historyMessage = context === 'cancel' ? (response.status === 409 && code === 'TURN_ALREADY_COMPLETED' ? 'This attempt already completed. Refreshing its saved history.'
     : response.status === 409 && code === 'ATTEMPT_CHANGED' ? 'The active attempt changed. No different attempt was targeted; refreshing messages.'
@@ -125,11 +156,12 @@ export async function responseError(response: Response, context: Context): Promi
   return new ApiError(safeMessage ?? (response.status === 403 ? 'Access was denied. Check your connection or contact the administrator.'
     : response.status === 429 ? 'Requests are temporarily limited. Wait before retrying.'
       : context === 'chat' ? 'This turn could not be completed. Its outcome may still need to be resolved.'
-        : 'The operation could not be confirmed. Please try checking your session again.'), code ?? 'UNVERIFIED_ERROR', response.status,
+        : 'The operation could not be confirmed. Please try checking your session again.'), code === 'ACCOUNT_CONTEXT_CHANGED' ? 'UNVERIFIED_ERROR' : code ?? 'UNVERIFIED_ERROR', response.status,
   typeof error?.retryable === 'boolean' ? error.retryable : context === 'chat' && response.status >= 500, false, correlation);
 }
 
 /** Converts transport failures to an honest unknown outcome rather than a claim of cancellation. */
 export function failure(error: unknown): ApiError {
+  if (error instanceof AccountScopeError) return new ApiError(error.message, 'ACCOUNT_SCOPE_INVALIDATED', 0, false);
   return error instanceof ApiError ? error : new ApiError('The connection ended before the outcome was confirmed. Backend work may still finish.');
 }

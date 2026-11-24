@@ -1,3 +1,5 @@
+import { AccountScope } from '../auth/accountScope';
+import { scoped } from './http';
 import { validConversationId } from './conversations';
 import { ApiError, jsonResponse, record, request, responseError } from './http';
 
@@ -94,43 +96,45 @@ function status(value: unknown, invalid: () => ApiError): TurnStatus {
 }
 
 /** Loads exactly one capped messages page; the combined 75-second abort also covers body consumption. */
-export async function listMessages(conversationId: string, next: string | undefined, signal: AbortSignal): Promise<MessagePage> {
-  if (!validConversationId(conversationId) || (next !== undefined && (!cursor(next) || next === null))) {
-    throw new ApiError('Invalid conversation or messages continuation.', 'INVALID_INPUT', 400, false);
-  }
-  const response = await request(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-    method: 'GET', signal: AbortSignal.any([signal, AbortSignal.timeout(75_000)]), headers: { Accept: 'application/json' },
-  }, next);
-  try {
-    if (response.status !== 200) throw await responseError(response, 'messages');
-    const value = await jsonResponse(response, 262_144);
-    const invalid = () => new ApiError('The conversation messages could not be verified. Refresh messages to try again.', 'INVALID_RESPONSE', 200, false);
-    if (!shape(value, ['conversationId', 'snapshotSequence', 'messages', 'turnStatuses', 'nextCursor'])
-      || value.conversationId !== conversationId || !sequence(value.snapshotSequence)
-      || !Array.isArray(value.messages) || value.messages.length > 20 || !Array.isArray(value.turnStatuses)
-      || value.turnStatuses.length > 20 || !cursor(value.nextCursor)) throw invalid();
-    const ids = new Set<string>();
-    const turns = new Set<string>();
-    const snapshotSequence = value.snapshotSequence;
-    let previous = 0;
-    const messages = value.messages.map((item: unknown): HistoryMessage => {
-      if (!shape(item, ['messageId', 'turnId', 'sequence', 'role', 'content', 'createdAt']) || !historyIdentifier(item.messageId)
-        || !historyIdentifier(item.turnId) || !sequence(item.sequence) || item.sequence <= previous || item.sequence > snapshotSequence
-        || ids.has(item.messageId) || (item.role !== 'user' && item.role !== 'assistant')
-        || typeof item.content !== 'string' || !item.content.length || item.content.length > 32_768 || !timestamp(item.createdAt)) throw invalid();
-      ids.add(item.messageId); turns.add(item.turnId); previous = item.sequence;
-      return { messageId: item.messageId, turnId: item.turnId, sequence: item.sequence, role: item.role, content: item.content, createdAt: item.createdAt };
-    });
-    const represented = new Set<string>();
-    const turnStatuses = value.turnStatuses.map((item: unknown) => {
-      const parsed = status(item, invalid);
-      if (!turns.has(parsed.turnId) || represented.has(parsed.turnId)) throw invalid();
-      represented.add(parsed.turnId); return parsed;
-    });
-    if (represented.size !== turns.size) throw invalid();
-    return { conversationId, snapshotSequence, messages, turnStatuses, nextCursor: value.nextCursor };
-  } finally {
-    // Invalid media types fail before jsonResponse acquires a reader; cancel those bodies too.
-    await response.body?.cancel().catch(() => undefined);
-  }
+export async function listMessages(scope: AccountScope, conversationId: string, next: string | undefined, signal: AbortSignal): Promise<MessagePage> {
+  return scoped(scope, async () => {
+    if (!validConversationId(conversationId) || (next !== undefined && (!cursor(next) || next === null))) {
+      throw new ApiError('Invalid conversation or messages continuation.', 'INVALID_INPUT', 400, false);
+    }
+    const response = await request(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: 'GET', signal: AbortSignal.any([signal, AbortSignal.timeout(75_000)]), headers: { Accept: 'application/json' },
+    }, next, scope);
+    try {
+      if (response.status !== 200) throw await responseError(response, 'messages');
+      const value = await jsonResponse(response, 262_144);
+      const invalid = () => new ApiError('The conversation messages could not be verified. Refresh messages to try again.', 'INVALID_RESPONSE', 200, false);
+      if (!shape(value, ['conversationId', 'snapshotSequence', 'messages', 'turnStatuses', 'nextCursor'])
+        || value.conversationId !== conversationId || !sequence(value.snapshotSequence)
+        || !Array.isArray(value.messages) || value.messages.length > 20 || !Array.isArray(value.turnStatuses)
+        || value.turnStatuses.length > 20 || !cursor(value.nextCursor)) throw invalid();
+      const ids = new Set<string>();
+      const turns = new Set<string>();
+      const snapshotSequence = value.snapshotSequence;
+      let previous = 0;
+      const messages = value.messages.map((item: unknown): HistoryMessage => {
+        if (!shape(item, ['messageId', 'turnId', 'sequence', 'role', 'content', 'createdAt']) || !historyIdentifier(item.messageId)
+          || !historyIdentifier(item.turnId) || !sequence(item.sequence) || item.sequence <= previous || item.sequence > snapshotSequence
+          || ids.has(item.messageId) || (item.role !== 'user' && item.role !== 'assistant')
+          || typeof item.content !== 'string' || !item.content.length || item.content.length > 32_768 || !timestamp(item.createdAt)) throw invalid();
+        ids.add(item.messageId); turns.add(item.turnId); previous = item.sequence;
+        return { messageId: item.messageId, turnId: item.turnId, sequence: item.sequence, role: item.role, content: item.content, createdAt: item.createdAt };
+      });
+      const represented = new Set<string>();
+      const turnStatuses = value.turnStatuses.map((item: unknown) => {
+        const parsed = status(item, invalid);
+        if (!turns.has(parsed.turnId) || represented.has(parsed.turnId)) throw invalid();
+        represented.add(parsed.turnId); return parsed;
+      });
+      if (represented.size !== turns.size) throw invalid();
+      return { conversationId, snapshotSequence, messages, turnStatuses, nextCursor: value.nextCursor };
+    } finally {
+      // Invalid media types fail before jsonResponse acquires a reader; cancel those bodies too.
+      await response.body?.cancel().catch(() => undefined);
+    }
+  });
 }
